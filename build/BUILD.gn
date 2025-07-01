@@ -1,0 +1,24 @@
+# Build configuration
+
+config("compiler_defaults") {
+  cflags = [
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+  ]
+}
+
+config("debug") {
+  cflags = [
+    "-g",
+    "-O0",
+  ]
+}
+
+config("release") {
+  defines = [ "NDEBUG=1" ]
+  cflags = [
+    "-Os",  # Optimize for size rather than speed
+    "-g",   # Keep debug symbols for crash analysis
+  ]
+} 

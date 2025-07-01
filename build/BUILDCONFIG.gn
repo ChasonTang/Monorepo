@@ -1,0 +1,57 @@
+# Build arguments go here.
+# See "gn help buildargs".
+declare_args() {
+  # Debug build (built-in argument, setting default value)
+  is_debug = true
+}
+
+# Set up current and target platform information
+# These are used for cross-compilation support
+if (current_os == "") {
+  current_os = host_os
+}
+if (current_cpu == "") {
+  current_cpu = host_cpu
+}
+if (target_os == "") {
+  target_os = host_os
+}
+if (target_cpu == "") {
+  target_cpu = host_cpu
+}
+
+# Set up the global build environment.
+# Currently only supports macOS, but ready for cross-compilation
+if (target_os == "mac") {
+  set_default_toolchain("//build/toolchain:clang")
+} else {
+  assert(false, "Unsupported target OS: $target_os. Currently only macOS is supported.")
+}
+
+# Configs that will be applied to all targets.
+_native_compiler_configs = [
+  "//build:compiler_defaults",
+]
+
+if (is_debug) {
+  _native_compiler_configs += [ "//build:debug" ]
+} else {
+  _native_compiler_configs += [ "//build:release" ]
+}
+
+# Apply that config to all targets.
+set_defaults("executable") {
+  configs = _native_compiler_configs
+}
+
+set_defaults("static_library") {
+  configs = _native_compiler_configs
+}
+
+set_defaults("shared_library") {
+  configs = _native_compiler_configs
+}
+
+set_defaults("source_set") {
+  configs = _native_compiler_configs
+} 

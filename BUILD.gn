@@ -1,0 +1,13 @@
+# Root BUILD.gn file for the Monorepo project
+
+group("default") {
+  deps = [
+    "//hello:hello_world",
+  ]
+}
+
+group("all") {
+  deps = [
+    ":default",
+  ]
+} 
