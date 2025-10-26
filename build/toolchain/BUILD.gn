@@ -3,6 +3,7 @@
 toolchain("clang") {
   cc = "clang"
   cxx = "clang++"
+  asm = "clang"
   ar = "ar"
   ld = cxx
 
@@ -10,37 +11,41 @@ toolchain("clang") {
     depfile = "{{output}}.d"
     command = "$cc -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
-    description = "CC {{output}}"
-    outputs = [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("cxx") {
     depfile = "{{output}}.d"
     command = "$cxx -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
-    description = "CXX {{output}}"
-    outputs = [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+  }
+
+  tool("asm") {
+    depfile = "{{output}}.d"
+    command = "$asm -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    depsformat = "gcc"
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("alink") {
     rspfile = "{{output}}.rsp"
     command = "rm -f {{output}} && $ar rcs {{output}} @$rspfile"
-    description = "AR {{target_output_name}}{{output_extension}}"
     rspfile_content = "{{inputs}}"
-    outputs = [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
+    outputs =
+        [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
     default_output_extension = ".a"
     output_prefix = "lib"
   }
 
   tool("solink") {
-    soname = "{{target_output_name}}{{output_extension}}"
     rspfile = "{{output}}.rsp"
-    command = "$ld -shared {{ldflags}} -o {{output}} -Wl,-soname=$soname @$rspfile"
-    rspfile_content = "{{inputs}} {{solibs}} {{libs}}"
-    description = "SOLINK $soname"
-    default_output_extension = ".so"
+    command =
+        "$ld -shared {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile"
+    rspfile_content = "{{inputs}}"
+    default_output_extension = ".dylib"
     output_prefix = "lib"
-    outputs = [ "{{target_out_dir}}/$soname" ]
+    outputs = [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
   }
 
   tool("link") {
@@ -48,28 +53,25 @@ toolchain("clang") {
     outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
     rspfile = "$outfile.rsp"
     command = "$ld {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}}"
-    description = "LINK $outfile"
     rspfile_content = "{{inputs}}"
     outputs = [ outfile ]
   }
 
   tool("stamp") {
     command = "touch {{output}}"
-    description = "STAMP {{output}}"
   }
 
   tool("copy") {
     command = "cp -af {{source}} {{output}}"
-    description = "COPY {{source}} {{output}}"
   }
 
   toolchain_args = {
     # Fixed values for the build machine (where toolchain runs)
     current_os = "mac"
     current_cpu = host_cpu  # Use actual host CPU architecture (x64 or arm64)
-    
+
     # Forward target platform arguments for cross-compilation support
     target_os = target_os
     target_cpu = target_cpu
   }
-} 
+}

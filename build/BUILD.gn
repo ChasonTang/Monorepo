@@ -8,6 +8,21 @@ config("compiler_defaults") {
   ]
 }
 
+config("cxx17") {
+  cflags_cc = [ "-std=c++17" ]
+}
+
+config("no_unused_parameter") {
+  cflags = [ "-Wno-unused-parameter" ]
+}
+
+config("no_rtti_no_exceptions") {
+  cflags_cc = [
+    "-fno-rtti",
+    "-fno-exceptions",
+  ]
+}
+
 config("debug") {
   cflags = [
     "-g",
@@ -19,6 +34,6 @@ config("release") {
   defines = [ "NDEBUG=1" ]
   cflags = [
     "-Os",  # Optimize for size rather than speed
-    "-g",   # Keep debug symbols for crash analysis
+    "-g",  # Keep debug symbols for crash analysis
   ]
-} 
+}

@@ -1,0 +1,273 @@
+# Declare build arguments for optional features
+declare_args() {
+  # Congestion control algorithms
+  xqc_enable_bbr2 = false
+  xqc_enable_copa = false
+  xqc_enable_reno = false
+  xqc_enable_unlimited = false
+
+  # Multipath QUIC support
+  xqc_enable_mp_interop = false
+
+  # Forward Error Correction (FEC)
+  xqc_enable_fec = false
+  xqc_enable_xor = false  # XOR encoding (requires xqc_enable_fec)
+  xqc_enable_rsc = false  # Reed-Solomon (requires xqc_enable_fec)
+  xqc_enable_pkm = false  # Packet Mask (requires xqc_enable_fec)
+
+  # Protocol features
+  xqc_no_pid_packet_process = false  # Hide path_id in API
+
+  # Security and protection
+  xqc_protect_pool_mem = false  # Memory pool write protection (DEBUG ONLY -
+                                # severe performance impact!)
+  xqc_ping_attack_protect = !is_debug  # Enable in release, optional in debug
+
+  # Debug options
+  xqc_enable_debug =
+      is_debug  # Enable debug assertions (e.g., list integrity checks)
+
+  # Logging options (auto-configured based on is_debug)
+  xqc_print_secret =
+      is_debug  # Print TLS secrets for Wireshark (DEBUG ONLY - security risk!)
+  xqc_disable_log = false  # Completely disable all logging (EXTREME - overrides
+                           # all log options!)
+  xqc_only_error_log = !is_debug  # Only error logs in release
+  xqc_enable_event_log = is_debug  # Enable qlog event logging in debug
+}
+
+# HTTP3/QPACK sources
+# http3_sources = [
+# "src/http3/xqc_h3_conn.c",
+# "src/http3/xqc_h3_stream.c",
+# "src/http3/xqc_h3_request.c",
+# "src/http3/frame/xqc_h3_frame.c",
+# "src/http3/xqc_h3_header.c",
+# "src/http3/xqc_h3_ctx.c",
+# "src/http3/xqc_h3_defs.c",
+# "src/http3/qpack/xqc_qpack.c",
+# "src/http3/qpack/xqc_prefixed_int.c",
+# "src/http3/qpack/xqc_prefixed_str.c",
+# "src/http3/qpack/xqc_decoder.c",
+# "src/http3/qpack/xqc_encoder.c",
+# "src/http3/qpack/xqc_rep.c",
+# "src/http3/qpack/xqc_ins.c",
+# "src/http3/qpack/stable/xqc_stable.c",
+# "src/http3/qpack/dtable/xqc_dtable.c",
+# "src/http3/xqc_h3_ext_dgram.c",
+# "src/http3/xqc_h3_ext_bytestream.c",
+# ]
+
+# Transport sources
+transport_sources = [
+  "src/transport/reinjection_control/xqc_reinj_deadline.c",
+  "src/transport/reinjection_control/xqc_reinj_default.c",
+  "src/transport/reinjection_control/xqc_reinj_dgram.c",
+  "src/transport/scheduler/xqc_scheduler_backup.c",
+  "src/transport/scheduler/xqc_scheduler_backup_fec.c",
+  "src/transport/scheduler/xqc_scheduler_common.c",
+  "src/transport/scheduler/xqc_scheduler_minrtt.c",
+  "src/transport/scheduler/xqc_scheduler_rap.c",
+  "src/transport/xqc_cid.c",
+  "src/transport/xqc_client.c",
+  "src/transport/xqc_conn.c",
+  "src/transport/xqc_datagram.c",
+  "src/transport/xqc_defs.c",
+  "src/transport/xqc_engine.c",
+  "src/transport/xqc_frame.c",
+  "src/transport/xqc_frame_parser.c",
+  "src/transport/xqc_multipath.c",
+  "src/transport/xqc_pacing.c",
+  "src/transport/xqc_packet.c",
+  "src/transport/xqc_packet_in.c",
+  "src/transport/xqc_packet_out.c",
+  "src/transport/xqc_packet_parser.c",
+  "src/transport/xqc_quic_lb.c",
+  "src/transport/xqc_recv_record.c",
+  "src/transport/xqc_recv_timestamps_info.c",
+  "src/transport/xqc_reinjection.c",
+  "src/transport/xqc_send_ctl.c",
+  "src/transport/xqc_send_queue.c",
+  "src/transport/xqc_stream.c",
+  "src/transport/xqc_timer.c",
+  "src/transport/xqc_transport_params.c",
+  "src/transport/xqc_utils.c",
+]
+
+# TLS sources (BoringSSL only)
+tls_sources = [
+  "src/tls/boringssl/xqc_crypto_impl.c",
+  "src/tls/boringssl/xqc_hkdf_impl.c",
+  "src/tls/boringssl/xqc_ssl_if_impl.c",
+  "src/tls/xqc_crypto.c",
+  "src/tls/xqc_hkdf.c",
+  "src/tls/xqc_null_crypto.c",
+  "src/tls/xqc_tls.c",
+  "src/tls/xqc_tls_ctx.c",
+]
+
+# Common sources
+common_sources = [
+  "src/common/utils/2d_hash/xqc_2d_hash_table.c",
+  "src/common/utils/huffman/xqc_huffman.c",
+  "src/common/utils/huffman/xqc_huffman_code.c",
+  "src/common/utils/ringarray/xqc_ring_array.c",
+  "src/common/utils/ringmem/xqc_ring_mem.c",
+  "src/common/utils/var_buf/xqc_var_buf.c",
+  "src/common/utils/vint/xqc_discrete_int_parser.c",
+  "src/common/utils/vint/xqc_variable_len_int.c",
+  "src/common/xqc_log.c",
+  "src/common/xqc_log_event_callback.c",
+  "src/common/xqc_random.c",
+  "src/common/xqc_str.c",
+  "src/common/xqc_time.c",
+]
+
+# Congestion control sources (base)
+congestion_control_sources = [
+  "src/congestion_control/xqc_bbr.c",
+  "src/congestion_control/xqc_cubic.c",
+  "src/congestion_control/xqc_sample.c",
+  "src/congestion_control/xqc_window_filter.c",
+]
+
+# Optional congestion control algorithms
+if (xqc_enable_reno) {
+  congestion_control_sources += [ "src/congestion_control/xqc_new_reno.c" ]
+}
+
+if (xqc_enable_bbr2) {
+  congestion_control_sources += [ "src/congestion_control/xqc_bbr2.c" ]
+}
+
+if (xqc_enable_copa) {
+  congestion_control_sources += [ "src/congestion_control/xqc_copa.c" ]
+}
+
+if (xqc_enable_unlimited) {
+  congestion_control_sources += [ "src/congestion_control/xqc_unlimited_cc.c" ]
+}
+
+# Multipath QUIC scheduler
+if (xqc_enable_mp_interop) {
+  transport_sources += [ "src/transport/scheduler/xqc_scheduler_interop.c" ]
+}
+
+# FEC (Forward Error Correction) sources
+if (xqc_enable_fec) {
+  fec_sources = [
+    "src/transport/fec_schemes/xqc_galois_calculation.c",
+    "src/transport/xqc_fec.c",
+    "src/transport/xqc_fec_scheme.c",
+  ]
+
+  if (xqc_enable_xor) {
+    fec_sources += [ "src/transport/fec_schemes/xqc_xor.c" ]
+  }
+
+  if (xqc_enable_rsc) {
+    fec_sources += [ "src/transport/fec_schemes/xqc_reed_solomon.c" ]
+  }
+
+  if (xqc_enable_pkm) {
+    fec_sources += [ "src/transport/fec_schemes/xqc_packet_mask.c" ]
+  }
+
+  transport_sources += fec_sources
+}
+
+shared_library("xquic") {
+  sources = transport_sources + tls_sources + common_sources +
+            congestion_control_sources
+  include_dirs = [
+    ".",
+    "include",
+  ]
+  cflags_c = [
+    "-Wno-unused",
+    "-Wno-sign-compare",
+    "-Wno-unused-parameter",
+    "-Wno-pointer-sign",
+    "-Wno-missing-field-initializers",
+  ]
+
+  defines = [
+    # Note: BoringSSL auto-defines OPENSSL_IS_BORINGSSL in <openssl/base.h>
+    # NOCRYPT, NDEBUG_PRINT, NPRINT_MALLOC are not used anywhere in xquic
+    # Code checks for DEBUG_PRINT and PRINT_MALLOC (without 'N' prefix)
+    # These are disabled by default (not defined), so no need to define N* variants
+  ]
+
+  # Debug assertions
+  if (xqc_enable_debug) {
+    defines += [ "XQC_DEBUG" ]
+  }
+
+  # Congestion control algorithms
+  if (xqc_enable_bbr2) {
+    defines += [ "XQC_ENABLE_BBR2" ]
+  }
+  if (xqc_enable_copa) {
+    defines += [ "XQC_ENABLE_COPA" ]
+  }
+  if (xqc_enable_reno) {
+    defines += [ "XQC_ENABLE_RENO" ]
+  }
+  if (xqc_enable_unlimited) {
+    defines += [ "XQC_ENABLE_UNLIMITED" ]
+  }
+
+  # Multipath QUIC
+  if (xqc_enable_mp_interop) {
+    defines += [ "XQC_ENABLE_MP_INTEROP" ]
+  }
+
+  # Forward Error Correction (FEC)
+  if (xqc_enable_fec) {
+    defines += [ "XQC_ENABLE_FEC" ]
+  }
+  if (xqc_enable_xor) {
+    defines += [ "XQC_ENABLE_XOR" ]
+  }
+  if (xqc_enable_rsc) {
+    defines += [ "XQC_ENABLE_RSC" ]
+  }
+  if (xqc_enable_pkm) {
+    defines += [ "XQC_ENABLE_PKM" ]
+  }
+
+  # Protocol features
+  if (xqc_no_pid_packet_process) {
+    defines += [ "XQC_NO_PID_PACKET_PROCESS" ]
+  }
+
+  # Security and protection
+  if (xqc_protect_pool_mem) {
+    defines += [ "XQC_PROTECT_POOL_MEM" ]
+  }
+  if (xqc_ping_attack_protect) {
+    defines += [ "XQC_PING_ATTACK_PROTECT" ]
+  }
+
+  # Logging options (priority: DISABLE_LOG > ONLY_ERROR_LOG)
+  if (xqc_disable_log) {
+    # Completely disable all logging
+    defines += [ "XQC_DISABLE_LOG" ]
+  } else {
+    # Normal logging with filters
+    if (xqc_only_error_log) {
+      defines += [ "XQC_ONLY_ERROR_LOG" ]
+    }
+    if (xqc_print_secret) {
+      defines += [ "XQC_PRINT_SECRET" ]
+    }
+    if (xqc_enable_event_log) {
+      defines += [ "XQC_ENABLE_EVENT_LOG" ]
+    }
+  }
+
+  deps = [
+    "//boringssl:crypto",
+    "//boringssl:ssl",
+  ]
+}

@@ -2,12 +2,11 @@
 
 group("default") {
   deps = [
-    "//hello:hello_world",
+    "//boringssl:ssl",
+    "//xquic",
   ]
 }
 
 group("all") {
-  deps = [
-    ":default",
-  ]
-} 
+  deps = [ ":default" ]
+}

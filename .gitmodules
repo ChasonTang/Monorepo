@@ -1,0 +1,6 @@
+[submodule "xquic"]
+	path = xquic
+	url = git@github.com:alibaba/xquic.git
+[submodule "boringssl"]
+	path = boringssl
+	url = https://github.com/google/boringssl.git
