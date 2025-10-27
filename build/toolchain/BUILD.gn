@@ -1,36 +1,39 @@
 # Toolchain definitions
 
 toolchain("clang") {
-  cc = "clang"
-  cxx = "clang++"
-  asm = "clang"
-  ar = "ar"
-  ld = cxx
+  prefix = rebase_path("//tool/clang/bin", root_build_dir)
+  sysroot = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+  cxx_include = "$sysroot/usr/include/c++/v1"
+  cc = "$prefix/clang"
+  cxx = "$prefix/clang++"
+  asm = "$prefix/clang"
+  ar = "$prefix/llvm-ar"
+  ld = "$prefix/clang++"
 
   tool("cc") {
     depfile = "{{output}}.d"
-    command = "$cc -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    command = "$cc -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("cxx") {
     depfile = "{{output}}.d"
-    command = "$cxx -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+    command = "$cxx -nostdinc++ -isystem $cxx_include -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("asm") {
     depfile = "{{output}}.d"
-    command = "$asm -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    command = "$asm -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("alink") {
     rspfile = "{{output}}.rsp"
-    command = "rm -f {{output}} && $ar rcs {{output}} @$rspfile"
+    command = "$ar rcs {{output}} @$rspfile"
     rspfile_content = "{{inputs}}"
     outputs =
         [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
@@ -40,8 +43,7 @@ toolchain("clang") {
 
   tool("solink") {
     rspfile = "{{output}}.rsp"
-    command =
-        "$ld -shared {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile"
+    command = "$ld -isysroot $sysroot -shared {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile"
     rspfile_content = "{{inputs}}"
     default_output_extension = ".dylib"
     output_prefix = "lib"
@@ -52,7 +54,7 @@ toolchain("clang") {
     # Output executables to the root output directory, not obj directory
     outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
     rspfile = "$outfile.rsp"
-    command = "$ld {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}}"
+    command = "$ld -isysroot $sysroot {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}}"
     rspfile_content = "{{inputs}}"
     outputs = [ outfile ]
   }
