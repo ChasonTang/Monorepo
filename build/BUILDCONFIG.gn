@@ -3,6 +3,9 @@
 declare_args() {
   # Debug build (built-in argument, setting default value)
   is_debug = true
+
+  # Enable AddressSanitizer
+  is_asan = false
 }
 
 # Set up current and target platform information
@@ -25,18 +28,22 @@ if (target_cpu == "") {
 if (target_os == "mac") {
   set_default_toolchain("//build/toolchain:clang")
 } else {
-  assert(false, "Unsupported target OS: $target_os. Currently only macOS is supported.")
+  assert(
+      false,
+      "Unsupported target OS: $target_os. Currently only macOS is supported.")
 }
 
 # Configs that will be applied to all targets.
-_native_compiler_configs = [
-  "//build:compiler_defaults",
-]
+_native_compiler_configs = [ "//build:compiler_defaults" ]
 
 if (is_debug) {
   _native_compiler_configs += [ "//build:debug" ]
 } else {
   _native_compiler_configs += [ "//build:release" ]
+}
+
+if (is_asan) {
+  _native_compiler_configs += [ "//build:asan" ]
 }
 
 # Apply that config to all targets.
@@ -54,4 +61,4 @@ set_defaults("shared_library") {
 
 set_defaults("source_set") {
   configs = _native_compiler_configs
-} 
+}

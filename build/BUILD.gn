@@ -37,3 +37,8 @@ config("release") {
     "-g",  # Keep debug symbols for crash analysis
   ]
 }
+
+config("asan") {
+  cflags = [ "-fsanitize=address" ]
+  ldflags = [ "-fsanitize=address" ]
+}
