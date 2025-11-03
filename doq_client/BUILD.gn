@@ -1,0 +1,26 @@
+# DNS-over-QUIC Client Build Configuration
+
+executable("doq_client") {
+  sources = [
+    "doq_client.c",
+    "dns_proto.c",
+    "event_loop.c",
+  ]
+
+  include_dirs = [
+    ".",
+    "../xquic/include",
+  ]
+
+  deps = [
+    "//xquic",
+    "//boringssl:ssl",
+    "//boringssl:crypto",
+  ]
+
+  cflags_c = [
+    "-Wno-unused-parameter",
+    "-Wno-sign-compare",
+  ]
+}
+

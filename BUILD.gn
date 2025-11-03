@@ -4,6 +4,7 @@ group("default") {
   deps = [
     "//boringssl:ssl",
     "//xquic",
+    "//doq_client",
   ]
 }
 
