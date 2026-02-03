@@ -3,7 +3,7 @@
 **Document Version:** 1.2
 **Author:** Chason Tang
 **Last Updated:** 2026-02-04
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -210,7 +210,7 @@ binary_search_range_table(const struct dyld_cache_range_entry* rangeTable,
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                          Address Lookup Flow                              │
+│                          Address Lookup Flow                             │
 └──────────────────────────────────────────────────────────────────────────┘
 
                               ┌─────────────┐
@@ -444,9 +444,9 @@ Using iOS 10.0.2 dyld_shared_cache_arm64:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.2 | 2026-02-04 | - | Removed alias handling; added LINKEDIT exclusion rationale (Section 3.5) |
-| 1.1 | 2026-02-03 | - | Removed legacy fallback path; simplified to require accelerator info (iOS 9+ minimum) |
-| 1.0 | 2026-02-03 | - | Initial version |
+| 1.2 | 2026-02-04 | Chason Tang | Removed alias handling; added LINKEDIT exclusion rationale (Section 3.5) |
+| 1.1 | 2026-02-03 | Chason Tang | Removed legacy fallback path; simplified to require accelerator info (iOS 9+ minimum) |
+| 1.0 | 2026-02-03 | Chason Tang | Initial version |
 
 ---
 

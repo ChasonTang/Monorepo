@@ -358,8 +358,8 @@ ipsw/
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.1 | 2026-02-03 | - | Reformatted to new document standard; added tables, improved diagrams |
-| 1.0 | 2026-02-03 | - | Initial version |
+| 1.1 | 2026-02-03 | Chason Tang | Reformatted to new document standard; added tables, improved diagrams |
+| 1.0 | 2026-02-03 | Chason Tang | Initial version |
 
 ---
 
