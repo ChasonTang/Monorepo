@@ -77,23 +77,23 @@ struct dyld_cache_image_info {
  * Based on dyld-421.2/launch-cache/dyld_cache_format.h
  */
 struct dyld_cache_accelerator_info {
-  uint32_t version;             /* currently 1 */
-  uint32_t imageExtrasCount;    /* does not include aliases */
-  uint32_t imagesExtrasOffset;  /* offset to first dyld_cache_image_info_extra */
-  uint32_t bottomUpListOffset;  /* offset to bottom-up sorted image index list */
-  uint32_t dylibTrieOffset;     /* offset to dylib path trie */
-  uint32_t dylibTrieSize;       /* size of dylib trie */
-  uint32_t initializersOffset;  /* offset to initializers list */
-  uint32_t initializersCount;   /* count of initializers */
-  uint32_t dofSectionsOffset;   /* offset to DOF sections */
-  uint32_t dofSectionsCount;    /* count of DOF sections */
-  uint32_t reExportListOffset;  /* offset to re-export list */
-  uint32_t reExportCount;       /* count of re-exports */
-  uint32_t depListOffset;       /* offset to dependency list */
-  uint32_t depListCount;        /* count of dependencies */
-  uint32_t rangeTableOffset;    /* offset to range table */
-  uint32_t rangeTableCount;     /* count of range entries */
-  uint64_t dyldSectionAddr;     /* address of libdyld's __dyld section */
+  uint32_t version;            /* currently 1 */
+  uint32_t imageExtrasCount;   /* does not include aliases */
+  uint32_t imagesExtrasOffset; /* offset to first dyld_cache_image_info_extra */
+  uint32_t bottomUpListOffset; /* offset to bottom-up sorted image index list */
+  uint32_t dylibTrieOffset;    /* offset to dylib path trie */
+  uint32_t dylibTrieSize;      /* size of dylib trie */
+  uint32_t initializersOffset; /* offset to initializers list */
+  uint32_t initializersCount;  /* count of initializers */
+  uint32_t dofSectionsOffset;  /* offset to DOF sections */
+  uint32_t dofSectionsCount;   /* count of DOF sections */
+  uint32_t reExportListOffset; /* offset to re-export list */
+  uint32_t reExportCount;      /* count of re-exports */
+  uint32_t depListOffset;      /* offset to dependency list */
+  uint32_t depListCount;       /* count of dependencies */
+  uint32_t rangeTableOffset;   /* offset to range table */
+  uint32_t rangeTableCount;    /* count of range entries */
+  uint64_t dyldSectionAddr;    /* address of libdyld's __dyld section */
 };
 
 /*
@@ -173,9 +173,10 @@ get_accelerator_info(const uint8_t *cache, size_t cache_size,
     return NULL;
   }
 
-  uint64_t range_table_end =
-      (uint64_t)file_offset + accel_info->rangeTableOffset +
-      (uint64_t)accel_info->rangeTableCount * sizeof(struct dyld_cache_range_entry);
+  uint64_t range_table_end = (uint64_t)file_offset +
+                             accel_info->rangeTableOffset +
+                             (uint64_t)accel_info->rangeTableCount *
+                                 sizeof(struct dyld_cache_range_entry);
   if (range_table_end > cache_size) {
     return NULL;
   }
@@ -340,13 +341,11 @@ int main(int argc, const char *argv[]) {
   }
 
   /* Get accelerator info - required for iOS 9+ / macOS 10.11+ */
-  const struct dyld_cache_accelerator_info *accel_info =
-      get_accelerator_info(cache, cache_size, header, mappings,
-                           header->mappingCount);
+  const struct dyld_cache_accelerator_info *accel_info = get_accelerator_info(
+      cache, cache_size, header, mappings, header->mappingCount);
   if (accel_info == NULL) {
-    fprintf(stderr,
-            "Error: This cache lacks accelerator info. "
-            "Only iOS 9+ / macOS 10.11+ caches are supported.\n");
+    fprintf(stderr, "Error: This cache lacks accelerator info. "
+                    "Only iOS 9+ / macOS 10.11+ caches are supported.\n");
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -356,7 +355,7 @@ int main(int argc, const char *argv[]) {
       mappings, header->mappingCount, header->accelerateInfoAddr);
   const struct dyld_cache_range_entry *rangeTable =
       (const struct dyld_cache_range_entry *)(cache + accel_file_offset +
-                                               accel_info->rangeTableOffset);
+                                              accel_info->rangeTableOffset);
 
   if (verbose) {
     printf("Cache magic: %.16s\n", header->magic);
@@ -382,18 +381,16 @@ int main(int argc, const char *argv[]) {
   }
 
   /* Binary search for the address in rangeTable - O(log n) */
-  const struct dyld_cache_range_entry *found_entry =
-      binary_search_range_table(rangeTable, accel_info->rangeTableCount,
-                                target_addr);
+  const struct dyld_cache_range_entry *found_entry = binary_search_range_table(
+      rangeTable, accel_info->rangeTableCount, target_addr);
 
   if (found_entry != NULL) {
     uint32_t image_index = found_entry->imageIndex;
 
     /* Validate image index */
     if (image_index >= header->imagesCount) {
-      fprintf(stderr,
-              "Error: Invalid image index %u (max: %u)\n",
-              image_index, header->imagesCount - 1);
+      fprintf(stderr, "Error: Invalid image index %u (max: %u)\n", image_index,
+              header->imagesCount - 1);
       munmap((void *)cache, cache_size);
       return 1;
     }
