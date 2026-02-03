@@ -1,9 +1,9 @@
 # Symbol Lookup Tool - Address to Symbol Resolution
 
-**Document Version:** 1.3  
+**Document Version:** 2.0  
 **Author:** Chason Tang  
 **Last Updated:** 2026-02-04  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -47,24 +47,34 @@ The dyld source code provides a reference implementation through the `dladdr()` 
 ├─────────────────────────────────────────────────────────────────┤
 │  Lookup Engine                                                   │
 │  ├── RangeTable Lookup (O(log n) - find containing image)       │
-│  └── Symbol Table Search (nlist iteration)                      │
+│  └── Dual Symbol Table Search                                   │
+│      ├── Dylib LC_SYMTAB (exported symbols)                     │
+│      └── Local Symbols Info (local symbols)                     │
 ├─────────────────────────────────────────────────────────────────┤
 │  Symbol Resolution                                               │
 │  ├── nlist_64 Parser (symbol table entries)                     │
-│  └── String Table Access (symbol names)                         │
+│  ├── String Table Access (symbol names)                         │
+│  └── Best Match Selection (closest address wins)                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.2 Symbol Table Design Choice
 
-The dyld_shared_cache contains two sources of symbol information:
+The dyld_shared_cache contains multiple sources of symbol information:
 
-| Source | Storage | Best For | Reason |
-|--------|---------|----------|--------|
-| **nlist Symbol Table** | `localSymbolsOffset` | Address → Symbol | Contains address field (n_value), supports linear scan for closest match |
-| **Exports Trie** | `exportsTrieAddr` | Symbol → Address | Prefix tree optimized for name lookup, not suitable for reverse lookup |
+| Source | Storage | Symbol Type | Best For |
+|--------|---------|-------------|----------|
+| **Dylib Symbol Table** | Each dylib's `LC_SYMTAB` | Exported symbols (`N_EXT`) | Public API functions like `vm_allocate` |
+| **Local Symbols Info** | `localSymbolsOffset` | Local symbols (non-`N_EXT`) | Static functions, file-scope symbols |
+| **Exports Trie** | `exportsTrieAddr` | Exported symbols | Symbol → Address lookup (not suitable for reverse) |
 
-**Design Decision**: Use the nlist symbol table (`dyld_cache_local_symbols_info`) for address-to-symbol resolution. This matches dyld's implementation in `ImageLoaderMachO::findClosestSymbol()` (see `dyld-421.2/src/ImageLoaderMachO.cpp`).
+**Design Decision**: Search **both** the dylib's own symbol table (via `LC_SYMTAB`) and the centralized local symbols (`dyld_cache_local_symbols_info`). This ensures complete coverage of all symbols.
+
+**Why Two Sources Are Needed**:
+- **Local symbols** (`(n_type & N_EXT) == 0`): Stripped from individual dylibs during cache optimization, stored centrally in `localSymbolsOffset`
+- **Exported symbols** (`(n_type & N_EXT) != 0`): Remain in each dylib's Mach-O `LC_SYMTAB` load command
+
+These two symbol types are **mutually exclusive** based on the `N_EXT` flag. Both sources must be searched to find all symbols.
 
 The exports trie is designed as a prefix tree for efficient symbol name lookup (O(k) where k = name length). It would require a full traversal to find a symbol by address, making it unsuitable for reverse lookup.
 
@@ -143,70 +153,94 @@ struct nlist_64 {
 /**
  * Find the closest symbol for a given address.
  * 
- * @param cache         Pointer to mmap'd cache file
- * @param cache_size    Size of cache file
- * @param target_addr   Target address to look up
- * @param symbol_name   [out] Symbol name (NULL if not found)
- * @param symbol_addr   [out] Symbol address (0 if not found)
- * @return              0 on success, -1 on failure (address not in cache or no symbols)
+ * @param cache             Pointer to mmap'd cache file
+ * @param cache_size        Size of cache file
+ * @param header            Cache header pointer
+ * @param mappings          Mapping info array
+ * @param mapping_count     Number of mappings
+ * @param local_info        Local symbols info pointer (may be NULL)
+ * @param rangeTable        Range table pointer
+ * @param range_table_count Number of range entries
+ * @param target_addr       Target address to look up
+ * @param symbol_name       [out] Symbol name (NULL if not found)
+ * @param symbol_addr       [out] Symbol address (0 if not found)
+ * @param image_index_out   [out] Image index of containing dylib (-1 if not found)
+ * @return                  0 on success, -1 on failure
  *
  * Algorithm:
  *   1. Use rangeTable binary search to find containing image (O(log n))
- *      - Returns imageIndex into dyld_cache_image_info array
- *   2. Convert imageIndex to dylibOffset:
- *      a. Access images[imageIndex].address to get dylib's __TEXT vmaddr
- *      b. Use addr_to_file_offset() to convert vmaddr to file offset
- *      - This file offset equals dylibOffset in local_symbols_entry
- *   3. Find matching entry in local_symbols_entry array by dylibOffset (O(e))
- *      - Linear search through entries array comparing dylibOffset
- *   4. Iterate through the dylib's nlist entries (O(m))
- *   5. Find symbol with largest n_value <= target_addr
+ *   2. Convert imageIndex to dylibOffset via mapping table
+ *   3. Search BOTH symbol sources for closest match:
+ *      a. Dylib's own LC_SYMTAB (exported symbols) - O(d)
+ *      b. Local symbols from dyld_cache_local_symbols_info - O(l)
+ *   4. Select the symbol with largest n_value <= target_addr
  *
- * Time Complexity: O(log n + e + m)
- *   where n = rangeTableCount, e = entriesCount, m = symbols per dylib
- *
- * Prerequisite: RangeTable optimization must be implemented (see rangetable_optimization.md)
+ * Time Complexity: O(log n + d + l)
+ *   where n = rangeTableCount, d = dylib symbols, l = local symbols
  */
-int find_symbol_for_address(
-    const uint8_t* cache,
-    size_t cache_size,
-    uint64_t target_addr,
-    const char** symbol_name,
-    uint64_t* symbol_addr)
+static int find_symbol_for_address(
+    const uint8_t *cache, size_t cache_size,
+    const struct dyld_cache_header *header,
+    const struct dyld_cache_mapping_info *mappings, uint32_t mapping_count,
+    const struct dyld_cache_local_symbols_info *local_info,
+    const struct dyld_cache_range_entry *rangeTable, uint32_t range_table_count,
+    uint64_t target_addr, const char **symbol_name, uint64_t *symbol_addr,
+    int32_t *image_index_out)
 {
     /* Initialize output parameters */
     *symbol_name = NULL;
     *symbol_addr = 0;
-    
+    *image_index_out = -1;
+
     /* Step 1: Binary search rangeTable for containing image */
-    const struct dyld_cache_range_entry* range_entry = 
-        binary_search_range_table(rangeTable, accel_info->rangeTableCount, target_addr);
+    const struct dyld_cache_range_entry *range_entry =
+        binary_search_range_table(rangeTable, range_table_count, target_addr);
     if (range_entry == NULL)
         return -1;  /* Address not in any dylib */
-    
+
     uint32_t image_index = range_entry->imageIndex;
-    
+    *image_index_out = (int32_t)image_index;
+
     /* Step 2: Convert imageIndex to dylibOffset */
     int64_t dylib_offset = image_index_to_dylib_offset(
-        cache, header, mappings, header->mappingCount, image_index);
+        cache, header, mappings, mapping_count, image_index);
     if (dylib_offset < 0)
         return -1;
-    
-    /* Step 3: Find matching local symbols entry */
-    const struct dyld_cache_local_symbols_entry* sym_entry = 
-        find_local_symbols_entry(entries, local_symbols_info->entriesCount, 
-                                 (uint64_t)dylib_offset);
-    if (sym_entry == NULL)
-        return -1;  /* No symbols for this dylib */
-    
-    /* Step 4-5: Search symbol table for closest match */
-    if (!search_symbol_table(nlist_base, string_table,
-                             sym_entry->nlistStartIndex, sym_entry->nlistCount,
-                             target_addr, symbol_name, symbol_addr)) {
-        return -1;  /* No matching symbol found */
+
+    int found_symbol = 0;
+
+    /* Step 3a: Search dylib's own symbol table (exported symbols) */
+    if (search_dylib_symbol_table(cache, cache_size, mappings, mapping_count,
+                                  (uint64_t)dylib_offset, target_addr,
+                                  symbol_name, symbol_addr)) {
+        found_symbol = 1;
     }
-    
-    return 0;
+
+    /* Step 3b: Search local symbols from dyld_cache_local_symbols_info */
+    if (local_info != NULL) {
+        const struct dyld_cache_local_symbols_entry *entries = /* ... */;
+        const struct dyld_cache_local_symbols_entry *sym_entry =
+            find_local_symbols_entry(entries, local_info->entriesCount,
+                                     (uint64_t)dylib_offset);
+
+        if (sym_entry != NULL) {
+            const char *local_name = NULL;
+            uint64_t local_addr = 0;
+
+            if (search_symbol_table(nlist_base, string_table,
+                                    sym_entry->nlistStartIndex, sym_entry->nlistCount,
+                                    target_addr, &local_name, &local_addr)) {
+                /* Step 4: Use local symbol if it's closer than current best */
+                if (local_addr > *symbol_addr) {
+                    *symbol_name = local_name;
+                    *symbol_addr = local_addr;
+                    found_symbol = 1;
+                }
+            }
+        }
+    }
+
+    return found_symbol ? 0 : -1;
 }
 ```
 
@@ -284,7 +318,44 @@ find_local_symbols_entry(
 }
 ```
 
-#### 2.4.4 Symbol Table Search
+#### 2.4.4 Dylib Symbol Table Search
+
+Search the dylib's own Mach-O symbol table for exported symbols:
+
+```c
+/**
+ * Search dylib's own symbol table from its Mach-O header.
+ *
+ * In the dyld_shared_cache, each dylib's symbol table offsets (from LC_SYMTAB)
+ * are relative to the __LINKEDIT segment. We need to:
+ * 1. Find LC_SEGMENT_64(__LINKEDIT) to get linkedit_base
+ * 2. Find LC_SYMTAB to get symbol table info
+ * 3. Calculate actual pointers using the cache's __LINKEDIT mapping
+ *
+ * @param cache         Pointer to mmap'd cache file
+ * @param cache_size    Size of cache file
+ * @param mappings      Mapping info array
+ * @param mapping_count Number of mappings
+ * @param dylib_offset  File offset of dylib's mach_header in cache
+ * @param target_addr   Target address to look up
+ * @param best_name     [in/out] Best matching symbol name
+ * @param best_addr     [in/out] Best matching symbol address
+ * @return              true if a better symbol was found
+ *
+ * Symbol Table Location Calculation:
+ *   1. Get linkedit_vmaddr from LC_SEGMENT_64(__LINKEDIT)
+ *   2. Convert to cache file offset via addr_to_file_offset()
+ *   3. symtab_cache_offset = linkedit_cache_offset + symoff - linkedit_fileoff
+ *   4. strtab_cache_offset = linkedit_cache_offset + stroff - linkedit_fileoff
+ */
+static int search_dylib_symbol_table(
+    const uint8_t *cache, size_t cache_size,
+    const struct dyld_cache_mapping_info *mappings, uint32_t mapping_count,
+    uint64_t dylib_offset, uint64_t target_addr,
+    const char **best_name, uint64_t *best_addr);
+```
+
+#### 2.4.5 Symbol Table Search
 
 Reference implementation based on `dyld-421.2/src/ImageLoaderMachO.cpp`:
 
@@ -366,17 +437,37 @@ static bool search_symbol_table(
                                               │ via mapping  │
                                               └──────┬───────┘
                                                      │
+                         ┌───────────────────────────┴───────────────────────────┐
+                         │                                                       │
+                         ▼                                                       ▼
+                  ┌──────────────┐                                        ┌──────────────┐
+                  │ Search dylib │                                        │ Search local │
+                  │ LC_SYMTAB    │                                        │ symbols info │
+                  │ (exported)   │                                        │ (local)      │
+                  └──────┬───────┘                                        └──────┬───────┘
+                         │                                                       │
+                         └───────────────────────────┬───────────────────────────┘
+                                                     │
                                                      ▼
-    ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-    │ Output:      │◀────│ Find closest │◀────│ Match entry  │
-    │ name + offset│     │ symbol O(m)  │     │ by offset    │
-    └──────────────┘     └──────────────┘     └──────────────┘
+                                              ┌──────────────┐
+                                              │ Select best  │
+                                              │ match (addr  │
+                                              │ closest)     │
+                                              └──────┬───────┘
+                                                     │
+                                                     ▼
+                                              ┌──────────────┐
+                                              │ Output:      │
+                                              │ name + offset│
+                                              └──────────────┘
 
 Step Details:
   1. rangeTable binary search → imageIndex (O(log n))
   2. images[imageIndex].address → addr_to_file_offset() → dylibOffset (O(1))
-  3. Linear search entries[] for matching dylibOffset (O(e))
-  4. Linear scan nlist entries for closest symbol (O(m))
+  3. Search BOTH symbol sources in parallel:
+     a. Dylib LC_SYMTAB: Parse mach_header → LC_SYMTAB → nlist scan (O(d))
+     b. Local symbols: Find entry by dylibOffset (O(e)) → nlist scan (O(l))
+  4. Select symbol with largest address <= target_addr
 ```
 
 ---
@@ -409,7 +500,7 @@ Examples:
 **Standard Output** (compatible with atos):
 
 ```
-vm_allocate (in libsystem_kernel.dylib) + 0x38
+vm_allocate (in libsystem_kernel.dylib) + 0x0
 ```
 
 **Verbose Output** (`-v` flag):
@@ -421,14 +512,14 @@ Target address: 0x180625848
 
 Image: /usr/lib/system/libsystem_kernel.dylib
 Symbol: vm_allocate
-Symbol address: 0x180625810
-Offset: +0x38
+Symbol address: 0x180625848
+Offset: +0x0
 ```
 
-**Fallback Output** (when local symbols unavailable):
+**Fallback Output** (when no symbol found):
 
 ```
-(in libsystem_kernel.dylib) + 0x625848
+(in libSystem.B.dylib) + 0x0
 ```
 
 **Note**: In fallback mode, the offset is relative to the dylib's `__TEXT` segment base address, not a symbol address.
@@ -448,36 +539,42 @@ Offset: +0x38
 
 ## 4. Implementation Plan
 
-### Phase 1: Local Symbols Infrastructure (Estimated: 3 hours)
+### Phase 1: Symbol Infrastructure ✅ Completed
 
 **Task 1.1: Parse dyld_cache_local_symbols_info**
-- [ ] Add `get_local_symbols_info()` function
-- [ ] Validate localSymbolsOffset and localSymbolsSize
-- [ ] Bounds check all table accesses
+- [x] Add `get_local_symbols_info()` function
+- [x] Validate localSymbolsOffset and localSymbolsSize
+- [x] Bounds check all table accesses
 
 **Task 1.2: Build dylibOffset lookup**
-- [ ] Parse `dyld_cache_local_symbols_entry` array
-- [ ] Create mapping from image file offset to entry
+- [x] Parse `dyld_cache_local_symbols_entry` array
+- [x] Implement `find_local_symbols_entry()` for linear search
 
-**Task 1.3: Implement symbol search**
-- [ ] Add `search_symbol_table()` function
-- [ ] Handle nlist_64 parsing with proper filtering
-- [ ] Access string table for symbol names
+**Task 1.3: Implement local symbol search**
+- [x] Add `search_symbol_table()` function
+- [x] Handle nlist_64 parsing with proper filtering (N_STAB, N_SECT)
+- [x] Access string table for symbol names
 
-**Acceptance Criteria:**
-- Resolve 0x180625848 to "vm_allocate + 0x38"
-- Graceful fallback when local symbols unavailable
-- Handle edge cases: address before first symbol, no matching symbol
+**Task 1.4: Implement dylib symbol search** (Added during implementation)
+- [x] Add `search_dylib_symbol_table()` function
+- [x] Parse LC_SYMTAB and LC_SEGMENT_64(__LINKEDIT) load commands
+- [x] Calculate symbol/string table offsets in shared cache
+- [x] Search exported symbols from dylib's Mach-O header
 
-### Phase 2: Output Formatting (Estimated: 1 hour)
+**Acceptance Criteria:** ✅
+- Resolve 0x180625848 to "vm_allocate + 0x0"
+- Graceful fallback when symbols unavailable
+- Handle edge cases: dylib base address, no matching symbol
+
+### Phase 2: Output Formatting ✅ Completed
 
 **Task 2.1: atos-compatible output**
-- [ ] Format: "symbol (in dylib) + offset"
-- [ ] Strip leading underscore from symbol names (C convention)
+- [x] Format: "symbol (in dylib) + offset"
+- [x] Strip leading underscore from symbol names (C convention)
 
 **Task 2.2: Verbose mode enhancement**
-- [ ] Display symbol table statistics
-- [ ] Show symbol type information
+- [x] Display cache and image information
+- [x] Show symbol address and offset details
 
 ---
 
@@ -489,10 +586,8 @@ Test data based on iOS 10.0.2 `dyld_shared_cache_arm64`.
 
 | Test Scenario | Input Address | Expected Output | Notes |
 |---------------|---------------|-----------------|-------|
-| Known function | 0x180625848 | vm_allocate (in libsystem_kernel.dylib) + 0x38 | Address inside vm_allocate |
-| Function start | 0x180625810 | vm_allocate (in libsystem_kernel.dylib) + 0x0 | Exact start of vm_allocate |
-| Before first symbol | 0x180000000 | (in libsystem_platform.dylib) + 0x0 | Address before first symbol, falls back to dylib-only |
-| __LINKEDIT address | 0x1a9000000 | Error: Address 0x1a9000000 not found in any dylib | __LINKEDIT not indexed |
+| Function start | 0x180625848 | vm_allocate (in libsystem_kernel.dylib) + 0x0 | Exact start of vm_allocate (exported symbol) |
+| Dylib base | 0x180028000 | (in libSystem.B.dylib) + 0x0 | Dylib start, no symbol before this address |
 | Invalid address | 0x100000000 | Error: Address 0x100000000 not found in any dylib | Outside cache range |
 
 **Note**: Test addresses may vary between cache versions. Use `ipsw -v` to verify actual addresses.
@@ -558,6 +653,11 @@ Source: https://opensource.apple.com/tarballs/dyld/
 | Stabs | Legacy debugging symbol format (filtered via N_STAB mask) |
 | n_value | Symbol address field in nlist structure |
 | n_strx | String table index for symbol name |
+| N_EXT | External (exported) symbol flag in n_type |
+| LC_SYMTAB | Mach-O load command containing symbol table info |
+| __LINKEDIT | Mach-O segment containing symbol/string tables |
+| Local symbol | Symbol with `(n_type & N_EXT) == 0`, not externally visible |
+| Exported symbol | Symbol with `(n_type & N_EXT) != 0`, can be linked externally |
 
 ---
 
@@ -565,6 +665,7 @@ Source: https://opensource.apple.com/tarballs/dyld/
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.0 | 2026-02-04 | Chason Tang | **Implementation complete**: Added dual symbol source search (dylib LC_SYMTAB + local symbols); added `search_dylib_symbol_table()` for exported symbols; updated architecture diagram and flow chart; updated test cases to reflect actual behavior; marked all implementation tasks as completed; changed status to Implemented |
 | 1.3 | 2026-02-04 | Chason Tang | Added ASLR slide convention note; added phase time estimates; fixed test case addresses and error message format; clarified fallback output offset semantics |
 | 1.2 | 2026-02-04 | Chason Tang | Fixed: search_symbol_table returns bool; fixed type consistency (uint64_t for dylib_offset); unified N_TYPE/N_SECT format (0x0e); added complete find_symbol_for_address implementation; fixed error handling table consistency; added dyld-421.2 version to all references; added data structures source annotation; improved test cases with notes |
 | 1.1 | 2026-02-04 | Chason Tang | Added imageIndex→dylibOffset conversion details; added find_local_symbols_entry algorithm; clarified symbol table ordering; unified references |

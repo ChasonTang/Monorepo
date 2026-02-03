@@ -106,6 +106,55 @@ struct dyld_cache_range_entry {
   uint32_t imageIndex;   /* index into dyld_cache_image_info array */
 };
 
+/**
+ * Header for local symbols section in dyld_shared_cache.
+ * Located at header->localSymbolsOffset in the cache file.
+ * Based on dyld-421.2/launch-cache/dyld_cache_format.h
+ */
+struct dyld_cache_local_symbols_info {
+  uint32_t nlistOffset;   /* Offset to nlist entries (from this struct) */
+  uint32_t nlistCount;    /* Total count of nlist entries */
+  uint32_t stringsOffset; /* Offset to string table (from this struct) */
+  uint32_t stringsSize;   /* Size of string table in bytes */
+  uint32_t entriesOffset; /* Offset to entries array (from this struct) */
+  uint32_t entriesCount;  /* Number of entries (one per dylib) */
+};
+
+/**
+ * Per-dylib entry in local symbols table.
+ * Maps a dylib to its range of symbols in the shared nlist array.
+ */
+struct dyld_cache_local_symbols_entry {
+  uint32_t dylibOffset;     /* File offset of dylib's mach_header in cache */
+  uint32_t nlistStartIndex; /* First symbol index for this dylib */
+  uint32_t nlistCount;      /* Number of symbols for this dylib */
+};
+
+/**
+ * 64-bit symbol table entry (from <mach-o/nlist.h>).
+ */
+struct nlist_64 {
+  uint32_t n_strx;  /* Index into string table */
+  uint8_t n_type;   /* Type flags (N_EXT, N_TYPE, etc.) */
+  uint8_t n_sect;   /* Section number (1-based) or NO_SECT */
+  uint16_t n_desc;  /* Description field */
+  uint64_t n_value; /* Symbol value (address for defined symbols) */
+};
+
+/* n_type masks */
+#define N_STAB 0xe0 /* Stabs debugging symbol */
+#define N_PEXT 0x10 /* Private external symbol */
+#define N_TYPE 0x0e /* Type mask */
+#define N_EXT 0x01  /* External symbol */
+
+/* n_type values for N_TYPE bits */
+#define N_UNDF 0x00 /* Undefined */
+#define N_ABS 0x02  /* Absolute */
+#define N_SECT 0x0e /* Defined in section n_sect */
+
+/* Note: LC_SYMTAB, LC_SEGMENT_64, struct symtab_command, and
+ * struct segment_command_64 are defined in <mach-o/loader.h> */
+
 /*
  * Convert a virtual address to a file offset using the mapping table.
  * Returns -1 if the address is not in any mapping.
@@ -185,6 +234,317 @@ get_accelerator_info(const uint8_t *cache, size_t cache_size,
 }
 
 /**
+ * Get the local symbols info from the cache.
+ * Returns pointer to local symbols info, or NULL if not available.
+ *
+ * @param cache       Pointer to mmap'd cache file
+ * @param cache_size  Size of cache file
+ * @param header      Cache header pointer
+ * @return            Pointer to local symbols info, or NULL if not available
+ */
+static const struct dyld_cache_local_symbols_info *
+get_local_symbols_info(const uint8_t *cache, size_t cache_size,
+                       const struct dyld_cache_header *header) {
+  /* Check if localSymbols is present */
+  if (header->localSymbolsOffset == 0 || header->localSymbolsSize == 0) {
+    return NULL;
+  }
+
+  /* Bounds check for local symbols info */
+  if (header->localSymbolsOffset + sizeof(struct dyld_cache_local_symbols_info) >
+      cache_size) {
+    return NULL;
+  }
+
+  const struct dyld_cache_local_symbols_info *local_info =
+      (const struct dyld_cache_local_symbols_info *)(cache +
+                                                     header->localSymbolsOffset);
+
+  /* Validate offsets within local symbols section */
+  uint64_t nlist_end = (uint64_t)local_info->nlistOffset +
+                       (uint64_t)local_info->nlistCount * sizeof(struct nlist_64);
+  uint64_t strings_end =
+      (uint64_t)local_info->stringsOffset + local_info->stringsSize;
+  uint64_t entries_end =
+      (uint64_t)local_info->entriesOffset +
+      (uint64_t)local_info->entriesCount *
+          sizeof(struct dyld_cache_local_symbols_entry);
+
+  /* All offsets are relative to local_info, check they fit in localSymbolsSize */
+  if (nlist_end > header->localSymbolsSize ||
+      strings_end > header->localSymbolsSize ||
+      entries_end > header->localSymbolsSize) {
+    return NULL;
+  }
+
+  return local_info;
+}
+
+/**
+ * Convert imageIndex (from rangeTable) to dylibOffset (for local symbols entry).
+ *
+ * @param cache         Pointer to mmap'd cache file
+ * @param header        Cache header pointer
+ * @param mappings      Mapping info array
+ * @param mapping_count Number of mappings
+ * @param image_index   Index from rangeTable lookup
+ * @return              File offset of dylib's mach_header, or -1 on error
+ *
+ * The rangeTable returns an imageIndex into dyld_cache_image_info array.
+ * The local_symbols_entry uses dylibOffset (file offset of mach_header).
+ * This function bridges the two by:
+ *   1. Looking up the image's virtual address from images[imageIndex].address
+ *   2. Converting that virtual address to a file offset via mapping table
+ */
+static int64_t
+image_index_to_dylib_offset(const uint8_t *cache,
+                            const struct dyld_cache_header *header,
+                            const struct dyld_cache_mapping_info *mappings,
+                            uint32_t mapping_count, uint32_t image_index) {
+  /* Get image info array */
+  const struct dyld_cache_image_info *images =
+      (const struct dyld_cache_image_info *)(cache + header->imagesOffset);
+
+  /* Bounds check */
+  if (image_index >= header->imagesCount)
+    return -1;
+
+  /* Get dylib's __TEXT segment virtual address */
+  uint64_t image_addr = images[image_index].address;
+
+  /* Convert virtual address to file offset using mapping table */
+  return addr_to_file_offset(mappings, mapping_count, image_addr);
+}
+
+/**
+ * Find the local symbols entry for a given dylib file offset.
+ *
+ * @param entries       Pointer to entries array
+ * @param entries_count Number of entries
+ * @param dylib_offset  File offset of dylib's mach_header (from
+ * image_index_to_dylib_offset)
+ * @return              Pointer to matching entry, or NULL if not found
+ *
+ * Time Complexity: O(n) where n = entries_count
+ *
+ * Note: The entries array order may not match the images array order.
+ * A linear search is required to find the matching dylibOffset.
+ * The caller must ensure dylib_offset is valid (>= 0) before calling.
+ */
+static const struct dyld_cache_local_symbols_entry *
+find_local_symbols_entry(const struct dyld_cache_local_symbols_entry *entries,
+                         uint32_t entries_count, uint64_t dylib_offset) {
+  for (uint32_t i = 0; i < entries_count; i++) {
+    if ((uint64_t)entries[i].dylibOffset == dylib_offset) {
+      return &entries[i];
+    }
+  }
+  return NULL;
+}
+
+/**
+ * Search symbol table for the closest match to target address.
+ *
+ * @param nlist_base    Base pointer to nlist_64 array
+ * @param string_table  Base pointer to string table
+ * @param start_index   First nlist index for this image
+ * @param count         Number of nlist entries for this image
+ * @param target_addr   Target address (unslid)
+ * @param best_name     [out] Best matching symbol name (unchanged if not found)
+ * @param best_addr     [out] Best matching symbol address (unchanged if not
+ * found)
+ * @return              true if a symbol was found, false otherwise
+ *
+ * Time Complexity: O(n) where n = count
+ * Space Complexity: O(1)
+ */
+static int search_symbol_table(const struct nlist_64 *nlist_base,
+                               const char *string_table, uint32_t start_index,
+                               uint32_t count, uint64_t target_addr,
+                               const char **best_name, uint64_t *best_addr,
+                               int verbose) {
+  const struct nlist_64 *best_symbol = NULL;
+
+  (void)verbose; /* Reserved for future use */
+
+  for (uint32_t i = 0; i < count; i++) {
+    const struct nlist_64 *sym = &nlist_base[start_index + i];
+
+    /* Skip stabs debugging symbols */
+    if ((sym->n_type & N_STAB) != 0)
+      continue;
+
+    /* Only consider symbols defined in a section */
+    if ((sym->n_type & N_TYPE) != N_SECT)
+      continue;
+
+    /* Symbol must not be past the target address */
+    if (sym->n_value > target_addr)
+      continue;
+
+    /* Select if this is the closest so far */
+    if (best_symbol == NULL || sym->n_value > best_symbol->n_value) {
+      best_symbol = sym;
+    }
+  }
+
+  if (best_symbol != NULL) {
+    *best_name = &string_table[best_symbol->n_strx];
+    *best_addr = best_symbol->n_value;
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * Search dylib's own symbol table from its Mach-O header.
+ *
+ * In the dyld_shared_cache, each dylib's symbol table offsets (from LC_SYMTAB)
+ * are relative to the __LINKEDIT segment base of the dylib. We need to:
+ * 1. Find LC_SEGMENT_64(__LINKEDIT) to get linkedit_base
+ * 2. Find LC_SYMTAB to get symbol table info
+ * 3. Calculate actual pointers using the cache's __LINKEDIT mapping
+ *
+ * @param cache         Pointer to mmap'd cache file
+ * @param cache_size    Size of cache file
+ * @param mappings      Mapping info array
+ * @param mapping_count Number of mappings
+ * @param dylib_offset  File offset of dylib's mach_header in cache
+ * @param target_addr   Target address to look up
+ * @param best_name     [in/out] Best matching symbol name
+ * @param best_addr     [in/out] Best matching symbol address
+ * @param verbose       Verbose output flag
+ * @return              true if a better symbol was found, false otherwise
+ */
+static int search_dylib_symbol_table(
+    const uint8_t *cache, size_t cache_size,
+    const struct dyld_cache_mapping_info *mappings, uint32_t mapping_count,
+    uint64_t dylib_offset, uint64_t target_addr, const char **best_name,
+    uint64_t *best_addr, int verbose) {
+  /* Get mach_header_64 at dylib_offset */
+  if (dylib_offset + sizeof(struct mach_header_64) > cache_size) {
+    return 0;
+  }
+
+  const struct mach_header_64 *mh =
+      (const struct mach_header_64 *)(cache + dylib_offset);
+
+  /* Validate magic */
+  if (mh->magic != MH_MAGIC_64) {
+    return 0;
+  }
+
+  /* Find LC_SYMTAB and LC_SEGMENT_64(__LINKEDIT) */
+  const struct symtab_command *symtab_cmd = NULL;
+  uint64_t linkedit_vmaddr = 0;
+  uint64_t linkedit_fileoff = 0;
+
+  const uint8_t *lc_ptr = (const uint8_t *)(mh + 1);
+  const uint8_t *lc_end = lc_ptr + mh->sizeofcmds;
+
+  if ((uint64_t)(lc_end - cache) > cache_size) {
+    return 0;
+  }
+
+  for (uint32_t i = 0; i < mh->ncmds && lc_ptr < lc_end; i++) {
+    const struct load_command *lc = (const struct load_command *)lc_ptr;
+
+    if (lc->cmdsize < sizeof(struct load_command) || lc_ptr + lc->cmdsize > lc_end) {
+      break;
+    }
+
+    if (lc->cmd == LC_SYMTAB) {
+      symtab_cmd = (const struct symtab_command *)lc;
+    } else if (lc->cmd == LC_SEGMENT_64) {
+      const struct segment_command_64 *seg =
+          (const struct segment_command_64 *)lc;
+      if (strncmp(seg->segname, "__LINKEDIT", 16) == 0) {
+        linkedit_vmaddr = seg->vmaddr;
+        linkedit_fileoff = seg->fileoff;
+      }
+    }
+
+    lc_ptr += lc->cmdsize;
+  }
+
+  if (symtab_cmd == NULL || linkedit_vmaddr == 0) {
+    return 0;
+  }
+
+  /* In shared cache, symbol/string offsets are relative to __LINKEDIT file offset
+   * But the actual data is in the cache's __LINKEDIT mapping.
+   * We need to convert: symoff (file-based) -> cache file offset
+   *
+   * The formula is:
+   *   actual_offset = linkedit_fileoff + (symoff - (linkedit_vmaddr - linkedit_vmaddr))
+   * But in shared cache, all dylibs share the same __LINKEDIT segment from the cache.
+   * So we need to use the cache's __LINKEDIT mapping to find the data.
+   *
+   * symoff and stroff are offsets from the original dylib's __LINKEDIT base.
+   * We need to add them to linkedit_fileoff to get the cache file offset.
+   */
+
+  /* Convert linkedit_vmaddr to file offset in cache */
+  int64_t linkedit_cache_offset =
+      addr_to_file_offset(mappings, mapping_count, linkedit_vmaddr);
+  if (linkedit_cache_offset < 0) {
+    return 0;
+  }
+
+  /* Calculate symbol table and string table pointers */
+  uint64_t symtab_offset = (uint64_t)linkedit_cache_offset + symtab_cmd->symoff -
+                           linkedit_fileoff;
+  uint64_t strtab_offset = (uint64_t)linkedit_cache_offset + symtab_cmd->stroff -
+                           linkedit_fileoff;
+
+  /* Bounds check */
+  if (symtab_offset + symtab_cmd->nsyms * sizeof(struct nlist_64) > cache_size) {
+    return 0;
+  }
+  if (strtab_offset + symtab_cmd->strsize > cache_size) {
+    return 0;
+  }
+
+  const struct nlist_64 *nlist = (const struct nlist_64 *)(cache + symtab_offset);
+  const char *strtab = (const char *)(cache + strtab_offset);
+
+  (void)verbose; /* Reserved for future use */
+
+  int found_better = 0;
+
+  for (uint32_t i = 0; i < symtab_cmd->nsyms; i++) {
+    const struct nlist_64 *sym = &nlist[i];
+
+    /* Skip stabs debugging symbols */
+    if ((sym->n_type & N_STAB) != 0)
+      continue;
+
+    /* Only consider symbols defined in a section */
+    if ((sym->n_type & N_TYPE) != N_SECT)
+      continue;
+
+    /* Symbol must not be past the target address */
+    if (sym->n_value > target_addr)
+      continue;
+
+    /* Bounds check for string index */
+    if (sym->n_strx >= symtab_cmd->strsize)
+      continue;
+
+    const char *sym_name = &strtab[sym->n_strx];
+
+    /* Select if this is closer than current best */
+    if (*best_addr == 0 || sym->n_value > *best_addr) {
+      *best_name = sym_name;
+      *best_addr = sym->n_value;
+      found_better = 1;
+    }
+  }
+
+  return found_better;
+}
+
+/**
  * Binary search for address in sorted rangeTable.
  *
  * @param rangeTable Pointer to sorted range entry array
@@ -214,6 +574,135 @@ binary_search_range_table(const struct dyld_cache_range_entry *rangeTable,
     }
   }
   return NULL;
+}
+
+/**
+ * Find the closest symbol for a given address.
+ *
+ * @param cache             Pointer to mmap'd cache file
+ * @param cache_size        Size of cache file
+ * @param header            Cache header pointer
+ * @param mappings          Mapping info array
+ * @param mapping_count     Number of mappings
+ * @param local_info        Local symbols info pointer
+ * @param rangeTable        Range table pointer
+ * @param range_table_count Number of range entries
+ * @param target_addr       Target address to look up
+ * @param symbol_name       [out] Symbol name (NULL if not found)
+ * @param symbol_addr       [out] Symbol address (0 if not found)
+ * @param image_index       [out] Image index of containing dylib (-1 if not
+ * found)
+ * @return                  0 on success, -1 on failure (address not in cache or
+ * no symbols)
+ *
+ * Algorithm:
+ *   1. Use rangeTable binary search to find containing image (O(log n))
+ *      - Returns imageIndex into dyld_cache_image_info array
+ *   2. Convert imageIndex to dylibOffset:
+ *      a. Access images[imageIndex].address to get dylib's __TEXT vmaddr
+ *      b. Use addr_to_file_offset() to convert vmaddr to file offset
+ *      - This file offset equals dylibOffset in local_symbols_entry
+ *   3. Find matching entry in local_symbols_entry array by dylibOffset (O(e))
+ *      - Linear search through entries array comparing dylibOffset
+ *   4. Iterate through the dylib's nlist entries (O(m))
+ *   5. Find symbol with largest n_value <= target_addr
+ *
+ * Time Complexity: O(log n + e + m)
+ *   where n = rangeTableCount, e = entriesCount, m = symbols per dylib
+ */
+static int find_symbol_for_address(
+    const uint8_t *cache, size_t cache_size,
+    const struct dyld_cache_header *header,
+    const struct dyld_cache_mapping_info *mappings, uint32_t mapping_count,
+    const struct dyld_cache_local_symbols_info *local_info,
+    const struct dyld_cache_range_entry *rangeTable, uint32_t range_table_count,
+    uint64_t target_addr, const char **symbol_name, uint64_t *symbol_addr,
+    int32_t *image_index_out, int verbose) {
+  /* Initialize output parameters */
+  *symbol_name = NULL;
+  *symbol_addr = 0;
+  *image_index_out = -1;
+
+  /* Step 1: Binary search rangeTable for containing image */
+  const struct dyld_cache_range_entry *range_entry =
+      binary_search_range_table(rangeTable, range_table_count, target_addr);
+  if (range_entry == NULL)
+    return -1; /* Address not in any dylib */
+
+  uint32_t image_index = range_entry->imageIndex;
+  *image_index_out = (int32_t)image_index;
+
+  /* Step 2: Convert imageIndex to dylibOffset */
+  int64_t dylib_offset = image_index_to_dylib_offset(cache, header, mappings,
+                                                     mapping_count, image_index);
+  if (dylib_offset < 0)
+    return -1;
+
+  int found_symbol = 0;
+
+  /* Search source 1: dylib's own symbol table (exported symbols) */
+  if (search_dylib_symbol_table(cache, cache_size, mappings, mapping_count,
+                                (uint64_t)dylib_offset, target_addr, symbol_name,
+                                symbol_addr, verbose)) {
+    found_symbol = 1;
+  }
+
+  /* Search source 2: local symbols from dyld_cache_local_symbols_info */
+  if (local_info != NULL) {
+    /* Get entries array */
+    const struct dyld_cache_local_symbols_entry *entries =
+        (const struct dyld_cache_local_symbols_entry
+             *)((const uint8_t *)local_info + local_info->entriesOffset);
+
+    /* Find matching local symbols entry */
+    const struct dyld_cache_local_symbols_entry *sym_entry =
+        find_local_symbols_entry(entries, local_info->entriesCount,
+                                 (uint64_t)dylib_offset);
+
+    if (sym_entry != NULL) {
+      /* Get nlist and string table pointers */
+      const struct nlist_64 *nlist_base =
+          (const struct nlist_64 *)((const uint8_t *)local_info +
+                                    local_info->nlistOffset);
+      const char *string_table =
+          (const char *)((const uint8_t *)local_info + local_info->stringsOffset);
+
+      /* Search local symbol table - may find a closer match */
+      const char *local_name = NULL;
+      uint64_t local_addr = 0;
+
+      if (search_symbol_table(nlist_base, string_table, sym_entry->nlistStartIndex,
+                              sym_entry->nlistCount, target_addr, &local_name,
+                              &local_addr, verbose)) {
+        /* Use local symbol if it's closer than current best */
+        if (local_addr > *symbol_addr) {
+          *symbol_name = local_name;
+          *symbol_addr = local_addr;
+          found_symbol = 1;
+        }
+      }
+    }
+  }
+
+  return found_symbol ? 0 : -1;
+}
+
+/**
+ * Get the basename of a path (last component after /).
+ */
+static const char *get_basename(const char *path) {
+  const char *last_slash = strrchr(path, '/');
+  return last_slash ? last_slash + 1 : path;
+}
+
+/**
+ * Strip leading underscore from symbol name (C convention).
+ * Returns the original name if it doesn't start with underscore.
+ */
+static const char *strip_leading_underscore(const char *name) {
+  if (name && name[0] == '_')
+    return name + 1;
+  return name;
 }
 
 static void print_usage(const char *prog_name) {
@@ -357,72 +846,94 @@ int main(int argc, const char *argv[]) {
       (const struct dyld_cache_range_entry *)(cache + accel_file_offset +
                                               accel_info->rangeTableOffset);
 
+  /* Get local symbols info (may be NULL if not available) */
+  const struct dyld_cache_local_symbols_info *local_info =
+      get_local_symbols_info(cache, cache_size, header);
+
   if (verbose) {
     printf("Cache magic: %.16s\n", header->magic);
     printf("Image count: %u\n", header->imagesCount);
-    printf("Target address: 0x%llx\n\n", (unsigned long long)target_addr);
-
-    /* Print mapping info */
-    printf("Mappings (%u):\n", header->mappingCount);
-    for (uint32_t i = 0; i < header->mappingCount; i++) {
-      printf("  [%u] address: 0x%llx - 0x%llx, fileOffset: 0x%llx\n", i,
-             (unsigned long long)mappings[i].address,
-             (unsigned long long)(mappings[i].address + mappings[i].size),
-             (unsigned long long)mappings[i].fileOffset);
-    }
-    printf("\n");
-
-    /* Print accelerator info */
-    printf("Accelerator info:\n");
-    printf("  version: %u\n", accel_info->version);
-    printf("  rangeTableCount: %u\n", accel_info->rangeTableCount);
-    printf("  imageExtrasCount: %u\n", accel_info->imageExtrasCount);
+    printf("Target address: 0x%llx\n", (unsigned long long)target_addr);
     printf("\n");
   }
 
-  /* Binary search for the address in rangeTable - O(log n) */
-  const struct dyld_cache_range_entry *found_entry = binary_search_range_table(
-      rangeTable, accel_info->rangeTableCount, target_addr);
+  /* Perform symbol lookup */
+  const char *symbol_name = NULL;
+  uint64_t symbol_addr = 0;
+  int32_t image_index = -1;
 
-  if (found_entry != NULL) {
-    uint32_t image_index = found_entry->imageIndex;
+  int symbol_found = find_symbol_for_address(
+      cache, cache_size, header, mappings, header->mappingCount, local_info,
+      rangeTable, accel_info->rangeTableCount, target_addr, &symbol_name,
+      &symbol_addr, &image_index, verbose);
 
-    /* Validate image index */
-    if (image_index >= header->imagesCount) {
-      fprintf(stderr, "Error: Invalid image index %u (max: %u)\n", image_index,
-              header->imagesCount - 1);
-      munmap((void *)cache, cache_size);
-      return 1;
-    }
-
-    /* Get the dylib path */
-    const struct dyld_cache_image_info *image = &images[image_index];
-    if (image->pathFileOffset >= cache_size) {
-      fprintf(stderr, "Error: Invalid path offset for image %u\n", image_index);
-      munmap((void *)cache, cache_size);
-      return 1;
-    }
-
-    const char *dylib_path = (const char *)(cache + image->pathFileOffset);
-
-    /* Ensure path string is null-terminated within bounds */
-    size_t max_path_len = cache_size - image->pathFileOffset;
-    size_t path_len = strnlen(dylib_path, max_path_len);
-    if (path_len == max_path_len) {
-      fprintf(stderr, "Error: Path string not null-terminated for image %u\n",
-              image_index);
-      munmap((void *)cache, cache_size);
-      return 1;
-    }
-
-    printf("%s\n", dylib_path);
+  /* Check if we at least found the containing dylib */
+  if (image_index < 0) {
+    /* Address not in any dylib */
+    fprintf(stderr, "Error: Address 0x%llx not found in any dylib\n",
+            (unsigned long long)target_addr);
     munmap((void *)cache, cache_size);
-    return 0;
+    return 1;
   }
 
-  /* Address not found - this is expected for __LINKEDIT addresses */
-  fprintf(stderr, "Address 0x%llx not found in any dylib\n",
-          (unsigned long long)target_addr);
+  /* Get the dylib path */
+  const struct dyld_cache_image_info *image = &images[image_index];
+  if (image->pathFileOffset >= cache_size) {
+    fprintf(stderr, "Error: Invalid path offset for image %d\n", image_index);
+    munmap((void *)cache, cache_size);
+    return 1;
+  }
+
+  const char *dylib_path = (const char *)(cache + image->pathFileOffset);
+
+  /* Ensure path string is null-terminated within bounds */
+  size_t max_path_len = cache_size - image->pathFileOffset;
+  size_t path_len = strnlen(dylib_path, max_path_len);
+  if (path_len == max_path_len) {
+    fprintf(stderr, "Error: Path string not null-terminated for image %d\n",
+            image_index);
+    munmap((void *)cache, cache_size);
+    return 1;
+  }
+
+  const char *dylib_basename = get_basename(dylib_path);
+
+  if (symbol_found == 0 && symbol_name != NULL) {
+    /* Symbol found - output in atos-compatible format */
+    uint64_t offset = target_addr - symbol_addr;
+    const char *display_name = strip_leading_underscore(symbol_name);
+
+    if (verbose) {
+      printf("Image: %s\n", dylib_path);
+      printf("Symbol: %s\n", display_name);
+      printf("Symbol address: 0x%llx\n", (unsigned long long)symbol_addr);
+      printf("Offset: +0x%llx\n", (unsigned long long)offset);
+    } else {
+      /* atos-compatible output: symbol (in dylib) + offset */
+      printf("%s (in %s) + 0x%llx\n", display_name, dylib_basename,
+             (unsigned long long)offset);
+    }
+  } else {
+    /* No symbol found - fallback to dylib-only output */
+    if (local_info == NULL) {
+      fprintf(stderr, "Note: No local symbols available\n");
+    }
+
+    /* Calculate offset from dylib's __TEXT base */
+    uint64_t dylib_base = image->address;
+    uint64_t offset = target_addr - dylib_base;
+
+    if (verbose) {
+      printf("Image: %s\n", dylib_path);
+      printf("Symbol: (not found)\n");
+      printf("Dylib base: 0x%llx\n", (unsigned long long)dylib_base);
+      printf("Offset: +0x%llx\n", (unsigned long long)offset);
+    } else {
+      /* Fallback output: (in dylib) + offset */
+      printf("(in %s) + 0x%llx\n", dylib_basename, (unsigned long long)offset);
+    }
+  }
+
   munmap((void *)cache, cache_size);
-  return 1;
+  return 0;
 }
