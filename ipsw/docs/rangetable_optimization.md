@@ -1,8 +1,8 @@
 # RangeTable Optimization for IPSW Address Lookup
 
-**Document Version:** 1.1  
-**Author:** Technical Design  
-**Last Updated:** 2026-02-03  
+**Document Version:** 1.2
+**Author:** Chason Tang
+**Last Updated:** 2026-02-04
 **Status:** Proposed
 
 ---
@@ -57,7 +57,8 @@ for (uint32_t i = 0; i < header->imagesCount; i++) {
 **Problems with Current Approach:**
 1. Must parse every image's Mach-O header
 2. Must iterate through all load commands
-3. No early exit optimization (continues even after finding match for alias detection)
+3. No early exit optimization
+4. Returns all 1170+ dylibs for `__LINKEDIT` addresses (shared segment problem)
 
 ### 2.2 dyld Shared Cache Accelerator Info
 
@@ -114,20 +115,18 @@ bool ImageLoaderMegaDylib::addressInCache(const void* address, ...) {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         IPSW CLI Tool (Optimized)                        │
+│                         IPSW CLI Tool (Optimized)                       │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  main()                                                                  │
-│  ├── Argument Parsing                                                    │
-│  ├── File Mapping (mmap)                                                 │
-│  ├── Cache Header Validation                                             │
+│  main()                                                                 │
+│  ├── Argument Parsing                                                   │
+│  ├── File Mapping (mmap)                                                │
+│  ├── Cache Header Validation                                            │
 │  │    └── Require accelerateInfoAddr != 0 (exit with error otherwise)   │
-│  └── Address Lookup Engine                                               │
-│       ├── Locate Accelerator Info                                        │
-│       │    └── Convert accelerateInfoAddr to file offset                 │
-│       ├── RangeTable Binary Search                                       │
-│       │    └── O(log n) lookup using sorted range entries                │
-│       └── Alias Resolution                                               │
-│            └── Find all paths with matching image base address           │
+│  └── Address Lookup Engine                                              │
+│       ├── Locate Accelerator Info                                       │
+│       │    └── Convert accelerateInfoAddr to file offset                │
+│       └── RangeTable Binary Search                                      │
+│            └── O(log n) lookup using sorted range entries               │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -257,28 +256,32 @@ binary_search_range_table(const struct dyld_cache_range_entry* rangeTable,
           ▼                   ▼
     ┌──────────────────┐  ┌──────────────┐
     │ Get imageIndex   │  │ Report       │
-    │ Lookup path(s)   │  │ not found    │
-    │ (check aliases)  │  │ Exit code 1  │
+    │ Lookup path from │  │ not found    │
+    │ image_info array │  │ Exit code 1  │
     └────────┬─────────┘  └──────────────┘
              │
              ▼
     ┌────────────────────────────────┐
-    │ Output matching dylib path(s)  │
+    │ Output matching dylib path     │
     │ Exit code 0                    │
     └────────────────────────────────┘
 ```
 
-### 3.5 Handling Multiple Matches (Aliases)
+### 3.5 LINKEDIT Segment Exclusion
 
-The current implementation reports multiple paths when an address belongs to aliased dylibs. With rangeTable optimization:
+The `rangeTable` **intentionally excludes `__LINKEDIT` segments**. This is by design in Apple's cache builder (`OptimizerLinkedit.cpp` line 443-444):
 
-1. **Primary Match**: Binary search returns the first matching entry with `imageIndex`
-2. **Alias Detection**: Scan `dyld_cache_image_info` array for entries sharing the same `address` field
+```cpp
+for ( const macho_segment_command<P>* segCmd : op->segCmds() ) {
+    if ( strcmp(segCmd->segname(), "__LINKEDIT") == 0 )
+        continue;  // Skipped!
+    // Only __TEXT and __DATA segments are indexed
+}
+```
 
-The rangeTable design groups by segment, not by alias. Aliases share the same segments, so:
-- A single rangeTable entry maps to an `imageIndex`
-- Multiple image info entries may share the same base address (they are aliases)
-- Output all paths for complete results
+**Why?** In the shared cache, all dylibs share a single merged `__LINKEDIT` region. Each dylib's `LC_SEGMENT_64(__LINKEDIT)` command points to the **same** virtual address range. Using the legacy segment-walking approach, a `__LINKEDIT` address would match **all 1170+ dylibs** — which is meaningless.
+
+The `rangeTable` design solves this by only indexing `__TEXT` and `__DATA` segments, which remain unique per dylib. For addresses in `__LINKEDIT`, the tool will report "not found" — this is the correct behavior since such addresses cannot be uniquely attributed to any single dylib.
 
 ---
 
@@ -309,36 +312,26 @@ The rangeTable design groups by segment, not by alias. Aliases share the same se
 **Task 2.2: Replace Main Lookup Logic**
 - [ ] Remove existing linear search code (`check_macho_segments()` function)
 - [ ] Replace with rangeTable binary search
-- [ ] Preserve existing output format
+- [ ] Output single matching path (no alias handling needed)
 
 **Acceptance Criteria:**
-- Correct results for all test addresses
+- Correct results for all test addresses in `__TEXT` and `__DATA` segments
+- `__LINKEDIT` addresses correctly report "not found"
 - Verbose mode shows rangeTable statistics
 
-### Phase 3: Alias Handling (Estimated: 1 hour)
+### Phase 3: Code Cleanup & Testing (Estimated: 2 hours)
 
-**Task 3.1: Implement Alias Detection**
-- [ ] After rangeTable match, get the image's base address from `dyld_cache_image_info[imageIndex]`
-- [ ] Scan image info array for other entries with same `address` field
-- [ ] Output all matching paths
-
-**Acceptance Criteria:**
-- Multiple paths output for aliased dylibs
-- Alias detection is efficient (single pass through image info)
-
-### Phase 4: Code Cleanup & Testing (Estimated: 2 hours)
-
-**Task 4.1: Remove Legacy Code**
+**Task 3.1: Remove Legacy Code**
 - [ ] Remove `check_macho_segments()` function
 - [ ] Remove `addr_to_file_offset()` if no longer needed (may still be needed for accelerator info location)
 - [ ] Simplify main() control flow
 
-**Task 4.2: Testing**
+**Task 3.2: Testing**
 - [ ] Test with iOS 10 dyld_shared_cache_arm64 (has accelerator info)
 - [ ] Test edge cases: boundary addresses, invalid addresses, __LINKEDIT region
 - [ ] Verify error handling for unsupported caches
 
-**Task 4.3: Documentation Update**
+**Task 3.3: Documentation Update**
 - [ ] Update `address_lookup.md` with new algorithm section
 - [ ] Document minimum supported cache version
 - [ ] Document new verbose output fields
@@ -364,7 +357,6 @@ The rangeTable design groups by segment, not by alias. Aliases share the same se
 |----------|-------------|
 | `get_accelerator_info()` | Locate and validate accelerator info in cache |
 | `binary_search_range_table()` | O(log n) address lookup in sorted range table |
-| `find_image_aliases()` | Find all paths sharing same base address |
 
 ### 5.3 Functions to Remove
 
@@ -377,11 +369,11 @@ The rangeTable design groups by segment, not by alias. Aliases share the same se
 | Category | Lines |
 |----------|-------|
 | New structures | ~30 |
-| New functions | ~80 |
+| New functions | ~60 |
 | Removed functions | ~-60 |
-| Refactored main() | ~30 |
-| Comments & documentation | ~30 |
-| **Net Change** | **~+80** |
+| Refactored main() | ~20 |
+| Comments & documentation | ~20 |
+| **Net Change** | **~+70** |
 
 ---
 
@@ -430,8 +422,14 @@ For reference, the dyld_cache_header layout requires:
 ### 8.2 Test Data
 
 Using iOS 10.0.2 dyld_shared_cache_arm64:
-- `vm_allocate @ 0x180625848` → `/usr/lib/system/libsystem_kernel.dylib`
-- Expected rangeTableCount: ~3000+ entries (multiple segments per image)
+
+| Address | Segment | Expected Result |
+|---------|---------|-----------------|
+| 0x180625848 | __TEXT | `/usr/lib/system/libsystem_kernel.dylib` |
+| 0x1a0000000 | __DATA | Single dylib path |
+| 0x1a9000000 | __LINKEDIT | "not found" (correct behavior) |
+
+- Expected rangeTableCount: ~3000+ entries (multiple segments per image, excluding __LINKEDIT)
 
 ### 8.3 References
 
@@ -446,6 +444,7 @@ Using iOS 10.0.2 dyld_shared_cache_arm64:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.2 | 2026-02-04 | - | Removed alias handling; added LINKEDIT exclusion rationale (Section 3.5) |
 | 1.1 | 2026-02-03 | - | Removed legacy fallback path; simplified to require accelerator info (iOS 9+ minimum) |
 | 1.0 | 2026-02-03 | - | Initial version |
 

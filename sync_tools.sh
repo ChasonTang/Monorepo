@@ -27,7 +27,7 @@ else
 fi
 
 # Create tool directory
-TOOL_DIR="$(dirname "$0")/tool"
+TOOL_DIR="$(cd "$(dirname "$0")" && pwd)/tool"
 mkdir -p "$TOOL_DIR"
 
 echo "Syncing build tools..."

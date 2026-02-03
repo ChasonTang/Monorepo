@@ -1,8 +1,8 @@
 # IPSW Address Lookup Tool
 
-**Document Version:** 1.1  
-**Author:** Technical Design  
-**Last Updated:** 2026-02-03  
+**Document Version:** 1.1
+**Author:** Chason Tang
+**Last Updated:** 2026-02-03
 **Status:** Implemented
 
 ---
@@ -28,7 +28,6 @@ iOS uses the `dyld_shared_cache` file to pre-link all system dynamic libraries t
 | Address Lookup | Map virtual address to dylib path |
 | Alias Detection | Report all paths for aliased dylibs |
 | Verbose Mode | Display detailed cache metadata |
-| 64-bit Support | ARM64, x86_64, x86_64h architectures |
 
 ---
 
@@ -55,7 +54,7 @@ iOS uses the `dyld_shared_cache` file to pre-link all system dynamic libraries t
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                          Processing Flow                                  │
+│                          Processing Flow                                 │
 └──────────────────────────────────────────────────────────────────────────┘
 
     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐

@@ -72,6 +72,41 @@ struct dyld_cache_image_info {
 };
 
 /*
+ * dyld_cache_accelerator_info - Accelerator table header
+ * Contains offsets to various optimization tables including rangeTable.
+ * Based on dyld-421.2/launch-cache/dyld_cache_format.h
+ */
+struct dyld_cache_accelerator_info {
+  uint32_t version;             /* currently 1 */
+  uint32_t imageExtrasCount;    /* does not include aliases */
+  uint32_t imagesExtrasOffset;  /* offset to first dyld_cache_image_info_extra */
+  uint32_t bottomUpListOffset;  /* offset to bottom-up sorted image index list */
+  uint32_t dylibTrieOffset;     /* offset to dylib path trie */
+  uint32_t dylibTrieSize;       /* size of dylib trie */
+  uint32_t initializersOffset;  /* offset to initializers list */
+  uint32_t initializersCount;   /* count of initializers */
+  uint32_t dofSectionsOffset;   /* offset to DOF sections */
+  uint32_t dofSectionsCount;    /* count of DOF sections */
+  uint32_t reExportListOffset;  /* offset to re-export list */
+  uint32_t reExportCount;       /* count of re-exports */
+  uint32_t depListOffset;       /* offset to dependency list */
+  uint32_t depListCount;        /* count of dependencies */
+  uint32_t rangeTableOffset;    /* offset to range table */
+  uint32_t rangeTableCount;     /* count of range entries */
+  uint64_t dyldSectionAddr;     /* address of libdyld's __dyld section */
+};
+
+/*
+ * dyld_cache_range_entry - Maps an address range to an image index
+ * Entries are sorted by startAddress for binary search.
+ */
+struct dyld_cache_range_entry {
+  uint64_t startAddress; /* unslid address of region start */
+  uint32_t size;         /* size of region in bytes */
+  uint32_t imageIndex;   /* index into dyld_cache_image_info array */
+};
+
+/*
  * Convert a virtual address to a file offset using the mapping table.
  * Returns -1 if the address is not in any mapping.
  */
@@ -89,66 +124,95 @@ addr_to_file_offset(const struct dyld_cache_mapping_info *mappings,
 }
 
 /*
- * Check if the target address falls within any segment of the Mach-O at
- * the given file offset. This handles 64-bit Mach-O format (arm64).
- * Returns 1 if found, 0 otherwise.
+ * Get the accelerator info from the cache.
+ * Returns pointer to accelerator info, or NULL if not available.
+ *
+ * The accelerator info requires:
+ * - mappingOffset >= 0x78 (header has accelerateInfo fields)
+ * - accelerateInfoAddr != 0
+ * - accelerateInfoSize != 0
  */
-static int check_macho_segments(const uint8_t *cache, size_t cache_size,
-                                uint64_t macho_file_offset,
-                                uint64_t target_addr) {
-  const uint8_t *macho = cache + macho_file_offset;
-
-  /* Bounds check */
-  if (macho_file_offset + sizeof(struct mach_header_64) > cache_size) {
-    return 0;
+static const struct dyld_cache_accelerator_info *
+get_accelerator_info(const uint8_t *cache, size_t cache_size,
+                     const struct dyld_cache_header *header,
+                     const struct dyld_cache_mapping_info *mappings,
+                     uint32_t mapping_count) {
+  /* Check if header has accelerateInfo fields (mappingOffset >= 0x78) */
+  if (header->mappingOffset < 0x78) {
+    return NULL;
   }
 
-  const struct mach_header_64 *mh = (const struct mach_header_64 *)macho;
-
-  /* Verify magic - we expect 64-bit for arm64 */
-  if (mh->magic != MH_MAGIC_64) {
-    return 0;
+  /* Check if accelerateInfo is present */
+  if (header->accelerateInfoAddr == 0 || header->accelerateInfoSize == 0) {
+    return NULL;
   }
 
-  /* Iterate through load commands */
-  const uint8_t *cmd_ptr = macho + sizeof(struct mach_header_64);
-  uint32_t ncmds = mh->ncmds;
-
-  for (uint32_t i = 0; i < ncmds; i++) {
-    /* Bounds check for load_command */
-    if ((size_t)(cmd_ptr - cache) + sizeof(struct load_command) > cache_size) {
-      return 0;
-    }
-
-    const struct load_command *cmd = (const struct load_command *)cmd_ptr;
-
-    /* Validate cmdsize to prevent stuck iteration (Problem 2) */
-    if (cmd->cmdsize < sizeof(struct load_command)) {
-      return 0; /* Invalid cmdsize, abort */
-    }
-
-    if (cmd->cmd == LC_SEGMENT_64) {
-      /* Bounds check for segment_command_64 (Problem 1) */
-      if ((size_t)(cmd_ptr - cache) + sizeof(struct segment_command_64) >
-          cache_size) {
-        return 0;
-      }
-
-      const struct segment_command_64 *seg =
-          (const struct segment_command_64 *)cmd_ptr;
-
-      uint64_t seg_start = seg->vmaddr;
-      uint64_t seg_end = seg_start + seg->vmsize;
-
-      if (target_addr >= seg_start && target_addr < seg_end) {
-        return 1;
-      }
-    }
-
-    cmd_ptr += cmd->cmdsize;
+  /* Convert accelerateInfoAddr to file offset */
+  int64_t file_offset =
+      addr_to_file_offset(mappings, mapping_count, header->accelerateInfoAddr);
+  if (file_offset < 0) {
+    return NULL;
   }
 
-  return 0;
+  /* Bounds check for accelerator info */
+  if ((uint64_t)file_offset + sizeof(struct dyld_cache_accelerator_info) >
+      cache_size) {
+    return NULL;
+  }
+
+  const struct dyld_cache_accelerator_info *accel_info =
+      (const struct dyld_cache_accelerator_info *)(cache + file_offset);
+
+  /* Validate version (currently 1) */
+  if (accel_info->version != 1) {
+    return NULL;
+  }
+
+  /* Validate rangeTable bounds */
+  if (accel_info->rangeTableCount == 0) {
+    return NULL;
+  }
+
+  uint64_t range_table_end =
+      (uint64_t)file_offset + accel_info->rangeTableOffset +
+      (uint64_t)accel_info->rangeTableCount * sizeof(struct dyld_cache_range_entry);
+  if (range_table_end > cache_size) {
+    return NULL;
+  }
+
+  return accel_info;
+}
+
+/**
+ * Binary search for address in sorted rangeTable.
+ *
+ * @param rangeTable Pointer to sorted range entry array
+ * @param count      Number of entries in rangeTable
+ * @param addr       Target address to find (unslid)
+ * @return           Pointer to matching entry, or NULL if not found
+ *
+ * Time Complexity: O(log n) where n = rangeTableCount
+ */
+static const struct dyld_cache_range_entry *
+binary_search_range_table(const struct dyld_cache_range_entry *rangeTable,
+                          uint32_t count, uint64_t addr) {
+  uint32_t low = 0;
+  uint32_t high = count;
+
+  while (low < high) {
+    uint32_t mid = low + (high - low) / 2;
+    const struct dyld_cache_range_entry *entry = &rangeTable[mid];
+
+    if (addr < entry->startAddress) {
+      high = mid;
+    } else if (addr >= entry->startAddress + entry->size) {
+      low = mid + 1;
+    } else {
+      /* addr is within [startAddress, startAddress + size) */
+      return entry;
+    }
+  }
+  return NULL;
 }
 
 static void print_usage(const char *prog_name) {
@@ -275,6 +339,25 @@ int main(int argc, const char *argv[]) {
     }
   }
 
+  /* Get accelerator info - required for iOS 9+ / macOS 10.11+ */
+  const struct dyld_cache_accelerator_info *accel_info =
+      get_accelerator_info(cache, cache_size, header, mappings,
+                           header->mappingCount);
+  if (accel_info == NULL) {
+    fprintf(stderr,
+            "Error: This cache lacks accelerator info. "
+            "Only iOS 9+ / macOS 10.11+ caches are supported.\n");
+    munmap((void *)cache, cache_size);
+    return 1;
+  }
+
+  /* Get the rangeTable pointer */
+  int64_t accel_file_offset = addr_to_file_offset(
+      mappings, header->mappingCount, header->accelerateInfoAddr);
+  const struct dyld_cache_range_entry *rangeTable =
+      (const struct dyld_cache_range_entry *)(cache + accel_file_offset +
+                                               accel_info->rangeTableOffset);
+
   if (verbose) {
     printf("Cache magic: %.16s\n", header->magic);
     printf("Image count: %u\n", header->imagesCount);
@@ -289,49 +372,60 @@ int main(int argc, const char *argv[]) {
              (unsigned long long)mappings[i].fileOffset);
     }
     printf("\n");
+
+    /* Print accelerator info */
+    printf("Accelerator info:\n");
+    printf("  version: %u\n", accel_info->version);
+    printf("  rangeTableCount: %u\n", accel_info->rangeTableCount);
+    printf("  imageExtrasCount: %u\n", accel_info->imageExtrasCount);
+    printf("\n");
   }
 
-  /* Search through all images */
-  int found = 0;
-  for (uint32_t i = 0; i < header->imagesCount; i++) {
-    /* Validate pathFileOffset bounds (Problem 3) */
-    if (images[i].pathFileOffset >= cache_size) {
-      continue;
+  /* Binary search for the address in rangeTable - O(log n) */
+  const struct dyld_cache_range_entry *found_entry =
+      binary_search_range_table(rangeTable, accel_info->rangeTableCount,
+                                target_addr);
+
+  if (found_entry != NULL) {
+    uint32_t image_index = found_entry->imageIndex;
+
+    /* Validate image index */
+    if (image_index >= header->imagesCount) {
+      fprintf(stderr,
+              "Error: Invalid image index %u (max: %u)\n",
+              image_index, header->imagesCount - 1);
+      munmap((void *)cache, cache_size);
+      return 1;
     }
 
-    const char *dylib_path = (const char *)(cache + images[i].pathFileOffset);
+    /* Get the dylib path */
+    const struct dyld_cache_image_info *image = &images[image_index];
+    if (image->pathFileOffset >= cache_size) {
+      fprintf(stderr, "Error: Invalid path offset for image %u\n", image_index);
+      munmap((void *)cache, cache_size);
+      return 1;
+    }
 
-    /* Ensure path string is null-terminated within bounds (Problem 4) */
-    size_t max_path_len = cache_size - images[i].pathFileOffset;
+    const char *dylib_path = (const char *)(cache + image->pathFileOffset);
+
+    /* Ensure path string is null-terminated within bounds */
+    size_t max_path_len = cache_size - image->pathFileOffset;
     size_t path_len = strnlen(dylib_path, max_path_len);
     if (path_len == max_path_len) {
-      /* Path string is not null-terminated within file bounds, skip */
-      continue;
+      fprintf(stderr, "Error: Path string not null-terminated for image %u\n",
+              image_index);
+      munmap((void *)cache, cache_size);
+      return 1;
     }
 
-    uint64_t image_addr = images[i].address;
-
-    /* Convert image address to file offset */
-    int64_t file_offset =
-        addr_to_file_offset(mappings, header->mappingCount, image_addr);
-    if (file_offset < 0) {
-      continue;
-    }
-
-    /* Check if target address is in this image's segments */
-    if (check_macho_segments(cache, cache_size, (uint64_t)file_offset,
-                             target_addr)) {
-      printf("%s\n", dylib_path);
-      found = 1;
-      /* Don't break - an address might appear in multiple segments/aliases */
-    }
+    printf("%s\n", dylib_path);
+    munmap((void *)cache, cache_size);
+    return 0;
   }
 
-  if (!found) {
-    fprintf(stderr, "Address 0x%llx not found in any dylib\n",
-            (unsigned long long)target_addr);
-  }
-
+  /* Address not found - this is expected for __LINKEDIT addresses */
+  fprintf(stderr, "Address 0x%llx not found in any dylib\n",
+          (unsigned long long)target_addr);
   munmap((void *)cache, cache_size);
-  return found ? 0 : 1;
+  return 1;
 }
