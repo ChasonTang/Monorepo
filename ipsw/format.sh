@@ -5,10 +5,10 @@
 
 if [ $# -eq 0 ]; then
     # Find all .c and .h files and format them
-    find . -type f \( -name "*.c" -o -name "*.h" \) -exec xcrun clang-format -style=LLVM -i {} +
+    find . -type f \( -name "*.c" -o -name "*.h" \) -exec xcrun clang-format -style=file -i {} +
     echo "Formatted all .c and .h files."
 else
     # Format specific files provided as arguments
-    xcrun clang-format -style=LLVM -i "$@"
+    xcrun clang-format -style=file -i "$@"
     echo "Formatted: $@"
 fi
