@@ -1,8 +1,8 @@
 # [Document Title]
 
-**Document Version:** 1.0  
-**Author:** [Author Name]  
-**Last Updated:** YYYY-MM-DD  
+**Document Version:** 1.0
+**Author:** [Author Name]
+**Last Updated:** [YYYY-MM-DD]
 **Status:** Draft | Proposed | Approved | Implemented | Deprecated
 
 ---
@@ -204,7 +204,7 @@ Description of output format
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | Author | Initial version |
+| 1.0 | [YYYY-MM-DD] | [Author Name] | Initial version |
 
 ---
 
