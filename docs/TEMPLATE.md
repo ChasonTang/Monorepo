@@ -1,8 +1,8 @@
 # [Document Title]
 
-**Document Version:** 1.0
-**Author:** [Author Name]
-**Last Updated:** [YYYY-MM-DD]
+**Document Version:** 1.0  
+**Author:** [Author Name]  
+**Last Updated:** [YYYY-MM-DD]  
 **Status:** Draft | Proposed | Approved | Implemented | Deprecated
 
 ---

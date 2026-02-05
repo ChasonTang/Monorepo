@@ -1,15 +1,15 @@
-# Odin Proxy Technical Design
+# Odin Technical Design
 
-**Document Version:** 2.0
-**Author:** Chason Tang
-**Last Updated:** 2025-02-05
+**Document Version:** 2.0  
+**Author:** Chason Tang  
+**Last Updated:** 2025-02-05  
 **Status:** Draft
 
 ---
 
 ## 1. Executive Summary
 
-Odin Proxy is a minimal Node.js proxy server that enables Claude Code CLI to communicate with Google Antigravity Cloud Code API. It exposes an Anthropic-compatible Messages API (`/v1/messages`) and translates requests/responses between Anthropic and Google Generative AI formats.
+Odin is a minimal Node.js proxy server that enables Claude Code CLI to communicate with Google Antigravity Cloud Code API. It exposes an Anthropic-compatible Messages API (`/v1/messages`) and translates requests/responses between Anthropic and Google Generative AI formats.
 
 ### 1.1 Design Principles
 
@@ -47,7 +47,7 @@ Claude Code CLI requires an Anthropic-compatible API endpoint at `ANTHROPIC_BASE
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                           Odin Proxy                                   │
+│                              Odin                                      │
 ├────────────────────────────────────────────────────────────────────────┤
 │                                                                        │
 │  ┌───────────────┐    ┌──────────────────┐    ┌──────────────────┐     │
@@ -71,7 +71,7 @@ Claude Code CLI requires an Anthropic-compatible API endpoint at `ANTHROPIC_BASE
 ### 2.2 Data Flow
 
 ```
-Claude Code CLI                    Odin Proxy                    Cloud Code API
+Claude Code CLI                      Odin                       Cloud Code API
       │                                │                               │
       │  POST /v1/messages             │                               │
       │  (Anthropic JSON)              │                               │
@@ -781,7 +781,7 @@ data: {"type":"message_stop"}
 ### 5.1 Manual Testing
 
 ```bash
-# 1. Start Odin Proxy
+# 1. Start Odin
 node src/index.js --api-key="$(cat ~/.odin-key)" --port=8080
 
 # 2. Configure Claude Code

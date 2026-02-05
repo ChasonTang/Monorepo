@@ -1,8 +1,8 @@
 # IPSW Address Lookup Tool
 
-**Document Version:** 1.1
-**Author:** Chason Tang
-**Last Updated:** 2026-02-03
+**Document Version:** 1.1  
+**Author:** Chason Tang  
+**Last Updated:** 2026-02-03  
 **Status:** Implemented
 
 ---

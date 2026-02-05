@@ -1,8 +1,8 @@
 # RangeTable Optimization for IPSW Address Lookup
 
-**Document Version:** 1.2
-**Author:** Chason Tang
-**Last Updated:** 2026-02-04
+**Document Version:** 1.2  
+**Author:** Chason Tang  
+**Last Updated:** 2026-02-04  
 **Status:** Implemented
 
 ---
