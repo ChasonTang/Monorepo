@@ -1,6 +1,6 @@
 # Odin Technical Design
 
-**Document Version:** 2.6  
+**Document Version:** 2.7  
 **Author:** Chason Tang  
 **Last Updated:** 2025-02-09  
 **Status:** Implemented
@@ -759,6 +759,7 @@ Examples:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/messages` | POST | Main Anthropic Messages API endpoint (streaming only) |
+| `/v1/messages/count_tokens` | POST | Returns 501 Not Implemented (recognized but unsupported) |
 | `/health` | GET | Health check (returns `{"status":"ok"}`) |
 | `/` | POST | Silent handler for Claude Code heartbeat |
 | `/api/event_logging/batch` | POST | Silent handler for Claude Code telemetry |
@@ -806,6 +807,7 @@ data: {"type":"message_stop"}
 | Condition | HTTP Status | Response |
 |-----------|-------------|----------|
 | Missing API key on startup | N/A | Exit with error message |
+| Count tokens endpoint | 501 | `{"type":"error","error":{"type":"not_implemented_error","message":"The /v1/messages/count_tokens endpoint is not implemented."}}` |
 | Unknown endpoint | 404 | `{"type":"error","error":{"type":"not_found_error","message":"Unknown endpoint: {method} {path}"}}` |
 | Non-streaming request (`stream: false`) | 400 | `{"type":"error","error":{"type":"invalid_request_error","message":"Only streaming mode is supported"}}` |
 | API authentication failed | 401 | `{"type":"error","error":{"type":"authentication_error","message":"..."}}` |
@@ -974,6 +976,7 @@ The returned JSON contains an `apiKey` field.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.7 | 2026-02-09 | Chason Tang | Add `POST /v1/messages/count_tokens` endpoint returning 501 Not Implemented; update exposed endpoints table and error handling table |
 | 2.6 | 2025-02-09 | Chason Tang | Phase 4 implemented: `/v1/messages` route handler in `server.js` with full streaming pipeline (anthropicToGoogle → sendRequest → streamSSEResponse); non-streaming request rejection (400); upstream error mapping (401/429/400/500); graceful error handling for mid-stream failures; mark Phase 4 tasks complete |
 | 2.5 | 2025-02-09 | Chason Tang | Phase 3 implemented: `cloudcode.js` with `sendRequest()` and Cloud Code request wrapper; `streamSSEResponse()` async generator and `formatSSE()` in `converter.js` with debug SSE logging; mark Phase 3 tasks complete |
 | 2.4 | 2025-02-09 | Chason Tang | Phase 2 implemented: `converter.js` with `anthropicToGoogle()`, `convertContentToParts()`, `googleToAnthropic()`, `randomHex()`, `extractTextContent()`; mark Phase 2 tasks complete |

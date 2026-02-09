@@ -134,6 +134,15 @@ export function createServer({ apiKey, debug, logger }) {
             return;
         }
 
+        if (method === 'POST' && path === '/v1/messages/count_tokens') {
+            // Token counting endpoint — recognized but not implemented
+            sendError(res, 501, 'not_implemented_error',
+                'The /v1/messages/count_tokens endpoint is not implemented.');
+            logResponse(req, 501, startTime);
+            logger?.log({ req, body, statusCode: 501, startTime });
+            return;
+        }
+
         if (method === 'POST' && path === '/v1/messages') {
             // ── Main Anthropic Messages API endpoint ─────────────────────
 
