@@ -1,0 +1,171 @@
+import http from 'node:http';
+
+// ─── Request Logging ────────────────────────────────────────────────────────
+
+/**
+ * Log an incoming request summary to stderr. In debug mode, also log full
+ * headers and body.
+ *
+ * @param {http.IncomingMessage} req
+ * @param {Object|null} body - Parsed request body (if available)
+ * @param {boolean} debug
+ * @returns {number} Start timestamp for duration calculation
+ */
+function logRequest(req, body, debug) {
+    const start = Date.now();
+    // Summary line is deferred until response is sent (see logResponse)
+    if (debug) {
+        console.error(`[Odin:debug] Headers:`, JSON.stringify(req.headers, null, 2));
+        if (body) {
+            console.error(`[Odin:debug] Body:`, JSON.stringify(body, null, 2));
+        }
+    }
+    return start;
+}
+
+/**
+ * Log the response summary line to stderr.
+ *
+ * @param {http.IncomingMessage} req
+ * @param {number} statusCode
+ * @param {number} startTime
+ * @param {string} [suffix] - Optional suffix (e.g., "← UNKNOWN ENDPOINT")
+ */
+function logResponse(req, statusCode, startTime, suffix) {
+    const duration = Date.now() - startTime;
+    const line = `[Odin] ${new Date().toISOString()} ${req.method} ${req.url} ${statusCode} ${duration}ms`;
+    console.error(suffix ? `${line}  ${suffix}` : line);
+}
+
+// ─── Body Parsing ───────────────────────────────────────────────────────────
+
+/**
+ * Read and parse JSON request body.
+ *
+ * @param {http.IncomingMessage} req
+ * @returns {Promise<Object|null>} Parsed JSON or null if empty/invalid
+ */
+function readBody(req) {
+    return new Promise((resolve) => {
+        const chunks = [];
+        req.on('data', (chunk) => chunks.push(chunk));
+        req.on('end', () => {
+            const raw = Buffer.concat(chunks).toString();
+            if (!raw) {
+                resolve(null);
+                return;
+            }
+            try {
+                resolve(JSON.parse(raw));
+            } catch {
+                resolve(null);
+            }
+        });
+        req.on('error', () => resolve(null));
+    });
+}
+
+// ─── Response Helpers ───────────────────────────────────────────────────────
+
+/**
+ * Send a JSON response.
+ *
+ * @param {http.ServerResponse} res
+ * @param {number} statusCode
+ * @param {Object} body
+ */
+function sendJSON(res, statusCode, body) {
+    const payload = JSON.stringify(body);
+    res.writeHead(statusCode, {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+    });
+    res.end(payload);
+}
+
+/**
+ * Send an Anthropic-format error response.
+ *
+ * @param {http.ServerResponse} res
+ * @param {number} statusCode
+ * @param {string} errorType
+ * @param {string} message
+ */
+function sendError(res, statusCode, errorType, message) {
+    sendJSON(res, statusCode, {
+        type: 'error',
+        error: {
+            type: errorType,
+            message
+        }
+    });
+}
+
+// ─── Server Factory ─────────────────────────────────────────────────────────
+
+/**
+ * Create and return the Odin HTTP server.
+ *
+ * @param {Object} options
+ * @param {string} options.apiKey - Cloud Code API key
+ * @param {boolean} options.debug - Enable debug logging
+ * @returns {http.Server}
+ */
+export function createServer({ apiKey, debug }) {
+    const server = http.createServer(async (req, res) => {
+        const body = await readBody(req);
+        const startTime = logRequest(req, body, debug);
+
+        const { method, url } = req;
+        // Strip query string for route matching
+        const path = url.split('?')[0];
+
+        // ── Strict Routing ──────────────────────────────────────────────
+
+        if (method === 'GET' && path === '/health') {
+            // Health check
+            sendJSON(res, 200, { status: 'ok' });
+            logResponse(req, 200, startTime);
+            return;
+        }
+
+        if (method === 'POST' && path === '/v1/messages') {
+            // Main Anthropic Messages API endpoint (Phase 4 integration)
+            // For Phase 1, return a placeholder indicating the endpoint is recognized
+            // but not yet implemented
+            sendError(res, 501, 'api_error', 'Messages endpoint not yet implemented');
+            logResponse(req, 501, startTime);
+            return;
+        }
+
+        if (method === 'POST' && path === '/') {
+            // Silent handler for Claude Code heartbeat
+            sendJSON(res, 200, {});
+            logResponse(req, 200, startTime);
+            return;
+        }
+
+        if (method === 'POST' && path === '/api/event_logging/batch') {
+            // Silent handler for Claude Code telemetry
+            sendJSON(res, 200, {});
+            logResponse(req, 200, startTime);
+            return;
+        }
+
+        // ── Unknown Endpoint (404) ──────────────────────────────────────
+
+        // Log full request for debugging unknown endpoints
+        if (debug) {
+            console.error(`[Odin:debug] Unknown endpoint hit: ${method} ${path}`);
+            console.error(`[Odin:debug] Headers:`, JSON.stringify(req.headers, null, 2));
+            if (body) {
+                console.error(`[Odin:debug] Body:`, JSON.stringify(body, null, 2));
+            }
+        }
+
+        sendError(res, 404, 'not_found_error', `Unknown endpoint: ${method} ${path}`);
+        logResponse(req, 404, startTime, '← UNKNOWN ENDPOINT');
+    });
+
+    return server;
+}

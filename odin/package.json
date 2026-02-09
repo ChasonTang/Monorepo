@@ -1,0 +1,13 @@
+{
+  "name": "odin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal proxy server bridging Claude Code CLI to Google Antigravity Cloud Code API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "author": "Chason Tang",
+  "license": "MIT"
+}

@@ -106,7 +106,7 @@ odin/
 │   ├── converter.js            # Bidirectional format conversion
 │   ├── cloudcode.js            # Cloud Code API client
 │   └── constants.js            # API endpoints, headers
-├── package.json                # No runtime dependencies
+├── package.json                # private: true, no runtime dependencies
 └── README.md
 ```
 
@@ -820,17 +820,17 @@ data: {"type":"message_stop"}
 ### Phase 1: Core Infrastructure (2 hours)
 
 **Task 1.1: Project Setup**
-- [ ] Create `package.json` with `"type": "module"` (no runtime dependencies)
-- [ ] Implement CLI argument parsing in `index.js` (`--api-key`, `--port`, `--debug`)
-- [ ] Implement native HTTP server in `server.js`
-- [ ] Implement request logging (summary line always, full details in `--debug` mode)
-- [ ] Implement strict routing: known endpoints handled, all others → 404 with full request logged
+- [x] Create `package.json` with `"type": "module"` (no runtime dependencies)
+- [x] Implement CLI argument parsing in `index.js` (`--api-key`, `--port`, `--debug`)
+- [x] Implement native HTTP server in `server.js`
+- [x] Implement request logging (summary line always, full details in `--debug` mode)
+- [x] Implement strict routing: known endpoints handled, all others → 404 with full request logged
 
 **Task 1.2: Constants**
-- [ ] Define Cloud Code endpoint
-- [ ] Define required headers
-- [ ] Define Antigravity system instruction constant
-- [ ] Implement `isThinkingModel()` utility
+- [x] Define Cloud Code endpoint
+- [x] Define required headers
+- [x] Define Antigravity system instruction constant
+- [x] Implement `isThinkingModel()` utility
 
 **Acceptance Criteria:**
 - Server starts and listens on configured port
@@ -974,6 +974,7 @@ The returned JSON contains an `apiKey` field.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.3 | 2025-02-09 | Chason Tang | Phase 1 implemented: `package.json` (`private: true`), `constants.js`, `index.js`, `server.js`; mark Phase 1 tasks complete |
 | 2.2 | 2025-02-09 | Chason Tang | Review fixes: empty parts placeholder (push `'.'` when all thinking blocks filtered), add `cache_read_input_tokens` to `message_delta` usage |
 | 2.1 | 2025-02-06 | Chason Tang | Review fixes: add Antigravity system instruction injection (role: "user"), thinking budget validation, streaming-only mode, fix API endpoint to sandbox, add Future Improvements section, strict routing with 404 for unknown endpoints, request logging design |
 | 2.0 | 2025-02-05 | Chason Tang | Redesign from first principles: native Node.js, simplified structure, removed unnecessary workarounds |
