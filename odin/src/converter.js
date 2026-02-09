@@ -196,6 +196,249 @@ export function anthropicToGoogle(anthropicRequest) {
     return googleRequest;
 }
 
+// ─── SSE Helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Format an SSE event string.
+ *
+ * @param {string} event - Event type (e.g. "message_start")
+ * @param {Object} data - Event data object
+ * @returns {string} Formatted SSE event string
+ */
+function formatSSE(event, data) {
+    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+// ─── SSE Stream Conversion (Google → Anthropic) ─────────────────────────────
+
+/**
+ * Stream and convert Google SSE events to Anthropic format.
+ *
+ * Reads the response body stream from Cloud Code, parses each SSE data line,
+ * and yields Anthropic-format SSE event strings. Handles thinking blocks,
+ * text blocks, and tool use blocks with correct block indexing.
+ *
+ * @param {ReadableStream} stream - Response body stream from Cloud Code
+ * @param {string} model - Model name for the response
+ * @param {boolean} [debug=false] - Enable debug logging of SSE chunks
+ * @yields {string} Anthropic SSE event lines
+ */
+export async function* streamSSEResponse(stream, model, debug = false) {
+    const messageId = `msg_${randomHex(16)}`;
+    let blockIndex = 0;
+    let currentBlockType = null;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let stopReason = null;
+    let hasEmittedStart = false;
+
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+
+            const jsonText = line.slice(5).trim();
+            if (!jsonText) continue;
+
+            if (debug) {
+                console.error(`[Odin:debug] ← SSE:`, line.trimEnd());
+            }
+
+            try {
+                const data = JSON.parse(jsonText);
+                const innerResponse = data.response || data;
+
+                // Update usage
+                const usage = innerResponse.usageMetadata;
+                if (usage) {
+                    inputTokens = usage.promptTokenCount || inputTokens;
+                    outputTokens = usage.candidatesTokenCount || outputTokens;
+                    cacheReadTokens = usage.cachedContentTokenCount || cacheReadTokens;
+                }
+
+                const parts = innerResponse.candidates?.[0]?.content?.parts || [];
+
+                // Emit message_start on first content
+                if (!hasEmittedStart && parts.length > 0) {
+                    hasEmittedStart = true;
+                    const event = formatSSE('message_start', {
+                        type: 'message_start',
+                        message: {
+                            id: messageId,
+                            type: 'message',
+                            role: 'assistant',
+                            content: [],
+                            model,
+                            stop_reason: null,
+                            stop_sequence: null,
+                            usage: {
+                                input_tokens: inputTokens - cacheReadTokens,
+                                output_tokens: 0,
+                                cache_read_input_tokens: cacheReadTokens,
+                                cache_creation_input_tokens: 0
+                            }
+                        }
+                    });
+                    if (debug) {
+                        console.error(`[Odin:debug] → SSE:`, event.trimEnd());
+                    }
+                    yield event;
+                }
+
+                // Process parts
+                for (const part of parts) {
+                    if (part.thought === true) {
+                        // Thinking block
+                        if (currentBlockType !== 'thinking') {
+                            if (currentBlockType !== null) {
+                                const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+                                if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
+                                yield stopEvent;
+                                blockIndex++;
+                            }
+                            currentBlockType = 'thinking';
+                            const startEvent = formatSSE('content_block_start', {
+                                type: 'content_block_start',
+                                index: blockIndex,
+                                content_block: { type: 'thinking', thinking: '' }
+                            });
+                            if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
+                            yield startEvent;
+                        }
+                        const deltaEvent = formatSSE('content_block_delta', {
+                            type: 'content_block_delta',
+                            index: blockIndex,
+                            delta: { type: 'thinking_delta', thinking: part.text || '' }
+                        });
+                        if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
+                        yield deltaEvent;
+
+                        // Emit signature if present
+                        if (part.thoughtSignature?.length >= 50) {
+                            const sigEvent = formatSSE('content_block_delta', {
+                                type: 'content_block_delta',
+                                index: blockIndex,
+                                delta: { type: 'signature_delta', signature: part.thoughtSignature }
+                            });
+                            if (debug) console.error(`[Odin:debug] → SSE:`, sigEvent.trimEnd());
+                            yield sigEvent;
+                        }
+
+                    } else if (part.text !== undefined) {
+                        // Text block
+                        if (currentBlockType !== 'text') {
+                            if (currentBlockType !== null) {
+                                const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+                                if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
+                                yield stopEvent;
+                                blockIndex++;
+                            }
+                            currentBlockType = 'text';
+                            const startEvent = formatSSE('content_block_start', {
+                                type: 'content_block_start',
+                                index: blockIndex,
+                                content_block: { type: 'text', text: '' }
+                            });
+                            if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
+                            yield startEvent;
+                        }
+                        const deltaEvent = formatSSE('content_block_delta', {
+                            type: 'content_block_delta',
+                            index: blockIndex,
+                            delta: { type: 'text_delta', text: part.text }
+                        });
+                        if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
+                        yield deltaEvent;
+
+                    } else if (part.functionCall) {
+                        // Tool use block — each tool call gets its own block
+                        if (currentBlockType !== null) {
+                            const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+                            if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
+                            yield stopEvent;
+                            blockIndex++;
+                        }
+                        currentBlockType = 'tool_use';
+                        stopReason = 'tool_use';
+
+                        const toolId = part.functionCall.id || `toolu_${randomHex(12)}`;
+                        const startEvent = formatSSE('content_block_start', {
+                            type: 'content_block_start',
+                            index: blockIndex,
+                            content_block: {
+                                type: 'tool_use',
+                                id: toolId,
+                                name: part.functionCall.name,
+                                input: {}
+                            }
+                        });
+                        if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
+                        yield startEvent;
+
+                        const deltaEvent = formatSSE('content_block_delta', {
+                            type: 'content_block_delta',
+                            index: blockIndex,
+                            delta: {
+                                type: 'input_json_delta',
+                                partial_json: JSON.stringify(part.functionCall.args || {})
+                            }
+                        });
+                        if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
+                        yield deltaEvent;
+                    }
+                }
+
+                // Check finish reason
+                const finishReason = innerResponse.candidates?.[0]?.finishReason;
+                if (finishReason && !stopReason) {
+                    stopReason = finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn';
+                }
+
+            } catch (e) {
+                // Skip malformed JSON
+                if (debug) {
+                    console.error(`[Odin:debug] ← SSE parse error:`, e.message);
+                }
+            }
+        }
+    }
+
+    // Close final block
+    if (currentBlockType !== null) {
+        const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+        if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
+        yield stopEvent;
+    }
+
+    // Emit message_delta and message_stop
+    const msgDelta = formatSSE('message_delta', {
+        type: 'message_delta',
+        delta: { stop_reason: stopReason || 'end_turn', stop_sequence: null },
+        usage: {
+            output_tokens: outputTokens,
+            cache_read_input_tokens: cacheReadTokens,
+            cache_creation_input_tokens: 0
+        }
+    });
+    if (debug) console.error(`[Odin:debug] → SSE:`, msgDelta.trimEnd());
+    yield msgDelta;
+
+    const msgStop = formatSSE('message_stop', { type: 'message_stop' });
+    if (debug) console.error(`[Odin:debug] → SSE:`, msgStop.trimEnd());
+    yield msgStop;
+}
+
 // ─── Response Conversion (Google → Anthropic) ───────────────────────────────
 
 /**

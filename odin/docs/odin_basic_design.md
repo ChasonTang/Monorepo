@@ -1,6 +1,6 @@
 # Odin Technical Design
 
-**Document Version:** 2.4  
+**Document Version:** 2.5  
 **Author:** Chason Tang  
 **Last Updated:** 2025-02-09  
 **Status:** Draft
@@ -855,12 +855,12 @@ data: {"type":"message_stop"}
 ### Phase 3: Cloud Code Client (2 hours)
 
 **Task 3.1: API Client**
-- [ ] Implement `sendRequest()` with proper headers
-- [ ] Build Cloud Code request wrapper
+- [x] Implement `sendRequest()` with proper headers
+- [x] Build Cloud Code request wrapper
 
 **Task 3.2: SSE Stream Handler**
-- [ ] Implement `streamSSEResponse()` generator
-- [ ] Real-time conversion of SSE events
+- [x] Implement `streamSSEResponse()` generator
+- [x] Real-time conversion of SSE events
 
 **Acceptance Criteria:**
 - Can make authenticated requests to Cloud Code API
@@ -974,6 +974,7 @@ The returned JSON contains an `apiKey` field.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.5 | 2025-02-09 | Chason Tang | Phase 3 implemented: `cloudcode.js` with `sendRequest()` and Cloud Code request wrapper; `streamSSEResponse()` async generator and `formatSSE()` in `converter.js` with debug SSE logging; mark Phase 3 tasks complete |
 | 2.4 | 2025-02-09 | Chason Tang | Phase 2 implemented: `converter.js` with `anthropicToGoogle()`, `convertContentToParts()`, `googleToAnthropic()`, `randomHex()`, `extractTextContent()`; mark Phase 2 tasks complete |
 | 2.3 | 2025-02-09 | Chason Tang | Phase 1 implemented: `package.json` (`private: true`), `constants.js`, `index.js`, `server.js`; mark Phase 1 tasks complete |
 | 2.2 | 2025-02-09 | Chason Tang | Review fixes: empty parts placeholder (push `'.'` when all thinking blocks filtered), add `cache_read_input_tokens` to `message_delta` usage |
