@@ -1,6 +1,6 @@
 # Odin Technical Design
 
-**Document Version:** 2.2  
+**Document Version:** 2.4  
 **Author:** Chason Tang  
 **Last Updated:** 2025-02-09  
 **Status:** Draft
@@ -840,13 +840,13 @@ data: {"type":"message_stop"}
 ### Phase 2: Protocol Conversion (3 hours)
 
 **Task 2.1: Request Converter**
-- [ ] Implement `anthropicToGoogle()` function
-- [ ] Implement `convertContentToParts()` for all block types
-- [ ] Handle system instructions, generation config, tools
+- [x] Implement `anthropicToGoogle()` function
+- [x] Implement `convertContentToParts()` for all block types
+- [x] Handle system instructions, generation config, tools
 
 **Task 2.2: Response Converter**
-- [ ] Implement `googleToAnthropic()` function
-- [ ] Handle all part types (text, thinking, functionCall)
+- [x] Implement `googleToAnthropic()` function
+- [x] Handle all part types (text, thinking, functionCall)
 
 **Acceptance Criteria:**
 - Can convert all documented content block types
@@ -974,6 +974,7 @@ The returned JSON contains an `apiKey` field.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.4 | 2025-02-09 | Chason Tang | Phase 2 implemented: `converter.js` with `anthropicToGoogle()`, `convertContentToParts()`, `googleToAnthropic()`, `randomHex()`, `extractTextContent()`; mark Phase 2 tasks complete |
 | 2.3 | 2025-02-09 | Chason Tang | Phase 1 implemented: `package.json` (`private: true`), `constants.js`, `index.js`, `server.js`; mark Phase 1 tasks complete |
 | 2.2 | 2025-02-09 | Chason Tang | Review fixes: empty parts placeholder (push `'.'` when all thinking blocks filtered), add `cache_read_input_tokens` to `message_delta` usage |
 | 2.1 | 2025-02-06 | Chason Tang | Review fixes: add Antigravity system instruction injection (role: "user"), thinking budget validation, streaming-only mode, fix API endpoint to sandbox, add Future Improvements section, strict routing with 404 for unknown endpoints, request logging design |
