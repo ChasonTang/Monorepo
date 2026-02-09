@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createServer } from './server.js';
+import { RequestLogger } from './logger.js';
 
 // ─── CLI Argument Parsing ───────────────────────────────────────────────────
 
@@ -28,16 +29,18 @@ function parseArgs(argv) {
 }
 
 function printUsage() {
-    console.error(`Usage: node src/index.js --api-key=<key> [--port=<port>] [--debug]
+    console.error(`Usage: node src/index.js --api-key=<key> [--port=<port>] [--debug] [--log-file=<path>]
 
 Options:
-  --api-key=<key>     API key for Antigravity Cloud Code (required)
-  --port=<port>       Port to listen on (default: 8080)
-  --debug             Enable debug logging
+  --api-key=<key>       API key for Antigravity Cloud Code (required)
+  --port=<port>         Port to listen on (default: 8080)
+  --debug               Enable debug logging
+  --log-file=<path>     Write request logs to file in NDJSON format (optional)
 
 Examples:
   node src/index.js --api-key="ya29.a0AeO..."
-  node src/index.js --api-key="ya29..." --port=3000 --debug`);
+  node src/index.js --api-key="ya29..." --port=3000 --debug
+  node src/index.js --api-key="ya29..." --log-file=logs/requests.ndjson`);
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -54,26 +57,35 @@ if (!args['api-key']) {
 const apiKey = args['api-key'];
 const port = parseInt(args['port'], 10) || 8080;
 const debug = args['debug'] === true;
+const logFile = args['log-file'] || null;
+
+// Create logger only when --log-file is specified
+const logger = logFile ? new RequestLogger(logFile) : null;
 
 // Create and start server
-const server = createServer({ apiKey, debug });
+const server = createServer({ apiKey, debug, logger });
 
 server.listen(port, () => {
     console.error(`[Odin] Server listening on http://localhost:${port}`);
     console.error(`[Odin] Debug mode: ${debug ? 'ON' : 'OFF'}`);
+    if (logger) {
+        console.error(`[Odin] Request log file: ${logFile}`);
+    }
     console.error(`[Odin] Press Ctrl+C to stop`);
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
     console.error('\n[Odin] Shutting down...');
+    await logger?.close();
     server.close(() => {
         process.exit(0);
     });
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
     console.error('[Odin] Received SIGTERM, shutting down...');
+    await logger?.close();
     server.close(() => {
         process.exit(0);
     });

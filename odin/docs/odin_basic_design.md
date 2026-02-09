@@ -1,9 +1,9 @@
 # Odin Technical Design
 
-**Document Version:** 2.5  
+**Document Version:** 2.6  
 **Author:** Chason Tang  
 **Last Updated:** 2025-02-09  
-**Status:** Draft
+**Status:** Implemented
 
 ---
 
@@ -869,9 +869,9 @@ data: {"type":"message_stop"}
 ### Phase 4: Integration (1 hour)
 
 **Task 4.1: Wire Everything Together**
-- [ ] Implement `/v1/messages` route handler (streaming only)
-- [ ] Reject non-streaming requests with `400 invalid_request_error`
-- [ ] Error handling and response formatting
+- [x] Implement `/v1/messages` route handler (streaming only)
+- [x] Reject non-streaming requests with `400 invalid_request_error`
+- [x] Error handling and response formatting
 
 **Acceptance Criteria:**
 - Claude Code CLI can connect and have a conversation
@@ -974,6 +974,7 @@ The returned JSON contains an `apiKey` field.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.6 | 2025-02-09 | Chason Tang | Phase 4 implemented: `/v1/messages` route handler in `server.js` with full streaming pipeline (anthropicToGoogle → sendRequest → streamSSEResponse); non-streaming request rejection (400); upstream error mapping (401/429/400/500); graceful error handling for mid-stream failures; mark Phase 4 tasks complete |
 | 2.5 | 2025-02-09 | Chason Tang | Phase 3 implemented: `cloudcode.js` with `sendRequest()` and Cloud Code request wrapper; `streamSSEResponse()` async generator and `formatSSE()` in `converter.js` with debug SSE logging; mark Phase 3 tasks complete |
 | 2.4 | 2025-02-09 | Chason Tang | Phase 2 implemented: `converter.js` with `anthropicToGoogle()`, `convertContentToParts()`, `googleToAnthropic()`, `randomHex()`, `extractTextContent()`; mark Phase 2 tasks complete |
 | 2.3 | 2025-02-09 | Chason Tang | Phase 1 implemented: `package.json` (`private: true`), `constants.js`, `index.js`, `server.js`; mark Phase 1 tasks complete |
