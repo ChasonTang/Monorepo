@@ -921,7 +921,7 @@ These items may or may not be necessary. They should be verified during integrat
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Tool schema sanitization | ⏳ To verify | Google API may have stricter schema validation. At minimum, remove `additionalProperties`. |
+| Tool schema sanitization | ✅ Done | Two-stage sanitization pipeline (`cleanSchemaForAntigravity` + `toGeminiSchema`) ported from `opencode-antigravity-auth`. See `odin_tool_schema_sanitization.md`. |
 | Empty parts placeholder | ✅ Done | Implemented in `anthropicToGoogle()`: pushes `{ text: '.' }` when parts array is empty after filtering |
 
 ## 6.1 Future Improvements
@@ -931,7 +931,7 @@ These items may or may not be necessary. They should be verified during integrat
 | `functionResponse.name` lookup | High | Current implementation uses `tool_use_id` as `name` field (works for Claude but semantically incorrect). Implement a lookup from `tool_use_id` to actual function name by scanning preceding `tool_use` blocks in the same conversation. |
 | Session ID for caching | Medium | Add `sessionId` to `request` payload (SHA256 of first user message). Improves prompt cache hit rate across multi-turn conversations. Reference: `session-manager.js` in antigravity-claude-proxy. |
 | Dynamic project ID | Medium | Fetch `projectId` dynamically via `loadCodeAssist` API instead of hardcoding. |
-| Schema sanitization pipeline | Low | Add multi-phase schema cleaning if tool schema errors are encountered (remove `$ref`, `allOf`, `anyOf`, `additionalProperties`, etc.). |
+| Schema sanitization pipeline | ✅ Done | Implemented two-stage pipeline: Stage 1 (`cleanSchemaForAntigravity`) handles `$ref`, `const`, `allOf`, `anyOf`, `additionalProperties`, type arrays, etc. Stage 2 (`toGeminiSchema`) uppercases types and strips Gemini-unsupported fields. See `odin_tool_schema_sanitization.md`. |
 
 ---
 
