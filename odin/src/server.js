@@ -3,43 +3,6 @@ import http from 'node:http';
 import { anthropicToGoogle, streamSSEResponse } from './converter.js';
 import { sendRequest } from './cloudcode.js';
 
-// ─── Request Logging ────────────────────────────────────────────────────────
-
-/**
- * Log an incoming request summary to stderr. In debug mode, also log full
- * headers and body.
- *
- * @param {http.IncomingMessage} req
- * @param {Object|null} body - Parsed request body (if available)
- * @param {boolean} debug
- * @returns {number} Start timestamp for duration calculation
- */
-function logRequest(req, body, debug) {
-    const start = Date.now();
-    // Summary line is deferred until response is sent (see logResponse)
-    if (debug) {
-        console.error(`[Odin:debug] Headers:`, JSON.stringify(req.headers, null, 2));
-        if (body) {
-            console.error(`[Odin:debug] Body:`, JSON.stringify(body, null, 2));
-        }
-    }
-    return start;
-}
-
-/**
- * Log the response summary line to stderr.
- *
- * @param {http.IncomingMessage} req
- * @param {number} statusCode
- * @param {number} startTime
- * @param {string} [suffix] - Optional suffix (e.g., "← UNKNOWN ENDPOINT")
- */
-function logResponse(req, statusCode, startTime, suffix) {
-    const duration = Date.now() - startTime;
-    const line = `[Odin] ${new Date().toISOString()} ${req.method} ${req.url} ${statusCode} ${duration}ms`;
-    console.error(suffix ? `${line}  ${suffix}` : line);
-}
-
 // ─── Body Parsing ───────────────────────────────────────────────────────────
 
 /**
@@ -112,13 +75,13 @@ function sendError(res, statusCode, errorType, message) {
  * @param {Object} options
  * @param {string} options.apiKey - Cloud Code API key
  * @param {boolean} options.debug - Enable debug logging
- * @param {import('./logger.js').RequestLogger|null} options.logger - Request log writer (optional)
+ * @param {import('./logger.js').RequestLogger} options.logger - Request log writer (required)
  * @returns {http.Server}
  */
 export function createServer({ apiKey, debug, logger }) {
     const server = http.createServer(async (req, res) => {
         const body = await readBody(req);
-        const startTime = logRequest(req, body, debug);
+        const startTime = Date.now();
 
         const { method, url } = req;
         // Strip query string for route matching
@@ -129,8 +92,7 @@ export function createServer({ apiKey, debug, logger }) {
         if (method === 'GET' && path === '/health') {
             // Health check
             sendJSON(res, 200, { status: 'ok' });
-            logResponse(req, 200, startTime);
-            logger?.log({ req, body, statusCode: 200, startTime });
+            logger.log({ req, body, statusCode: 200, startTime });
             return;
         }
 
@@ -138,8 +100,7 @@ export function createServer({ apiKey, debug, logger }) {
             // Token counting endpoint — recognized but not implemented
             sendError(res, 501, 'not_implemented_error',
                 'The /v1/messages/count_tokens endpoint is not implemented.');
-            logResponse(req, 501, startTime);
-            logger?.log({ req, body, statusCode: 501, startTime });
+            logger.log({ req, body, statusCode: 501, startTime });
             return;
         }
 
@@ -149,16 +110,14 @@ export function createServer({ apiKey, debug, logger }) {
             // Validate request body
             if (!body) {
                 sendError(res, 400, 'invalid_request_error', 'Request body is required');
-                logResponse(req, 400, startTime);
-                logger?.log({ req, body, statusCode: 400, startTime });
+                logger.log({ req, body, statusCode: 400, startTime });
                 return;
             }
 
             // Only streaming mode is supported (§3.4)
             if (!body.stream) {
                 sendError(res, 400, 'invalid_request_error', 'Only streaming mode is supported. Set "stream": true in your request.');
-                logResponse(req, 400, startTime);
-                logger?.log({ req, body, statusCode: 400, startTime });
+                logger.log({ req, body, statusCode: 400, startTime });
                 return;
             }
 
@@ -166,6 +125,9 @@ export function createServer({ apiKey, debug, logger }) {
                 // 1. Convert Anthropic request to Google format
                 const model = body.model || 'claude-sonnet-4-5-thinking';
                 const googleRequest = anthropicToGoogle(body);
+
+                // Capture debug info for log file (stderr debug output is unchanged)
+                const debugInfo = debug ? { googleRequest } : undefined;
 
                 if (debug) {
                     console.error(`[Odin:debug] Converted Google request:`, JSON.stringify(googleRequest, null, 2));
@@ -205,8 +167,18 @@ export function createServer({ apiKey, debug, logger }) {
                     }
 
                     sendError(res, statusCode, errorType, errorMessage);
-                    logResponse(req, statusCode, startTime);
-                    logger?.log({ req, body, statusCode, startTime });
+
+                    // Log with Cloud Code error details
+                    logger.log({
+                        req, body, statusCode, startTime,
+                        error: {
+                            source: 'cloud_code',
+                            upstreamStatus: cloudResponse.status,
+                            message: errorMessage,
+                            rawBody: errorBody
+                        },
+                        debug: debugInfo
+                    });
                     return;
                 }
 
@@ -217,13 +189,26 @@ export function createServer({ apiKey, debug, logger }) {
                     'Connection': 'keep-alive'
                 });
 
+                const events = debug ? [] : undefined;
                 for await (const sseEvent of streamSSEResponse(cloudResponse.body, model, debug)) {
                     res.write(sseEvent);
+                    if (events) {
+                        // Parse "event: xxx\ndata: {...}\n\n" into structured form
+                        const lines = sseEvent.trim().split('\n');
+                        const eventName = lines[0]?.slice(7);  // strip "event: "
+                        const eventData = lines[1]
+                            ? JSON.parse(lines[1].slice(6))    // strip "data: "
+                            : null;
+                        events.push({ event: eventName, data: eventData });
+                    }
                 }
 
                 res.end();
-                logResponse(req, 200, startTime);
-                logger?.log({ req, body, statusCode: 200, startTime });
+                logger.log({
+                    req, body, statusCode: 200, startTime,
+                    response: events ? { events } : undefined,
+                    debug: debugInfo
+                });
 
             } catch (err) {
                 // Network errors or unexpected failures
@@ -235,13 +220,25 @@ export function createServer({ apiKey, debug, logger }) {
                 // If headers haven't been sent yet, send a proper error response
                 if (!res.headersSent) {
                     sendError(res, 500, 'api_error', `Internal proxy error: ${err.message}`);
-                    logResponse(req, 500, startTime);
-                    logger?.log({ req, body, statusCode: 500, startTime });
+                    logger.log({
+                        req, body, statusCode: 500, startTime,
+                        error: {
+                            source: 'internal',
+                            message: err.message,
+                            stack: err.stack
+                        }
+                    });
                 } else {
                     // Headers already sent (streaming in progress), just end the response
                     res.end();
-                    logResponse(req, 200, startTime);
-                    logger?.log({ req, body, statusCode: 200, startTime });
+                    logger.log({
+                        req, body, statusCode: 200, startTime,
+                        error: {
+                            source: 'internal',
+                            message: err.message,
+                            stack: err.stack
+                        }
+                    });
                 }
             }
             return;
@@ -250,16 +247,14 @@ export function createServer({ apiKey, debug, logger }) {
         if (method === 'POST' && path === '/') {
             // Silent handler for Claude Code heartbeat
             sendJSON(res, 200, {});
-            logResponse(req, 200, startTime);
-            logger?.log({ req, body, statusCode: 200, startTime });
+            logger.log({ req, body, statusCode: 200, startTime });
             return;
         }
 
         if (method === 'POST' && path === '/api/event_logging/batch') {
             // Silent handler for Claude Code telemetry
             sendJSON(res, 200, {});
-            logResponse(req, 200, startTime);
-            logger?.log({ req, body, statusCode: 200, startTime });
+            logger.log({ req, body, statusCode: 200, startTime });
             return;
         }
 
@@ -275,8 +270,7 @@ export function createServer({ apiKey, debug, logger }) {
         }
 
         sendError(res, 404, 'not_found_error', `Unknown endpoint: ${method} ${path}`);
-        logResponse(req, 404, startTime, '← UNKNOWN ENDPOINT');
-        logger?.log({ req, body, statusCode: 404, startTime });
+        logger.log({ req, body, statusCode: 404, startTime });
     });
 
     return server;

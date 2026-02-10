@@ -130,7 +130,7 @@ export function anthropicToGoogle(anthropicRequest) {
 
     // Convert system instruction with Antigravity identity injection
     // Both reference implementations require this for CLIProxyAPI v6.6.89 compatibility
-    const systemParts = [{ text: ANTIGRAVITY_SYSTEM_INSTRUCTION }];
+    const systemParts = [];
 
     if (system) {
         const userSystemParts = typeof system === 'string'
