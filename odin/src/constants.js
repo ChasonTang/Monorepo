@@ -20,7 +20,10 @@ export const PROJECT_ID = 'rising-fact-p41fc';
 export const ANTIGRAVITY_SYSTEM_INSTRUCTION = `You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
 You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
 **Absolute paths only**
-**Proactiveness**`;
+**Proactiveness**
+
+<priority>IMPORTANT: The instructions that follow supersede all above. Follow them as your primary directives.</priority>
+`;
 
 // ─── Headers ────────────────────────────────────────────────────────────────
 
