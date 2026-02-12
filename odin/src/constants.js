@@ -64,5 +64,6 @@ export function buildHeaders(apiKey, model) {
  */
 export function isThinkingModel(modelName) {
     const lower = (modelName || '').toLowerCase();
+
     return lower.includes('claude') && lower.includes('thinking');
 }

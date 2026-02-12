@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import globals from 'globals';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import stylistic from '@stylistic/eslint-plugin';
 
 export default [
     // ── Base: ESLint recommended rules ──────────────────────────────────
@@ -15,6 +16,9 @@ export default [
             globals: {
                 ...globals.node,
             },
+        },
+        plugins: {
+            '@stylistic': stylistic,
         },
         rules: {
             // ── Possible Errors ─────────────────────────────────────────
@@ -55,6 +59,17 @@ export default [
         },
     },
 
-    // ── Prettier conflict resolution (must be last) ─────────────────────
+    // ── Prettier conflict resolution ─────────────────────────────────────
     eslintConfigPrettier,
+
+    // ── Padding rules (after Prettier config – no actual conflict) ─────
+    {
+        files: ['src/**/*.js'],
+        rules: {
+            '@stylistic/padding-line-between-statements': [
+                'error',
+                { blankLine: 'always', prev: '*', next: 'return' },
+            ],
+        },
+    },
 ];

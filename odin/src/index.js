@@ -25,6 +25,7 @@ function parseArgs(argv) {
             args[arg.slice(2)] = true;
         }
     }
+
     return args;
 }
 

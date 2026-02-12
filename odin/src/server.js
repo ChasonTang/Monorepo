@@ -19,6 +19,7 @@ function readBody(req) {
             const raw = Buffer.concat(chunks).toString();
             if (!raw) {
                 resolve(null);
+
                 return;
             }
             try {
@@ -93,6 +94,7 @@ export function createServer({ apiKey, debug, logger }) {
             // Health check
             sendJSON(res, 200, { status: 'ok' });
             logger.log({ req, body, statusCode: 200, startTime });
+
             return;
         }
 
@@ -105,6 +107,7 @@ export function createServer({ apiKey, debug, logger }) {
                 'The /v1/messages/count_tokens endpoint is not implemented.',
             );
             logger.log({ req, body, statusCode: 501, startTime });
+
             return;
         }
 
@@ -115,6 +118,7 @@ export function createServer({ apiKey, debug, logger }) {
             if (!body) {
                 sendError(res, 400, 'invalid_request_error', 'Request body is required');
                 logger.log({ req, body, statusCode: 400, startTime });
+
                 return;
             }
 
@@ -127,6 +131,7 @@ export function createServer({ apiKey, debug, logger }) {
                     'Only streaming mode is supported. Set "stream": true in your request.',
                 );
                 logger.log({ req, body, statusCode: 400, startTime });
+
                 return;
             }
 
@@ -197,6 +202,7 @@ export function createServer({ apiKey, debug, logger }) {
                         },
                         debug: debugInfo,
                     });
+
                     return;
                 }
 
@@ -267,6 +273,7 @@ export function createServer({ apiKey, debug, logger }) {
                     });
                 }
             }
+
             return;
         }
 
@@ -274,6 +281,7 @@ export function createServer({ apiKey, debug, logger }) {
             // Silent handler for Claude Code heartbeat
             sendJSON(res, 200, {});
             logger.log({ req, body, statusCode: 200, startTime });
+
             return;
         }
 
@@ -281,6 +289,7 @@ export function createServer({ apiKey, debug, logger }) {
             // Silent handler for Claude Code telemetry
             sendJSON(res, 200, {});
             logger.log({ req, body, statusCode: 200, startTime });
+
             return;
         }
 

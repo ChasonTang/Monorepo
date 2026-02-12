@@ -90,6 +90,7 @@ function appendDescriptionHint(schema, hint) {
     if (!schema || typeof schema !== 'object') return schema;
     const existing = typeof schema.description === 'string' ? schema.description : '';
     const newDescription = existing ? `${existing} (${hint})` : hint;
+
     return { ...schema, description: newDescription };
 }
 
@@ -107,6 +108,7 @@ function convertRefsToHints(schema) {
         const hint = `See: ${defName}`;
         const existingDesc = typeof schema.description === 'string' ? schema.description : '';
         const newDescription = existingDesc ? `${existingDesc} (${hint})` : hint;
+
         return { type: 'object', description: newDescription };
     }
 
@@ -114,6 +116,7 @@ function convertRefsToHints(schema) {
     for (const [key, value] of Object.entries(schema)) {
         result[key] = convertRefsToHints(value);
     }
+
     return result;
 }
 
@@ -133,6 +136,7 @@ function convertConstToEnum(schema) {
             result[key] = convertConstToEnum(value);
         }
     }
+
     return result;
 }
 
@@ -511,6 +515,7 @@ function removeUnsupportedKeywords(schema, insideProperties = false) {
             result[key] = value;
         }
     }
+
     return result;
 }
 
@@ -718,6 +723,7 @@ function extractTextContent(content) {
             .map((c) => c.text)
             .join('\n');
     }
+
     return '';
 }
 
