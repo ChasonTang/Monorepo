@@ -36,15 +36,15 @@ You are pair programming with a USER to solve their coding task. The task may re
  */
 export function buildHeaders(apiKey, model) {
     const headers = {
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'User-Agent': `antigravity/1.15.8 ${platform()}/${arch()}`,
         'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
         'Client-Metadata': JSON.stringify({
             ideType: 'IDE_UNSPECIFIED',
             platform: 'PLATFORM_UNSPECIFIED',
-            pluginType: 'GEMINI'
-        })
+            pluginType: 'GEMINI',
+        }),
     };
 
     if (isThinkingModel(model)) {

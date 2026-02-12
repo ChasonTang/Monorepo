@@ -10,9 +10,16 @@ import { ANTIGRAVITY_SYSTEM_INSTRUCTION, isThinkingModel } from './constants.js'
  * Antigravity rejects these in VALIDATED mode.
  */
 const UNSUPPORTED_CONSTRAINTS = [
-    'minLength', 'maxLength', 'exclusiveMinimum', 'exclusiveMaximum',
-    'pattern', 'minItems', 'maxItems', 'format',
-    'default', 'examples',
+    'minLength',
+    'maxLength',
+    'exclusiveMinimum',
+    'exclusiveMaximum',
+    'pattern',
+    'minItems',
+    'maxItems',
+    'format',
+    'default',
+    'examples',
 ];
 
 /**
@@ -21,8 +28,16 @@ const UNSUPPORTED_CONSTRAINTS = [
  */
 const UNSUPPORTED_KEYWORDS = new Set([
     ...UNSUPPORTED_CONSTRAINTS,
-    '$schema', '$defs', 'definitions', 'const', '$ref', 'additionalProperties',
-    'propertyNames', 'title', '$id', '$comment',
+    '$schema',
+    '$defs',
+    'definitions',
+    'const',
+    '$ref',
+    'additionalProperties',
+    'propertyNames',
+    'title',
+    '$id',
+    '$comment',
 ]);
 
 /**
@@ -30,11 +45,28 @@ const UNSUPPORTED_KEYWORDS = new Set([
  * These are JSON Schema features that Gemini's protobuf rejects.
  */
 const UNSUPPORTED_GEMINI_FIELDS = new Set([
-    'additionalProperties', '$schema', '$id', '$comment', '$ref', '$defs',
-    'definitions', 'const', 'contentMediaType', 'contentEncoding',
-    'if', 'then', 'else', 'not', 'patternProperties',
-    'unevaluatedProperties', 'unevaluatedItems', 'dependentRequired',
-    'dependentSchemas', 'propertyNames', 'minContains', 'maxContains',
+    'additionalProperties',
+    '$schema',
+    '$id',
+    '$comment',
+    '$ref',
+    '$defs',
+    'definitions',
+    'const',
+    'contentMediaType',
+    'contentEncoding',
+    'if',
+    'then',
+    'else',
+    'not',
+    'patternProperties',
+    'unevaluatedProperties',
+    'unevaluatedItems',
+    'dependentRequired',
+    'dependentSchemas',
+    'propertyNames',
+    'minContains',
+    'maxContains',
 ]);
 
 /**
@@ -67,7 +99,7 @@ function appendDescriptionHint(schema, hint) {
  */
 function convertRefsToHints(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => convertRefsToHints(item));
+    if (Array.isArray(schema)) return schema.map((item) => convertRefsToHints(item));
 
     if (typeof schema.$ref === 'string') {
         const refVal = schema.$ref;
@@ -91,7 +123,7 @@ function convertRefsToHints(schema) {
  */
 function convertConstToEnum(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => convertConstToEnum(item));
+    if (Array.isArray(schema)) return schema.map((item) => convertConstToEnum(item));
 
     const result = {};
     for (const [key, value] of Object.entries(schema)) {
@@ -111,12 +143,12 @@ function convertConstToEnum(schema) {
  */
 function addEnumHints(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => addEnumHints(item));
+    if (Array.isArray(schema)) return schema.map((item) => addEnumHints(item));
 
     let result = { ...schema };
 
     if (Array.isArray(result.enum) && result.enum.length > 1 && result.enum.length <= 10) {
-        const vals = result.enum.map(v => String(v)).join(', ');
+        const vals = result.enum.map((v) => String(v)).join(', ');
         result = appendDescriptionHint(result, `Allowed: ${vals}`);
     }
 
@@ -135,7 +167,7 @@ function addEnumHints(schema) {
  */
 function addAdditionalPropertiesHints(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => addAdditionalPropertiesHints(item));
+    if (Array.isArray(schema)) return schema.map((item) => addAdditionalPropertiesHints(item));
 
     let result = { ...schema };
 
@@ -158,7 +190,7 @@ function addAdditionalPropertiesHints(schema) {
  */
 function moveConstraintsToDescription(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => moveConstraintsToDescription(item));
+    if (Array.isArray(schema)) return schema.map((item) => moveConstraintsToDescription(item));
 
     let result = { ...schema };
 
@@ -184,9 +216,9 @@ function moveConstraintsToDescription(schema) {
  */
 function mergeAllOf(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => mergeAllOf(item));
+    if (Array.isArray(schema)) return schema.map((item) => mergeAllOf(item));
 
-    let result = { ...schema };
+    const result = { ...schema };
 
     if (Array.isArray(result.allOf)) {
         const merged = {};
@@ -306,7 +338,7 @@ function tryMergeEnumFromUnion(options) {
  */
 function flattenAnyOfOneOf(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => flattenAnyOfOneOf(item));
+    if (Array.isArray(schema)) return schema.map((item) => flattenAnyOfOneOf(item));
 
     let result = { ...schema };
 
@@ -341,7 +373,8 @@ function flattenAnyOfOneOf(schema) {
             let selected = flattenAnyOfOneOf(options[bestIdx]) || { type: 'string' };
 
             if (parentDesc) {
-                const childDesc = typeof selected.description === 'string' ? selected.description : '';
+                const childDesc =
+                    typeof selected.description === 'string' ? selected.description : '';
                 if (childDesc && childDesc !== parentDesc) {
                     selected = { ...selected, description: `${parentDesc} (${childDesc})` };
                 } else if (!childDesc) {
@@ -377,7 +410,7 @@ function flattenTypeArrays(schema, nullableFields, currentPath) {
     if (!schema || typeof schema !== 'object') return schema;
     if (Array.isArray(schema)) {
         return schema.map((item, idx) =>
-            flattenTypeArrays(item, nullableFields, `${currentPath || ''}[${idx}]`)
+            flattenTypeArrays(item, nullableFields, `${currentPath || ''}[${idx}]`),
         );
     }
 
@@ -387,7 +420,7 @@ function flattenTypeArrays(schema, nullableFields, currentPath) {
     if (Array.isArray(result.type)) {
         const types = result.type;
         const hasNull = types.includes('null');
-        const nonNullTypes = types.filter(t => t !== 'null' && t);
+        const nonNullTypes = types.filter((t) => t !== 'null' && t);
 
         const firstType = nonNullTypes.length > 0 ? nonNullTypes[0] : 'string';
         result.type = firstType;
@@ -404,13 +437,18 @@ function flattenTypeArrays(schema, nullableFields, currentPath) {
     if (result.properties && typeof result.properties === 'object') {
         const newProps = {};
         for (const [propKey, propValue] of Object.entries(result.properties)) {
-            const propPath = currentPath ? `${currentPath}.properties.${propKey}` : `properties.${propKey}`;
+            const propPath = currentPath
+                ? `${currentPath}.properties.${propKey}`
+                : `properties.${propKey}`;
             const processed = flattenTypeArrays(propValue, localNullableFields, propPath);
             newProps[propKey] = processed;
 
-            if (processed && typeof processed === 'object' &&
+            if (
+                processed &&
+                typeof processed === 'object' &&
                 typeof processed.description === 'string' &&
-                processed.description.includes('nullable')) {
+                processed.description.includes('nullable')
+            ) {
                 const objectPath = currentPath || '';
                 const existing = localNullableFields.get(objectPath) || [];
                 existing.push(propKey);
@@ -424,7 +462,7 @@ function flattenTypeArrays(schema, nullableFields, currentPath) {
     if (Array.isArray(result.required) && !nullableFields) {
         const nullableAtRoot = localNullableFields.get('') || [];
         if (nullableAtRoot.length > 0) {
-            result.required = result.required.filter(r => !nullableAtRoot.includes(r));
+            result.required = result.required.filter((r) => !nullableAtRoot.includes(r));
             if (result.required.length === 0) {
                 delete result.required;
             }
@@ -433,7 +471,11 @@ function flattenTypeArrays(schema, nullableFields, currentPath) {
 
     for (const [key, value] of Object.entries(result)) {
         if (key !== 'properties' && typeof value === 'object' && value !== null) {
-            result[key] = flattenTypeArrays(value, localNullableFields, `${currentPath || ''}.${key}`);
+            result[key] = flattenTypeArrays(
+                value,
+                localNullableFields,
+                `${currentPath || ''}.${key}`,
+            );
         }
     }
 
@@ -449,7 +491,7 @@ function flattenTypeArrays(schema, nullableFields, currentPath) {
  */
 function removeUnsupportedKeywords(schema, insideProperties = false) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => removeUnsupportedKeywords(item, false));
+    if (Array.isArray(schema)) return schema.map((item) => removeUnsupportedKeywords(item, false));
 
     const result = {};
     for (const [key, value] of Object.entries(schema)) {
@@ -477,13 +519,17 @@ function removeUnsupportedKeywords(schema, insideProperties = false) {
  */
 function cleanupRequiredFields(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => cleanupRequiredFields(item));
+    if (Array.isArray(schema)) return schema.map((item) => cleanupRequiredFields(item));
 
-    let result = { ...schema };
+    const result = { ...schema };
 
-    if (Array.isArray(result.required) && result.properties && typeof result.properties === 'object') {
-        const validRequired = result.required.filter(req =>
-            Object.prototype.hasOwnProperty.call(result.properties, req)
+    if (
+        Array.isArray(result.required) &&
+        result.properties &&
+        typeof result.properties === 'object'
+    ) {
+        const validRequired = result.required.filter((req) =>
+            Object.prototype.hasOwnProperty.call(result.properties, req),
         );
         if (validRequired.length === 0) {
             delete result.required;
@@ -507,9 +553,9 @@ function cleanupRequiredFields(schema) {
  */
 function addEmptySchemaPlaceholder(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map(item => addEmptySchemaPlaceholder(item));
+    if (Array.isArray(schema)) return schema.map((item) => addEmptySchemaPlaceholder(item));
 
-    let result = { ...schema };
+    const result = { ...schema };
 
     if (result.type === 'object') {
         const hasProperties =
@@ -619,11 +665,14 @@ function toGeminiSchema(schema) {
             result[key] = props;
         } else if (key === 'items' && typeof value === 'object') {
             result[key] = toGeminiSchema(value);
-        } else if ((key === 'anyOf' || key === 'oneOf' || key === 'allOf') && Array.isArray(value)) {
-            result[key] = value.map(item => toGeminiSchema(item));
+        } else if (
+            (key === 'anyOf' || key === 'oneOf' || key === 'allOf') &&
+            Array.isArray(value)
+        ) {
+            result[key] = value.map((item) => toGeminiSchema(item));
         } else if (key === 'required' && Array.isArray(value)) {
             if (propertyNames.size > 0) {
-                const valid = value.filter(p => typeof p === 'string' && propertyNames.has(p));
+                const valid = value.filter((p) => typeof p === 'string' && propertyNames.has(p));
                 if (valid.length > 0) result[key] = valid;
             } else {
                 result[key] = value;
@@ -665,8 +714,8 @@ function extractTextContent(content) {
     if (typeof content === 'string') return content;
     if (Array.isArray(content)) {
         return content
-            .filter(c => c.type === 'text')
-            .map(c => c.text)
+            .filter((c) => c.type === 'text')
+            .map((c) => c.text)
             .join('\n');
     }
     return '';
@@ -703,8 +752,8 @@ function convertContentToParts(content) {
                     parts.push({
                         inlineData: {
                             mimeType: block.source.media_type,
-                            data: block.source.data
-                        }
+                            data: block.source.data,
+                        },
                     });
                 }
                 break;
@@ -714,8 +763,8 @@ function convertContentToParts(content) {
                     functionCall: {
                         id: block.id,
                         name: block.name,
-                        args: block.input || {}
-                    }
+                        args: block.input || {},
+                    },
                 });
                 break;
 
@@ -727,8 +776,8 @@ function convertContentToParts(content) {
                     functionResponse: {
                         id: block.tool_use_id,
                         name: block.tool_use_id,
-                        response: { result: extractTextContent(block.content) }
-                    }
+                        response: { result: extractTextContent(block.content) },
+                    },
                 });
                 break;
 
@@ -738,7 +787,7 @@ function convertContentToParts(content) {
                     parts.push({
                         text: block.thinking,
                         thought: true,
-                        thoughtSignature: block.signature
+                        thoughtSignature: block.signature,
                     });
                 }
                 break;
@@ -759,12 +808,22 @@ function convertContentToParts(content) {
  * @returns {Object} Google format request
  */
 export function anthropicToGoogle(anthropicRequest) {
-    const { model, messages, system, max_tokens, temperature,
-            top_p, top_k, stop_sequences, tools, thinking } = anthropicRequest;
+    const {
+        model,
+        messages,
+        system,
+        max_tokens,
+        temperature,
+        top_p,
+        top_k,
+        stop_sequences,
+        tools,
+        thinking,
+    } = anthropicRequest;
 
     const googleRequest = {
         contents: [],
-        generationConfig: {}
+        generationConfig: {},
     };
 
     // Convert system instruction with Antigravity identity injection
@@ -772,15 +831,16 @@ export function anthropicToGoogle(anthropicRequest) {
     const systemParts = [{ text: ANTIGRAVITY_SYSTEM_INSTRUCTION }];
 
     if (system) {
-        const userSystemParts = typeof system === 'string'
-            ? [{ text: system }]
-            : system.filter(b => b.type === 'text').map(b => ({ text: b.text }));
+        const userSystemParts =
+            typeof system === 'string'
+                ? [{ text: system }]
+                : system.filter((b) => b.type === 'text').map((b) => ({ text: b.text }));
         systemParts.push(...userSystemParts);
     }
 
     googleRequest.systemInstruction = {
         role: 'user',
-        parts: systemParts
+        parts: systemParts,
     };
 
     // Convert messages to contents
@@ -793,7 +853,7 @@ export function anthropicToGoogle(anthropicRequest) {
         }
         googleRequest.contents.push({
             role: msg.role === 'assistant' ? 'model' : 'user',
-            parts
+            parts,
         });
     }
 
@@ -809,7 +869,7 @@ export function anthropicToGoogle(anthropicRequest) {
         const thinkingBudget = thinking?.budget_tokens;
         googleRequest.generationConfig.thinkingConfig = {
             include_thoughts: true,
-            ...(thinkingBudget ? { thinking_budget: thinkingBudget } : {})
+            ...(thinkingBudget ? { thinking_budget: thinkingBudget } : {}),
         };
 
         // Validate max_tokens > thinking_budget (API requirement)
@@ -820,17 +880,19 @@ export function anthropicToGoogle(anthropicRequest) {
 
     // Tools — sanitize schemas through the two-stage pipeline
     if (tools?.length) {
-        googleRequest.tools = [{
-            functionDeclarations: tools.map(tool => ({
-                name: tool.name,
-                description: tool.description || '',
-                parameters: toGeminiSchema(
-                    cleanSchemaForAntigravity(tool.input_schema || { type: 'object' })
-                )
-            }))
-        }];
+        googleRequest.tools = [
+            {
+                functionDeclarations: tools.map((tool) => ({
+                    name: tool.name,
+                    description: tool.description || '',
+                    parameters: toGeminiSchema(
+                        cleanSchemaForAntigravity(tool.input_schema || { type: 'object' }),
+                    ),
+                })),
+            },
+        ];
         googleRequest.toolConfig = {
-            functionCallingConfig: { mode: 'VALIDATED' }
+            functionCallingConfig: { mode: 'VALIDATED' },
         };
     }
 
@@ -927,9 +989,9 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                                 input_tokens: inputTokens - cacheReadTokens,
                                 output_tokens: 0,
                                 cache_read_input_tokens: cacheReadTokens,
-                                cache_creation_input_tokens: 0
-                            }
-                        }
+                                cache_creation_input_tokens: 0,
+                            },
+                        },
                     });
                     if (debug) {
                         console.error(`[Odin:debug] → SSE:`, event.trimEnd());
@@ -943,8 +1005,12 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                         // Thinking block
                         if (currentBlockType !== 'thinking') {
                             if (currentBlockType !== null) {
-                                const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
-                                if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
+                                const stopEvent = formatSSE('content_block_stop', {
+                                    type: 'content_block_stop',
+                                    index: blockIndex,
+                                });
+                                if (debug)
+                                    console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
                                 yield stopEvent;
                                 blockIndex++;
                             }
@@ -952,7 +1018,7 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                             const startEvent = formatSSE('content_block_start', {
                                 type: 'content_block_start',
                                 index: blockIndex,
-                                content_block: { type: 'thinking', thinking: '' }
+                                content_block: { type: 'thinking', thinking: '' },
                             });
                             if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
                             yield startEvent;
@@ -960,7 +1026,7 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                         const deltaEvent = formatSSE('content_block_delta', {
                             type: 'content_block_delta',
                             index: blockIndex,
-                            delta: { type: 'thinking_delta', thinking: part.text || '' }
+                            delta: { type: 'thinking_delta', thinking: part.text || '' },
                         });
                         if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
                         yield deltaEvent;
@@ -970,18 +1036,24 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                             const sigEvent = formatSSE('content_block_delta', {
                                 type: 'content_block_delta',
                                 index: blockIndex,
-                                delta: { type: 'signature_delta', signature: part.thoughtSignature }
+                                delta: {
+                                    type: 'signature_delta',
+                                    signature: part.thoughtSignature,
+                                },
                             });
                             if (debug) console.error(`[Odin:debug] → SSE:`, sigEvent.trimEnd());
                             yield sigEvent;
                         }
-
                     } else if (part.text !== undefined) {
                         // Text block
                         if (currentBlockType !== 'text') {
                             if (currentBlockType !== null) {
-                                const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
-                                if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
+                                const stopEvent = formatSSE('content_block_stop', {
+                                    type: 'content_block_stop',
+                                    index: blockIndex,
+                                });
+                                if (debug)
+                                    console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
                                 yield stopEvent;
                                 blockIndex++;
                             }
@@ -989,7 +1061,7 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                             const startEvent = formatSSE('content_block_start', {
                                 type: 'content_block_start',
                                 index: blockIndex,
-                                content_block: { type: 'text', text: '' }
+                                content_block: { type: 'text', text: '' },
                             });
                             if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
                             yield startEvent;
@@ -997,15 +1069,17 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                         const deltaEvent = formatSSE('content_block_delta', {
                             type: 'content_block_delta',
                             index: blockIndex,
-                            delta: { type: 'text_delta', text: part.text }
+                            delta: { type: 'text_delta', text: part.text },
                         });
                         if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
                         yield deltaEvent;
-
                     } else if (part.functionCall) {
                         // Tool use block — each tool call gets its own block
                         if (currentBlockType !== null) {
-                            const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+                            const stopEvent = formatSSE('content_block_stop', {
+                                type: 'content_block_stop',
+                                index: blockIndex,
+                            });
                             if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
                             yield stopEvent;
                             blockIndex++;
@@ -1021,8 +1095,8 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                                 type: 'tool_use',
                                 id: toolId,
                                 name: part.functionCall.name,
-                                input: {}
-                            }
+                                input: {},
+                            },
                         });
                         if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
                         yield startEvent;
@@ -1032,8 +1106,8 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                             index: blockIndex,
                             delta: {
                                 type: 'input_json_delta',
-                                partial_json: JSON.stringify(part.functionCall.args || {})
-                            }
+                                partial_json: JSON.stringify(part.functionCall.args || {}),
+                            },
                         });
                         if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
                         yield deltaEvent;
@@ -1045,7 +1119,6 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                 if (finishReason && !stopReason) {
                     stopReason = finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn';
                 }
-
             } catch (e) {
                 // Skip malformed JSON
                 if (debug) {
@@ -1057,7 +1130,10 @@ export async function* streamSSEResponse(stream, model, debug = false) {
 
     // Close final block
     if (currentBlockType !== null) {
-        const stopEvent = formatSSE('content_block_stop', { type: 'content_block_stop', index: blockIndex });
+        const stopEvent = formatSSE('content_block_stop', {
+            type: 'content_block_stop',
+            index: blockIndex,
+        });
         if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
         yield stopEvent;
     }
@@ -1069,8 +1145,8 @@ export async function* streamSSEResponse(stream, model, debug = false) {
         usage: {
             output_tokens: outputTokens,
             cache_read_input_tokens: cacheReadTokens,
-            cache_creation_input_tokens: 0
-        }
+            cache_creation_input_tokens: 0,
+        },
     });
     if (debug) console.error(`[Odin:debug] → SSE:`, msgDelta.trimEnd());
     yield msgDelta;
@@ -1104,7 +1180,7 @@ export function googleToAnthropic(googleResponse, model) {
                 content.push({
                     type: 'thinking',
                     thinking: part.text,
-                    signature: part.thoughtSignature || ''
+                    signature: part.thoughtSignature || '',
                 });
             } else {
                 content.push({ type: 'text', text: part.text });
@@ -1114,7 +1190,7 @@ export function googleToAnthropic(googleResponse, model) {
                 type: 'tool_use',
                 id: part.functionCall.id || `toolu_${randomHex(12)}`,
                 name: part.functionCall.name,
-                input: part.functionCall.args || {}
+                input: part.functionCall.args || {},
             });
             hasToolCalls = true;
         }
@@ -1142,7 +1218,7 @@ export function googleToAnthropic(googleResponse, model) {
             input_tokens: (usage.promptTokenCount || 0) - cachedTokens,
             output_tokens: usage.candidatesTokenCount || 0,
             cache_read_input_tokens: cachedTokens,
-            cache_creation_input_tokens: 0
-        }
+            cache_creation_input_tokens: 0,
+        },
     };
 }

@@ -45,7 +45,7 @@ export async function sendRequest(googleRequest, model, apiKey, debug) {
         request: googleRequest,
         userAgent: 'antigravity',
         requestType: 'agent',
-        requestId: `agent-${crypto.randomUUID()}`
+        requestId: `agent-${crypto.randomUUID()}`,
     };
 
     logUpstream(STREAMING_URL, headers, payload, debug);
@@ -53,7 +53,7 @@ export async function sendRequest(googleRequest, model, apiKey, debug) {
     const response = await fetch(STREAMING_URL, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
     });
 
     return response;

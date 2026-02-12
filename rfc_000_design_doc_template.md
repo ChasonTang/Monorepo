@@ -48,7 +48,7 @@ What value does solving this bring? Describe the expected benefits — e.g., imp
 
 {For each significant design decision, explain why this approach was chosen. Focus on the key trade-offs and constraints that shaped the design. If alternative approaches were considered, briefly mention them and the reason they were ruled out — exhaustive comparison is not required.}
 
-## 5. Interface Changes *(Optional)*
+## 5. Interface Changes *(Optional — delete this section and renumber subsequent sections if not applicable)*
 
 {Describe any changes to public APIs, CLIs, configuration, file formats, or protocols. Skip this section if no public interfaces are affected.}
 
@@ -62,7 +62,7 @@ What value does solving this bring? Describe the expected benefits — e.g., imp
 {proposed interface}
 ```
 
-## 6. Backward Compatibility & Migration *(Optional)*
+## 6. Backward Compatibility & Migration *(Optional — delete this section and renumber subsequent sections if not applicable)*
 
 {Describe any backward compatibility implications and migration paths for existing users. Skip this section if the change is fully backward-compatible or if this is a new feature with no prior behavior.}
 

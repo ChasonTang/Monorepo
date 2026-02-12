@@ -20,8 +20,8 @@ export class RequestLogger {
         fs.mkdirSync(dir, { recursive: true });
 
         this._stream = fs.createWriteStream(filePath, {
-            flags: 'w',          // Write mode — clear file on startup
-            encoding: 'utf8'
+            flags: 'w', // Write mode — clear file on startup
+            encoding: 'utf8',
         });
 
         this._stream.on('error', (err) => {
@@ -50,7 +50,7 @@ export class RequestLogger {
             statusCode,
             durationMs: Date.now() - startTime,
             headers: req.headers,
-            body: body ?? null
+            body: body ?? null,
         };
 
         if (error) {
@@ -65,7 +65,7 @@ export class RequestLogger {
             entry.debug = debug;
         }
 
-        this._stream.write(JSON.stringify(entry) + '\n');
+        this._stream.write(`${JSON.stringify(entry)}\n`);
     }
 
     /**
