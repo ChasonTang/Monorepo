@@ -38,6 +38,7 @@ export function buildHeaders(apiKey, model) {
     const headers = {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
         'User-Agent': `antigravity/1.15.8 ${platform()}/${arch()}`,
         'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
         'Client-Metadata': JSON.stringify({

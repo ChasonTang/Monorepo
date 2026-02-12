@@ -135,9 +135,17 @@ export function createServer({ apiKey, debug, logger }) {
                 return;
             }
 
+            // Model is required per Anthropic API spec
+            if (!body.model) {
+                sendError(res, 400, 'invalid_request_error', '"model" is required.');
+                logger.log({ req, body, statusCode: 400, startTime });
+
+                return;
+            }
+
             try {
                 // 1. Convert Anthropic request to Google format
-                const model = body.model || 'claude-sonnet-4-5-thinking';
+                const model = body.model;
                 const googleRequest = anthropicToGoogle(body);
 
                 // Capture debug info for log file (stderr debug output is unchanged)
