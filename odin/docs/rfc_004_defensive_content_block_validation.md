@@ -3,7 +3,7 @@
 **Version:** 1.1  
 **Author:** Chason Tang  
 **Date:** 2026-02-17  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -454,30 +454,30 @@ An alternative approach would be to add validation logic directly inside `anthro
 
 ### Phase 1: Add Validation Function — 15 minutes
 
-- [ ] Add the `UNSUPPORTED_CONTENT_TYPES` constant to `src/converter.js` (after the existing constants block, before the tool schema sanitization functions).
-- [ ] Implement the `validateContentBlocks()` function in `src/converter.js`.
-- [ ] Add the `default` case to the `switch` statement in `convertContentToParts()`.
-- [ ] Export `validateContentBlocks` from `src/converter.js`.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Add the `UNSUPPORTED_CONTENT_TYPES` constant to `src/converter.js` (after the existing constants block, before the tool schema sanitization functions).
+- [x] Implement the `validateContentBlocks()` function in `src/converter.js`.
+- [x] Add the `default` case to the `switch` statement in `convertContentToParts()`.
+- [x] Export `validateContentBlocks` from `src/converter.js`.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** The function is implemented, exported, and passes lint/format checks. `node -e "import('./src/converter.js')"` succeeds without errors.
 
 ### Phase 2: Server Integration — 10 minutes
 
-- [ ] Import `validateContentBlocks` in `src/server.js`.
-- [ ] Add the content block validation call after Ajv validation, before the `try` block.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Import `validateContentBlocks` in `src/server.js`.
+- [x] Add the content block validation call after Ajv validation, before the `try` block.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** `server.js` calls `validateContentBlocks()` and returns 400 on validation failure. `npm run check` passes.
 
 ### Phase 3: End-to-End Verification — 30 minutes
 
-- [ ] Start Odin and send a valid request with only supported content types (text, base64 image, tool_use, tool_result with text content, thinking). Verify it succeeds.
-- [ ] Send a request with a `document` content block. Verify HTTP 400 is returned with a clear error message mentioning "document".
-- [ ] Send a request with an image block using `source.type: 'url'`. Verify HTTP 400 is returned with a clear error message mentioning "url".
-- [ ] Send a request with a `tool_result` block whose content array contains an `image` block. Verify HTTP 400 is returned with a clear error message.
-- [ ] Verify the NDJSON log file captures the full request body for all rejected requests.
-- [ ] Run a normal Claude Code session through the proxy to verify no regression on existing workflows.
+- [x] Start Odin and send a valid request with only supported content types (text, base64 image, tool_use, tool_result with text content, thinking). Verify it succeeds.
+- [x] Send a request with a `document` content block. Verify HTTP 400 is returned with a clear error message mentioning "document".
+- [x] Send a request with an image block using `source.type: 'url'`. Verify HTTP 400 is returned with a clear error message mentioning "url".
+- [x] Send a request with a `tool_result` block whose content array contains an `image` block. Verify HTTP 400 is returned with a clear error message.
+- [x] Verify the NDJSON log file captures the full request body for all rejected requests.
+- [x] Run a normal Claude Code session through the proxy to verify no regression on existing workflows.
 
 **Done when:** All rejection scenarios produce correct error responses, and normal Claude Code workflows are unaffected.
 
