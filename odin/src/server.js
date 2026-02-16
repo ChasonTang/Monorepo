@@ -1,7 +1,8 @@
 import http from 'node:http';
 
-import { anthropicToGoogle, streamSSEResponse } from './converter.js';
+import { anthropicToGoogle, streamSSEResponse, validateContentBlocks } from './converter.js';
 import { sendRequest } from './cloudcode.js';
+import { validateMessagesRequest } from './validator.js';
 
 // ─── Body Parsing ───────────────────────────────────────────────────────────
 
@@ -122,22 +123,19 @@ export function createServer({ apiKey, debug, logger }) {
                 return;
             }
 
-            // Only streaming mode is supported (§3.4)
-            if (!body.stream) {
-                sendError(
-                    res,
-                    400,
-                    'invalid_request_error',
-                    'Only streaming mode is supported. Set "stream": true in your request.',
-                );
+            const validation = validateMessagesRequest(body);
+            if (!validation.valid) {
+                sendError(res, 400, 'invalid_request_error', validation.message);
                 logger.log({ req, body, statusCode: 400, startTime });
 
                 return;
             }
 
-            // Model is required per Anthropic API spec
-            if (!body.model) {
-                sendError(res, 400, 'invalid_request_error', '"model" is required.');
+            // Content block validation
+            const contentValidation = validateContentBlocks(body);
+            if (!contentValidation.valid) {
+                console.error(`[Odin] Unsupported content: ${contentValidation.message}`);
+                sendError(res, 400, 'invalid_request_error', contentValidation.message);
                 logger.log({ req, body, statusCode: 400, startTime });
 
                 return;

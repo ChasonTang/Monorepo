@@ -3,7 +3,7 @@
 **Version:** 1.3  
 **Author:** Chason Tang  
 **Date:** 2026-02-13  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -487,38 +487,38 @@ In interactive development (e.g., a developer testing a new integration), a sing
 
 ### Phase 1: Add Ajv Dependency — 5 minutes
 
-- [ ] Run `npm install ajv` in the `odin/` directory.
-- [ ] Verify `package.json` lists `ajv` under `dependencies` (not `devDependencies`).
-- [ ] Verify `npm ls ajv` shows the installed version.
+- [x] Run `npm install ajv` in the `odin/` directory.
+- [x] Verify `package.json` lists `ajv` under `dependencies` (not `devDependencies`).
+- [x] Verify `npm ls ajv` shows the installed version.
 
 **Done when:** `node -e "import('ajv')"` (run from `odin/`) succeeds without errors.
 
 ### Phase 2: Create Validator Module — 30 minutes
 
-- [ ] Create `src/validator.js` with the JSON Schema definition from §4.2.1.
-- [ ] Implement the Ajv compilation and `validateMessagesRequest()` function from §4.2.2.
-- [ ] Implement the `formatErrors()` function from §4.2.4.
-- [ ] Export `validateMessagesRequest` as the public API.
-- [ ] Verify the module loads without errors: `node -e "import('./src/validator.js')"`.
+- [x] Create `src/validator.js` with the JSON Schema definition from §4.2.1.
+- [x] Implement the Ajv compilation and `validateMessagesRequest()` function from §4.2.2.
+- [x] Implement the `formatErrors()` function from §4.2.4.
+- [x] Export `validateMessagesRequest` as the public API.
+- [x] Verify the module loads without errors: `node -e "import('./src/validator.js')"`.
 
 **Done when:** The module exports a working `validateMessagesRequest` function that accepts an object and returns `{ valid: true }` or `{ valid: false, message: string }`.
 
 ### Phase 3: Integrate into Server — 15 minutes
 
-- [ ] Import `validateMessagesRequest` in `src/server.js`.
-- [ ] Replace the three ad-hoc checks (lines 117–144) with the single validation call from §4.2.3.
-- [ ] Preserve the `!body` null check as the first validation gate.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Import `validateMessagesRequest` in `src/server.js`.
+- [x] Replace the three ad-hoc checks (lines 117–144) with the single validation call from §4.2.3.
+- [x] Preserve the `!body` null check as the first validation gate.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** `server.js` uses `validateMessagesRequest()` for all body validation, and `npm run check` passes.
 
 ### Phase 4: End-to-End Verification — 30 minutes
 
-- [ ] Start Odin and send a valid streaming request through the proxy. Verify it succeeds.
-- [ ] Send a request with `stream: false` — verify the error message matches the current behavior.
-- [ ] Send a request with missing `model` — verify a clear `invalid_request_error` is returned.
-- [ ] Send a request with `max_tokens: "ten"` — verify type validation catches it.
-- [ ] Send a request with extra unknown fields (e.g., `metadata: {}`) — verify it is accepted (not rejected).
+- [x] Start Odin and send a valid streaming request through the proxy. Verify it succeeds.
+- [x] Send a request with `stream: false` — verify the error message matches the current behavior.
+- [x] Send a request with missing `model` — verify a clear `invalid_request_error` is returned.
+- [x] Send a request with `max_tokens: "ten"` — verify type validation catches it.
+- [x] Send a request with extra unknown fields (e.g., `metadata: {}`) — verify it is accepted (not rejected).
 
 **Done when:** All five scenarios produce expected behavior, and existing Claude Code workflows are unaffected.
 
