@@ -31,10 +31,10 @@ You are pair programming with a USER to solve their coding task. The task may re
  * Build required headers for Cloud Code API requests.
  *
  * @param {string} apiKey - Bearer token for authentication
- * @param {string} model - Model name (used to determine thinking model headers)
+ * @param {Object} [incomingHeaders={}] - Headers from the incoming client request
  * @returns {Object} Headers object
  */
-export function buildHeaders(apiKey, model) {
+export function buildHeaders(apiKey, incomingHeaders = {}) {
     const headers = {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -42,14 +42,14 @@ export function buildHeaders(apiKey, model) {
         'User-Agent': `antigravity/1.15.8 ${platform()}/${arch()}`,
         'X-Goog-Api-Client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
         'Client-Metadata': JSON.stringify({
-            ideType: 'IDE_UNSPECIFIED',
-            platform: 'PLATFORM_UNSPECIFIED',
+            ideType: 'ANTIGRAVITY',
+            platform: 'MACOS',
             pluginType: 'GEMINI',
         }),
     };
 
-    if (isThinkingModel(model)) {
-        headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
+    if (incomingHeaders['anthropic-beta']) {
+        headers['anthropic-beta'] = incomingHeaders['anthropic-beta'];
     }
 
     return headers;

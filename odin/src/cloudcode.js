@@ -32,11 +32,12 @@ function logUpstream(url, headers, payload, debug) {
  * @param {string} model - Model name (e.g. "claude-sonnet-4-5-thinking")
  * @param {string} apiKey - Bearer token for Cloud Code authentication
  * @param {boolean} debug - Enable debug logging
+ * @param {Object} [incomingHeaders={}] - Headers from the incoming client request
  * @returns {Promise<Response>} Raw fetch Response (body is a ReadableStream)
  * @throws {Error} If the fetch itself fails (network error)
  */
-export async function sendRequest(googleRequest, model, apiKey, debug) {
-    const headers = buildHeaders(apiKey, model);
+export async function sendRequest(googleRequest, model, apiKey, debug, incomingHeaders = {}) {
+    const headers = buildHeaders(apiKey, incomingHeaders);
 
     // Build Cloud Code request wrapper (§2.5.4)
     const payload = {

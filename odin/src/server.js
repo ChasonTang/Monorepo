@@ -157,7 +157,13 @@ export function createServer({ apiKey, debug, logger }) {
                 }
 
                 // 2. Send to Cloud Code API
-                const cloudResponse = await sendRequest(googleRequest, model, apiKey, debug);
+                const cloudResponse = await sendRequest(
+                    googleRequest,
+                    model,
+                    apiKey,
+                    debug,
+                    req.headers,
+                );
 
                 // 3. Handle upstream error responses
                 if (!cloudResponse.ok) {
