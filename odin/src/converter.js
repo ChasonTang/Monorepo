@@ -800,24 +800,6 @@ export function validateContentBlocks(anthropicRequest) {
 // ─── Content Block Conversion (Anthropic → Google) ──────────────────────────
 
 /**
- * Extract text content from a tool_result content field.
- *
- * @param {string|Array|*} content
- * @returns {string}
- */
-function extractTextContent(content) {
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-        return content
-            .filter((c) => c.type === 'text')
-            .map((c) => c.text)
-            .join('\n');
-    }
-
-    return '';
-}
-
-/**
  * Convert Anthropic content blocks to Google parts.
  * Extracts only known fields, ignoring cache_control etc.
  *
@@ -872,20 +854,17 @@ function convertContentToParts(content) {
                     functionResponse: {
                         id: block.tool_use_id,
                         name: block.tool_use_id,
-                        response: { result: extractTextContent(block.content) },
+                        response: block.content,
                     },
                 });
                 break;
 
             case 'thinking':
-                // Only include thinking blocks with valid signatures
-                if (block.signature?.length >= 50) {
-                    parts.push({
-                        text: block.thinking,
-                        thought: true,
-                        thoughtSignature: block.signature,
-                    });
-                }
+                parts.push({
+                    text: block.thinking,
+                    thought: true,
+                    thoughtSignature: block.signature,
+                });
                 break;
 
             default:
@@ -936,7 +915,7 @@ export function anthropicToGoogle(anthropicRequest) {
         const userSystemParts =
             typeof system === 'string'
                 ? [{ text: system }]
-                : system.filter((b) => b.type === 'text').map((b) => ({ text: b.text }));
+                : system.map((b) => ({ text: b.text }));
         systemParts.push(...userSystemParts);
     }
 
