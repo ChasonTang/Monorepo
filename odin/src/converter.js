@@ -19,82 +19,150 @@ const UNSUPPORTED_CONTENT_TYPES = new Set([
     'web_search_tool_result', // Web search tool results — no conversion path
 ]);
 
-// ─── Tool Schema Sanitization Constants ─────────────────────────────────────
-// Ported from opencode-antigravity-auth request-helpers.ts & gemini.ts
+// ─── Tool Schema Sanitization (RFC-006: Whitelist-based Sanitizer) ──────────
 
 /**
- * Unsupported constraint keywords that should be moved to description hints.
- * Antigravity rejects these in VALIDATED mode.
+ * Allowed keywords (23 total) — pass through unchanged.
+ * Only keywords in this set survive the whitelist filter.
  */
-const UNSUPPORTED_CONSTRAINTS = [
-    'minLength',
-    'maxLength',
-    'exclusiveMinimum',
-    'exclusiveMaximum',
-    'pattern',
-    'minItems',
-    'maxItems',
-    'format',
-    'default',
-    'examples',
-];
-
-/**
- * Keywords that should be removed after hint extraction.
- * Superset of UNSUPPORTED_CONSTRAINTS.
- */
-const UNSUPPORTED_KEYWORDS = new Set([
-    ...UNSUPPORTED_CONSTRAINTS,
-    '$schema',
-    '$defs',
-    'definitions',
-    'const',
-    '$ref',
+const ALLOWED_KEYWORDS = new Set([
+    // Applicator (8 of 15)
+    'allOf',
+    'anyOf',
+    'oneOf',
+    'not',
+    'prefixItems',
+    'items',
+    'properties',
     'additionalProperties',
-    'propertyNames',
-    'title',
-    '$id',
-    '$comment',
+    // Validation (12 of 20)
+    'type',
+    'enum',
+    'maximum',
+    'minimum',
+    'maxLength',
+    'minLength',
+    'pattern',
+    'maxItems',
+    'minItems',
+    'maxProperties',
+    'minProperties',
+    'required',
+    // Meta-Data (2 of 7)
+    'description',
+    'default',
+    // Format (1 of 1)
+    'format',
 ]);
 
 /**
- * Additional fields that toGeminiSchema() strips.
- * These are JSON Schema features that Gemini's protobuf rejects.
+ * Keywords that are currently stripped but COULD be converted to description
+ * hints or other semantic-preserving transforms in the future.
+ *
+ * When any of these keywords is encountered and stripped, a warn-level log is
+ * emitted with the keyword name and value. This enables us to:
+ * 1. Detect when Claude Code starts sending these keywords
+ * 2. Measure frequency to prioritize which transforms to implement next
+ * 3. Proactively improve model accuracy before users report quality issues
+ *
+ * Grouped by potential future transform complexity:
  */
-const UNSUPPORTED_GEMINI_FIELDS = new Set([
-    'additionalProperties',
-    '$schema',
-    '$id',
-    '$comment',
+const MONITORABLE_KEYWORDS = new Set([
+    // ── Core vocabulary — future: $ref/$defs inline resolution ──
     '$ref',
     '$defs',
-    'definitions',
-    'const',
-    'contentMediaType',
-    'contentEncoding',
+
+    // ── Applicator — future: conditional/dependency/constraint description hints ──
     'if',
     'then',
     'else',
-    'not',
-    'patternProperties',
-    'unevaluatedProperties',
-    'unevaluatedItems',
-    'dependentRequired',
     'dependentSchemas',
+    'contains',
     'propertyNames',
-    'minContains',
+    'patternProperties',
+
+    // ── Validation — future: constraint description hints ──
+    'multipleOf',
+    'uniqueItems',
     'maxContains',
+    'minContains',
+    'dependentRequired',
+
+    // ── Unevaluated — future: structural constraint hints ──
+    'unevaluatedItems',
+    'unevaluatedProperties',
+
+    // ── Meta-Data — future: preserve as description hints ──
+    'title',
+    'deprecated',
+    'readOnly',
+    'writeOnly',
+    'examples',
+
+    // ── Content — future: encoding/media type hints ──
+    'contentEncoding',
+    'contentMediaType',
+    'contentSchema',
+
+    // ── Deprecated — future: merge/rewrite if encountered ──
+    'definitions',
+    'dependencies',
 ]);
 
 /**
- * VALIDATED mode requires at least one property in object schemas.
+ * All JSON Schema 2020-12 keywords NOT in the whitelist (34 standard + 4 deprecated = 38).
+ * Keywords in this set but NOT in MONITORABLE_KEYWORDS are stripped silently
+ * (they have no meaningful semantic-preserving transform potential).
  */
-const EMPTY_SCHEMA_PLACEHOLDER_NAME = '_placeholder';
-const EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION = 'Placeholder. Always pass true.';
+const KNOWN_UNSUPPORTED_KEYWORDS = new Set([
+    // ── Core vocabulary (9, all unsupported) ──
+    '$schema',
+    '$id',
+    '$ref',
+    '$anchor',
+    '$dynamicRef',
+    '$dynamicAnchor',
+    '$vocabulary',
+    '$comment',
+    '$defs',
+    // ── Applicator (7 of 15 unsupported) ──
+    'if',
+    'then',
+    'else',
+    'dependentSchemas',
+    'contains',
+    'patternProperties',
+    'propertyNames',
+    // ── Validation (8 of 20 unsupported) ──
+    'const', // Converted to enum in Phase 1a
+    'multipleOf',
+    'exclusiveMaximum',
+    'exclusiveMinimum',
+    'uniqueItems',
+    'maxContains',
+    'minContains',
+    'dependentRequired',
+    // ── Unevaluated (2, all unsupported) ──
+    'unevaluatedItems',
+    'unevaluatedProperties',
+    // ── Meta-Data (5 of 7 unsupported) ──
+    'title',
+    'deprecated',
+    'readOnly',
+    'writeOnly',
+    'examples',
+    // ── Content (3, all unsupported) ──
+    'contentEncoding',
+    'contentMediaType',
+    'contentSchema',
+    // ── Deprecated (4, from 2020-12 root meta-schema) ──
+    'definitions',
+    'dependencies',
+    '$recursiveAnchor',
+    '$recursiveRef',
+]);
 
-// ─── Tool Schema Sanitization — Stage 1: cleanSchemaForAntigravity ──────────
-// Ported from opencode-antigravity-auth request-helpers.ts
-// (cleanJSONSchemaForAntigravity)
+// ─── Phase 1: Semantic Transforms ───────────────────────────────────────────
 
 /**
  * Appends a hint to a schema's description field.
@@ -112,33 +180,7 @@ function appendDescriptionHint(schema, hint) {
 }
 
 /**
- * Phase 1a: Converts $ref to description hints.
- * $ref: "#/$defs/Foo" → { type: "object", description: "See: Foo" }
- */
-function convertRefsToHints(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => convertRefsToHints(item));
-
-    if (typeof schema.$ref === 'string') {
-        const refVal = schema.$ref;
-        const defName = refVal.includes('/') ? refVal.split('/').pop() : refVal;
-        const hint = `See: ${defName}`;
-        const existingDesc = typeof schema.description === 'string' ? schema.description : '';
-        const newDescription = existingDesc ? `${existingDesc} (${hint})` : hint;
-
-        return { type: 'object', description: newDescription };
-    }
-
-    const result = {};
-    for (const [key, value] of Object.entries(schema)) {
-        result[key] = convertRefsToHints(value);
-    }
-
-    return result;
-}
-
-/**
- * Phase 1b: Converts const to enum.
+ * Phase 1a: Converts const to enum.
  * { const: "foo" } → { enum: ["foo"] }
  */
 function convertConstToEnum(schema) {
@@ -158,556 +200,137 @@ function convertConstToEnum(schema) {
 }
 
 /**
- * Phase 1c: Adds enum hints to description.
- * { enum: ["a", "b", "c"] } → adds "(Allowed: a, b, c)" to description
- * Only for enums with 2-10 items.
- */
-function addEnumHints(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => addEnumHints(item));
-
-    let result = { ...schema };
-
-    if (Array.isArray(result.enum) && result.enum.length > 1 && result.enum.length <= 10) {
-        const vals = result.enum.map((v) => String(v)).join(', ');
-        result = appendDescriptionHint(result, `Allowed: ${vals}`);
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (key !== 'enum' && typeof value === 'object' && value !== null) {
-            result[key] = addEnumHints(value);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Phase 1d: Adds additionalProperties hints.
- * { additionalProperties: false } → adds "(No extra properties allowed)"
- */
-function addAdditionalPropertiesHints(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => addAdditionalPropertiesHints(item));
-
-    let result = { ...schema };
-
-    if (result.additionalProperties === false) {
-        result = appendDescriptionHint(result, 'No extra properties allowed');
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (key !== 'additionalProperties' && typeof value === 'object' && value !== null) {
-            result[key] = addAdditionalPropertiesHints(value);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Phase 1e: Moves unsupported constraints to description hints.
- * { minLength: 1, maxLength: 100 } → adds "(minLength: 1) (maxLength: 100)"
- */
-function moveConstraintsToDescription(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => moveConstraintsToDescription(item));
-
-    let result = { ...schema };
-
-    for (const constraint of UNSUPPORTED_CONSTRAINTS) {
-        if (result[constraint] !== undefined && typeof result[constraint] !== 'object') {
-            result = appendDescriptionHint(result, `${constraint}: ${result[constraint]}`);
-        }
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (typeof value === 'object' && value !== null) {
-            result[key] = moveConstraintsToDescription(value);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Phase 2a: Merges allOf schemas into a single object.
- * { allOf: [{ properties: { a } }, { properties: { b } }] }
- * → { properties: { a, b } }
- */
-function mergeAllOf(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => mergeAllOf(item));
-
-    const result = { ...schema };
-
-    if (Array.isArray(result.allOf)) {
-        const merged = {};
-        const mergedRequired = [];
-
-        for (const item of result.allOf) {
-            if (!item || typeof item !== 'object') continue;
-
-            if (item.properties && typeof item.properties === 'object') {
-                merged.properties = { ...merged.properties, ...item.properties };
-            }
-
-            if (Array.isArray(item.required)) {
-                for (const req of item.required) {
-                    if (!mergedRequired.includes(req)) {
-                        mergedRequired.push(req);
-                    }
-                }
-            }
-
-            for (const [key, value] of Object.entries(item)) {
-                if (key !== 'properties' && key !== 'required' && merged[key] === undefined) {
-                    merged[key] = value;
-                }
-            }
-        }
-
-        if (merged.properties) {
-            result.properties = { ...result.properties, ...merged.properties };
-        }
-        if (mergedRequired.length > 0) {
-            const existingRequired = Array.isArray(result.required) ? result.required : [];
-            result.required = Array.from(new Set([...existingRequired, ...mergedRequired]));
-        }
-
-        for (const [key, value] of Object.entries(merged)) {
-            if (key !== 'properties' && key !== 'required' && result[key] === undefined) {
-                result[key] = value;
-            }
-        }
-
-        delete result.allOf;
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (typeof value === 'object' && value !== null) {
-            result[key] = mergeAllOf(value);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Scores a schema option for selection in anyOf/oneOf flattening.
- * Higher score = more preferred. (object > array > other > null)
- */
-function scoreSchemaOption(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return { score: 0, typeName: 'unknown' };
-    }
-
-    const type = schema.type;
-
-    if (type === 'object' || schema.properties) return { score: 3, typeName: 'object' };
-    if (type === 'array' || schema.items) return { score: 2, typeName: 'array' };
-    if (type && type !== 'null') return { score: 1, typeName: type };
-
-    return { score: 0, typeName: type || 'null' };
-}
-
-/**
- * Checks if an anyOf/oneOf array represents enum choices.
- * Returns the merged enum values if so, otherwise null.
- */
-function tryMergeEnumFromUnion(options) {
-    if (!Array.isArray(options) || options.length === 0) return null;
-
-    const enumValues = [];
-
-    for (const option of options) {
-        if (!option || typeof option !== 'object') return null;
-
-        if (option.const !== undefined) {
-            enumValues.push(String(option.const));
-            continue;
-        }
-
-        if (Array.isArray(option.enum) && option.enum.length === 1) {
-            enumValues.push(String(option.enum[0]));
-            continue;
-        }
-
-        if (Array.isArray(option.enum) && option.enum.length > 0) {
-            for (const val of option.enum) {
-                enumValues.push(String(val));
-            }
-            continue;
-        }
-
-        if (option.properties || option.items || option.anyOf || option.oneOf || option.allOf) {
-            return null;
-        }
-
-        if (option.type && !option.const && !option.enum) {
-            return null;
-        }
-    }
-
-    return enumValues.length > 0 ? enumValues : null;
-}
-
-/**
- * Phase 2b: Flattens anyOf/oneOf to the best option with type hints.
- * Special handling for enum patterns:
- * { anyOf: [{ const: "a" }, { const: "b" }] } → { type: "string", enum: ["a", "b"] }
- */
-function flattenAnyOfOneOf(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => flattenAnyOfOneOf(item));
-
-    let result = { ...schema };
-
-    for (const unionKey of ['anyOf', 'oneOf']) {
-        if (Array.isArray(result[unionKey]) && result[unionKey].length > 0) {
-            const options = result[unionKey];
-            const parentDesc = typeof result.description === 'string' ? result.description : '';
-
-            // Check if this is an enum pattern
-            const mergedEnum = tryMergeEnumFromUnion(options);
-            if (mergedEnum !== null) {
-                const { [unionKey]: _, ...rest } = result;
-                result = { ...rest, type: 'string', enum: mergedEnum };
-                if (parentDesc) result.description = parentDesc;
-                continue;
-            }
-
-            // Standard flattening: score each option and pick the best
-            let bestIdx = 0;
-            let bestScore = -1;
-            const allTypes = [];
-
-            for (let i = 0; i < options.length; i++) {
-                const { score, typeName } = scoreSchemaOption(options[i]);
-                if (typeName) allTypes.push(typeName);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestIdx = i;
-                }
-            }
-
-            let selected = flattenAnyOfOneOf(options[bestIdx]) || { type: 'string' };
-
-            if (parentDesc) {
-                const childDesc =
-                    typeof selected.description === 'string' ? selected.description : '';
-                if (childDesc && childDesc !== parentDesc) {
-                    selected = { ...selected, description: `${parentDesc} (${childDesc})` };
-                } else if (!childDesc) {
-                    selected = { ...selected, description: parentDesc };
-                }
-            }
-
-            if (allTypes.length > 1) {
-                const uniqueTypes = Array.from(new Set(allTypes));
-                const hint = `Accepts: ${uniqueTypes.join(' | ')}`;
-                selected = appendDescriptionHint(selected, hint);
-            }
-
-            const { [unionKey]: _u, description: _d, ...rest } = result;
-            result = { ...rest, ...selected };
-        }
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (typeof value === 'object' && value !== null) {
-            result[key] = flattenAnyOfOneOf(value);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Phase 2c: Flattens type arrays to single type with nullable hint.
- * { type: ["string", "null"] } → { type: "string", description: "(nullable)" }
- */
-function flattenTypeArrays(schema, nullableFields, currentPath) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) {
-        return schema.map((item, idx) =>
-            flattenTypeArrays(item, nullableFields, `${currentPath || ''}[${idx}]`),
-        );
-    }
-
-    let result = { ...schema };
-    const localNullableFields = nullableFields || new Map();
-
-    if (Array.isArray(result.type)) {
-        const types = result.type;
-        const hasNull = types.includes('null');
-        const nonNullTypes = types.filter((t) => t !== 'null' && t);
-
-        const firstType = nonNullTypes.length > 0 ? nonNullTypes[0] : 'string';
-        result.type = firstType;
-
-        if (nonNullTypes.length > 1) {
-            result = appendDescriptionHint(result, `Accepts: ${nonNullTypes.join(' | ')}`);
-        }
-
-        if (hasNull) {
-            result = appendDescriptionHint(result, 'nullable');
-        }
-    }
-
-    if (result.properties && typeof result.properties === 'object') {
-        const newProps = {};
-        for (const [propKey, propValue] of Object.entries(result.properties)) {
-            const propPath = currentPath
-                ? `${currentPath}.properties.${propKey}`
-                : `properties.${propKey}`;
-            const processed = flattenTypeArrays(propValue, localNullableFields, propPath);
-            newProps[propKey] = processed;
-
-            if (
-                processed &&
-                typeof processed === 'object' &&
-                typeof processed.description === 'string' &&
-                processed.description.includes('nullable')
-            ) {
-                const objectPath = currentPath || '';
-                const existing = localNullableFields.get(objectPath) || [];
-                existing.push(propKey);
-                localNullableFields.set(objectPath, existing);
-            }
-        }
-        result.properties = newProps;
-    }
-
-    // Remove nullable fields from required array at root level
-    if (Array.isArray(result.required) && !nullableFields) {
-        const nullableAtRoot = localNullableFields.get('') || [];
-        if (nullableAtRoot.length > 0) {
-            result.required = result.required.filter((r) => !nullableAtRoot.includes(r));
-            if (result.required.length === 0) {
-                delete result.required;
-            }
-        }
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (key !== 'properties' && typeof value === 'object' && value !== null) {
-            result[key] = flattenTypeArrays(
-                value,
-                localNullableFields,
-                `${currentPath || ''}.${key}`,
-            );
-        }
-    }
-
-    return result;
-}
-
-/**
- * Phase 3: Removes unsupported keywords after hints have been extracted.
+ * Phase 1b: Converts exclusiveMinimum/exclusiveMaximum to min/max + description hint.
  *
- * @param {Object} schema
- * @param {boolean} insideProperties - When true, keys are property NAMES (preserve)
- * @returns {Object}
+ * - For type: "integer": also sets minimum = exclusiveMinimum + 1 (or maximum - 1)
+ * - For type: "number": only adds description hint (conversion not exact for continuous values)
+ * - Phase 1 transforms do NOT delete original keywords — Phase 2 handles all deletion.
  */
-function removeUnsupportedKeywords(schema, insideProperties = false) {
+function convertExclusiveBounds(schema) {
     if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => removeUnsupportedKeywords(item, false));
+    if (Array.isArray(schema)) return schema.map(convertExclusiveBounds);
+
+    let result = { ...schema };
+
+    if (result.exclusiveMinimum !== undefined) {
+        const excMin = result.exclusiveMinimum;
+        result = appendDescriptionHint(result, `exclusiveMinimum: ${excMin}`);
+        if (result.type === 'integer' && result.minimum === undefined) {
+            result.minimum = excMin + 1;
+        }
+    }
+
+    if (result.exclusiveMaximum !== undefined) {
+        const excMax = result.exclusiveMaximum;
+        result = appendDescriptionHint(result, `exclusiveMaximum: ${excMax}`);
+        if (result.type === 'integer' && result.maximum === undefined) {
+            result.maximum = excMax - 1;
+        }
+    }
+
+    for (const [key, value] of Object.entries(result)) {
+        if (typeof value === 'object' && value !== null) {
+            result[key] = convertExclusiveBounds(value);
+        }
+    }
+
+    return result;
+}
+
+// ─── Phase 2: Whitelist Filter with Monitoring ──────────────────────────────
+
+/**
+ * Phase 2: Whitelist filter — only permit known-safe JSON Schema keywords.
+ * All keywords not in ALLOWED_KEYWORDS are stripped. Logging tiers:
+ *   - MONITORABLE_KEYWORDS:      warn-level  (future transform potential)
+ *   - unknown (not in any set):  info-level  (upstream schema changes)
+ *   - other KNOWN_UNSUPPORTED:   silent      (routine, no action needed)
+ */
+function filterToAllowedKeywords(schema, logger) {
+    if (!schema || typeof schema !== 'object') return schema;
+    if (Array.isArray(schema)) return schema.map((s) => filterToAllowedKeywords(s, logger));
 
     const result = {};
+
     for (const [key, value] of Object.entries(schema)) {
-        if (!insideProperties && UNSUPPORTED_KEYWORDS.has(key)) continue;
-
-        if (typeof value === 'object' && value !== null) {
-            if (key === 'properties') {
-                const propertiesResult = {};
+        if (ALLOWED_KEYWORDS.has(key)) {
+            // ── Allowed: recurse into sub-schemas ──
+            if (key === 'properties' && typeof value === 'object' && value !== null) {
+                const props = {};
                 for (const [propName, propSchema] of Object.entries(value)) {
-                    propertiesResult[propName] = removeUnsupportedKeywords(propSchema, false);
+                    props[propName] = filterToAllowedKeywords(propSchema, logger);
                 }
-                result[key] = propertiesResult;
+                result[key] = props;
+            } else if (
+                (key === 'items' || key === 'not' || key === 'additionalProperties') &&
+                typeof value === 'object' &&
+                value !== null
+            ) {
+                result[key] = filterToAllowedKeywords(value, logger);
+            } else if (
+                (key === 'allOf' || key === 'anyOf' || key === 'oneOf' || key === 'prefixItems') &&
+                Array.isArray(value)
+            ) {
+                result[key] = value.map((item) => filterToAllowedKeywords(item, logger));
             } else {
-                result[key] = removeUnsupportedKeywords(value, false);
+                result[key] = value;
             }
-        } else {
-            result[key] = value;
+            continue;
         }
+
+        // ── Not allowed: three-tier logging ──
+        if (MONITORABLE_KEYWORDS.has(key)) {
+            // Keyword with future transform potential — log for prioritization
+            if (logger) {
+                logger.warn(
+                    `[schema-sanitizer] Monitorable keyword stripped: "${key}" ` +
+                        `(value: ${JSON.stringify(value)?.slice(0, 200)})`,
+                );
+            }
+        } else if (!KNOWN_UNSUPPORTED_KEYWORDS.has(key)) {
+            // Unknown keyword — may indicate new upstream pattern or Antigravity support
+            if (logger) {
+                logger.info(
+                    `[schema-sanitizer] Unknown keyword stripped: "${key}" ` +
+                        `(value: ${JSON.stringify(value)?.slice(0, 100)})`,
+                );
+            }
+        }
+        // Known unsupported (not monitorable): strip silently
     }
 
     return result;
 }
 
-/**
- * Phase 3b: Cleans up required fields — removes entries that don't exist in properties.
- */
-function cleanupRequiredFields(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => cleanupRequiredFields(item));
-
-    const result = { ...schema };
-
-    if (
-        Array.isArray(result.required) &&
-        result.properties &&
-        typeof result.properties === 'object'
-    ) {
-        const validRequired = result.required.filter((req) =>
-            Object.prototype.hasOwnProperty.call(result.properties, req),
-        );
-        if (validRequired.length === 0) {
-            delete result.required;
-        } else if (validRequired.length !== result.required.length) {
-            result.required = validRequired;
-        }
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (typeof value === 'object' && value !== null) {
-            result[key] = cleanupRequiredFields(value);
-        }
-    }
-
-    return result;
-}
+// ─── Orchestration ──────────────────────────────────────────────────────────
 
 /**
- * Phase 4: Adds placeholder property for empty object schemas.
- * VALIDATED mode requires at least one property.
- */
-function addEmptySchemaPlaceholder(schema) {
-    if (!schema || typeof schema !== 'object') return schema;
-    if (Array.isArray(schema)) return schema.map((item) => addEmptySchemaPlaceholder(item));
-
-    const result = { ...schema };
-
-    if (result.type === 'object') {
-        const hasProperties =
-            result.properties &&
-            typeof result.properties === 'object' &&
-            Object.keys(result.properties).length > 0;
-
-        if (!hasProperties) {
-            result.properties = {
-                [EMPTY_SCHEMA_PLACEHOLDER_NAME]: {
-                    type: 'boolean',
-                    description: EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
-                },
-            };
-            result.required = [EMPTY_SCHEMA_PLACEHOLDER_NAME];
-        }
-    }
-
-    for (const [key, value] of Object.entries(result)) {
-        if (typeof value === 'object' && value !== null) {
-            result[key] = addEmptySchemaPlaceholder(value);
-        }
-    }
-
-    return result;
-}
-
-/**
- * Clean a JSON Schema for Antigravity API compatibility.
- * Transforms unsupported features into description hints while preserving
- * semantic information.
+ * Single-stage pure function that sanitizes a JSON Schema for Antigravity
+ * compatibility. Replaces the previous two-stage pipeline
+ * (cleanSchemaForAntigravity → toGeminiSchema).
  *
- * Ported from opencode-antigravity-auth request-helpers.ts
- * (cleanJSONSchemaForAntigravity)
+ * Phase 1: Semantic transforms (only output-producing transforms)
+ *   1a. const → enum
+ *   1b. exclusiveMin/Max → min/max + description hint
  *
- * @param {Object} schema - JSON Schema object
- * @returns {Object} Cleaned schema
+ * Phase 2: Whitelist filter — strip all non-allowed keywords with
+ *   three-tier logging (monitorable/unknown/silent).
+ *
+ * @param {Object} schema - JSON Schema object (JSON Schema 2020-12)
+ * @param {Object} [logger] - Logger with .warn() and .info() methods
+ * @returns {Object} Antigravity-safe schema (supported subset only)
  */
-function cleanSchemaForAntigravity(schema) {
+export function sanitizeSchemaForAntigravity(schema, logger) {
     if (!schema || typeof schema !== 'object') return schema;
 
     let result = schema;
 
-    // Phase 1: Convert and add hints (information-preserving transforms)
-    result = convertRefsToHints(result);
-    result = convertConstToEnum(result);
-    result = addEnumHints(result);
-    result = addAdditionalPropertiesHints(result);
-    result = moveConstraintsToDescription(result);
+    // ── Phase 1: Semantic Transforms (only output-producing transforms) ──
+    result = convertConstToEnum(result); // 1a: const → enum
+    result = convertExclusiveBounds(result); // 1b: exclusiveMin/Max → min/max + hint
 
-    // Phase 2: Flatten complex structures
-    result = mergeAllOf(result);
-    result = flattenAnyOfOneOf(result);
-    result = flattenTypeArrays(result);
-
-    // Phase 3: Remove unsupported keywords
-    result = removeUnsupportedKeywords(result);
-    result = cleanupRequiredFields(result);
-
-    // Phase 4: Add placeholder for empty object schemas
-    result = addEmptySchemaPlaceholder(result);
-
-    return result;
-}
-
-// ─── Tool Schema Sanitization — Stage 2: toGeminiSchema ─────────────────────
-// Ported from opencode-antigravity-auth gemini.ts (toGeminiSchema)
-
-/**
- * Transform a JSON Schema to Gemini-compatible format.
- *
- * Key transformations:
- * - Converts type values to uppercase (object → OBJECT)
- * - Removes unsupported fields (additionalProperties, $schema, etc.)
- * - Recursively processes nested schemas (properties, items, anyOf, etc.)
- * - Ensures arrays have items (Gemini API requirement)
- * - Filters required to only existing properties
- *
- * @param {*} schema - A JSON Schema object or primitive
- * @returns {*} Gemini-compatible schema
- */
-function toGeminiSchema(schema) {
-    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-        return schema;
-    }
-
-    const result = {};
-    const propertyNames = new Set();
-
-    // Collect property names for required validation
-    if (schema.properties && typeof schema.properties === 'object') {
-        for (const name of Object.keys(schema.properties)) {
-            propertyNames.add(name);
-        }
-    }
-
-    for (const [key, value] of Object.entries(schema)) {
-        if (UNSUPPORTED_GEMINI_FIELDS.has(key)) continue;
-
-        if (key === 'type' && typeof value === 'string') {
-            result[key] = value.toUpperCase();
-        } else if (key === 'properties' && typeof value === 'object' && value !== null) {
-            const props = {};
-            for (const [propName, propSchema] of Object.entries(value)) {
-                props[propName] = toGeminiSchema(propSchema);
-            }
-            result[key] = props;
-        } else if (key === 'items' && typeof value === 'object') {
-            result[key] = toGeminiSchema(value);
-        } else if (
-            (key === 'anyOf' || key === 'oneOf' || key === 'allOf') &&
-            Array.isArray(value)
-        ) {
-            result[key] = value.map((item) => toGeminiSchema(item));
-        } else if (key === 'required' && Array.isArray(value)) {
-            if (propertyNames.size > 0) {
-                const valid = value.filter((p) => typeof p === 'string' && propertyNames.has(p));
-                if (valid.length > 0) result[key] = valid;
-            } else {
-                result[key] = value;
-            }
-        } else {
-            result[key] = value;
-        }
-    }
-
-    // Arrays must have items (Gemini API requirement)
-    if (result.type === 'ARRAY' && !result.items) {
-        result.items = { type: 'STRING' };
-    }
+    // ── Phase 2: Whitelist Filter ──
+    result = filterToAllowedKeywords(result, logger); // 2a-c: strip + log (monitorable/unknown)
 
     return result;
 }
@@ -944,14 +567,14 @@ export function anthropicToGoogle(anthropicRequest) {
         }
     }
 
-    // Tools — sanitize schemas through the two-stage pipeline
+    // Tools — sanitize schemas through the single-stage whitelist-based sanitizer (RFC-006)
     if (tools?.length) {
         googleRequest.tools = [
             {
                 functionDeclarations: tools.map((tool) => ({
                     name: tool.name,
                     description: tool.description,
-                    parameters: cleanSchemaForAntigravity(tool.input_schema),
+                    parameters: sanitizeSchemaForAntigravity(tool.input_schema),
                 })),
             },
         ];
