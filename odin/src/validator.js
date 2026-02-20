@@ -109,7 +109,7 @@ const messagesRequestSchema = {
             type: 'array',
             items: {
                 type: 'object',
-                required: ['name'],
+                required: ['name', 'input_schema'],
                 properties: {
                     name: {
                         type: 'string',

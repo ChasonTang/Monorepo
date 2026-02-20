@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { ANTIGRAVITY_SYSTEM_INSTRUCTION, isThinkingModel } from './constants.js';
+import { CLAUDE_THINKING_MAX_OUTPUT_TOKENS } from './constants.js';
 
 // ─── Unsupported Content Block Types ────────────────────────────────────────
 
@@ -825,23 +825,12 @@ function convertContentToParts(content) {
                 }
                 break;
 
-            case 'image':
-                if (block.source?.type === 'base64') {
-                    parts.push({
-                        inlineData: {
-                            mimeType: block.source.media_type,
-                            data: block.source.data,
-                        },
-                    });
-                }
-                break;
-
             case 'tool_use':
                 parts.push({
                     functionCall: {
                         id: block.id,
                         name: block.name,
-                        args: block.input || {},
+                        args: block.input,
                     },
                 });
                 break;
@@ -890,7 +879,6 @@ function convertContentToParts(content) {
  */
 export function anthropicToGoogle(anthropicRequest) {
     const {
-        model,
         messages,
         system,
         max_tokens,
@@ -907,31 +895,18 @@ export function anthropicToGoogle(anthropicRequest) {
         generationConfig: {},
     };
 
-    // Convert system instruction with Antigravity identity injection
-    // Both reference implementations require this for CLIProxyAPI v6.6.89 compatibility
-    const systemParts = [{ text: ANTIGRAVITY_SYSTEM_INSTRUCTION }];
-
     if (system) {
-        const userSystemParts =
-            typeof system === 'string'
-                ? [{ text: system }]
-                : system.map((b) => ({ text: b.text }));
-        systemParts.push(...userSystemParts);
+        googleRequest.systemInstruction = {
+            parts:
+                typeof system === 'string'
+                    ? [{ text: system }]
+                    : system.map((b) => ({ text: b.text })),
+        };
     }
-
-    googleRequest.systemInstruction = {
-        role: 'user',
-        parts: systemParts,
-    };
 
     // Convert messages to contents
     for (const msg of messages) {
         const parts = convertContentToParts(msg.content);
-        // Google API requires at least one part per content message.
-        // This can happen when all thinking blocks are filtered out (unsigned).
-        if (parts.length === 0) {
-            parts.push({ text: '.' });
-        }
         googleRequest.contents.push({
             role: msg.role === 'assistant' ? 'model' : 'user',
             parts,
@@ -939,23 +914,33 @@ export function anthropicToGoogle(anthropicRequest) {
     }
 
     // Generation config
-    if (max_tokens) googleRequest.generationConfig.maxOutputTokens = max_tokens;
-    if (temperature !== undefined) googleRequest.generationConfig.temperature = temperature;
-    if (top_p !== undefined) googleRequest.generationConfig.topP = top_p;
-    if (top_k !== undefined) googleRequest.generationConfig.topK = top_k;
-    if (stop_sequences?.length) googleRequest.generationConfig.stopSequences = stop_sequences;
+    if (max_tokens) {
+        googleRequest.generationConfig.maxOutputTokens = max_tokens;
+    }
+    if (temperature !== undefined) {
+        googleRequest.generationConfig.temperature = temperature;
+    }
+    if (top_p !== undefined) {
+        googleRequest.generationConfig.topP = top_p;
+    }
+    if (top_k !== undefined) {
+        googleRequest.generationConfig.topK = top_k;
+    }
+    if (stop_sequences?.length) {
+        googleRequest.generationConfig.stopSequences = stop_sequences;
+    }
 
     // Thinking config for thinking models
-    if (isThinkingModel(model)) {
-        const thinkingBudget = thinking?.budget_tokens;
+    if (thinking) {
+        const thinkingBudget = thinking.budget_tokens;
         googleRequest.generationConfig.thinkingConfig = {
-            include_thoughts: true,
-            ...(thinkingBudget ? { thinking_budget: thinkingBudget } : {}),
+            include_thoughts: thinking.type !== 'disabled',
+            thinking_budget: thinkingBudget,
         };
 
         // Validate max_tokens > thinking_budget (API requirement)
-        if (thinkingBudget && max_tokens && max_tokens <= thinkingBudget) {
-            googleRequest.generationConfig.maxOutputTokens = thinkingBudget + 8192;
+        if (thinkingBudget !== undefined && max_tokens <= thinkingBudget) {
+            googleRequest.generationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
         }
     }
 
@@ -965,16 +950,11 @@ export function anthropicToGoogle(anthropicRequest) {
             {
                 functionDeclarations: tools.map((tool) => ({
                     name: tool.name,
-                    description: tool.description || '',
-                    parameters: toGeminiSchema(
-                        cleanSchemaForAntigravity(tool.input_schema || { type: 'object' }),
-                    ),
+                    description: tool.description,
+                    parameters: cleanSchemaForAntigravity(tool.input_schema),
                 })),
             },
         ];
-        googleRequest.toolConfig = {
-            functionCallingConfig: { mode: 'VALIDATED' },
-        };
     }
 
     return googleRequest;

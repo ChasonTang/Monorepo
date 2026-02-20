@@ -11,6 +11,8 @@ export const STREAMING_URL = `${CLOUDCODE_ENDPOINT}/v1internal:streamGenerateCon
 /** Hardcoded project ID (TODO: dynamic fetch via loadCodeAssist API in future) */
 export const PROJECT_ID = 'rising-fact-p41fc';
 
+export const CLAUDE_THINKING_MAX_OUTPUT_TOKENS = 64_000;
+
 // ─── Antigravity System Instruction ─────────────────────────────────────────
 
 /**
