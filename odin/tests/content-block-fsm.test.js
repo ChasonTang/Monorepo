@@ -19,9 +19,7 @@ function eventTypes(events) {
 }
 
 function deltaTypes(events) {
-    return events
-        .filter((e) => e.event === 'content_block_delta')
-        .map((e) => e.data.delta.type);
+    return events.filter((e) => e.event === 'content_block_delta').map((e) => e.data.delta.type);
 }
 
 // ─── classifyPart ────────────────────────────────────────────────────────────
@@ -36,10 +34,7 @@ describe('classifyPart', () => {
     });
 
     it('classifies functionCall part as tool_use', () => {
-        assert.equal(
-            classifyPart({ functionCall: { name: 'f', args: {} } }),
-            'tool_use',
-        );
+        assert.equal(classifyPart({ functionCall: { name: 'f', args: {} } }), 'tool_use');
     });
 
     it('returns null for unknown part shape', () => {
@@ -108,10 +103,7 @@ describe('ContentBlockFSM', () => {
         const e1 = fsm.process({ thought: true, text: '...' });
         const e2 = fsm.process({ text: 'hi' });
 
-        assert.deepStrictEqual(eventTypes(e1), [
-            'content_block_start',
-            'content_block_delta',
-        ]);
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
         assert.equal(e1[0].data.index, 0);
 
         assert.deepStrictEqual(eventTypes(e2), [
@@ -134,10 +126,7 @@ describe('ContentBlockFSM', () => {
         const e1 = fsm.process({ thought: true, text: 'a' });
         const e2 = fsm.process({ thought: true, text: 'b' });
 
-        assert.deepStrictEqual(eventTypes(e1), [
-            'content_block_start',
-            'content_block_delta',
-        ]);
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
         assert.deepStrictEqual(eventTypes(e2), ['content_block_delta']);
         assert.equal(e2[0].data.index, 0);
         assert.deepStrictEqual(e2[0].data.delta, {
@@ -152,10 +141,7 @@ describe('ContentBlockFSM', () => {
         const e1 = fsm.process({ text: 'a' });
         const e2 = fsm.process({ text: 'b' });
 
-        assert.deepStrictEqual(eventTypes(e1), [
-            'content_block_start',
-            'content_block_delta',
-        ]);
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
         assert.deepStrictEqual(eventTypes(e2), ['content_block_delta']);
         assert.equal(e2[0].data.index, 0);
         assert.deepStrictEqual(e2[0].data.delta, {
@@ -174,10 +160,7 @@ describe('ContentBlockFSM', () => {
             functionCall: { name: 'f2', args: {} },
         });
 
-        assert.deepStrictEqual(eventTypes(e1), [
-            'content_block_start',
-            'content_block_delta',
-        ]);
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
         assert.equal(e1[0].data.index, 0);
         assert.equal(e1[0].data.content_block.type, 'tool_use');
         assert.equal(e1[0].data.content_block.name, 'f1');
@@ -200,10 +183,7 @@ describe('ContentBlockFSM', () => {
             functionCall: { name: 'f', args: {} },
         });
 
-        assert.deepStrictEqual(eventTypes(e1), [
-            'content_block_start',
-            'content_block_delta',
-        ]);
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
         assert.equal(e1[0].data.index, 0);
 
         assert.deepStrictEqual(eventTypes(e2), [
@@ -232,10 +212,7 @@ describe('ContentBlockFSM', () => {
             'content_block_delta',
             'content_block_delta',
         ]);
-        assert.deepStrictEqual(deltaTypes(events), [
-            'thinking_delta',
-            'signature_delta',
-        ]);
+        assert.deepStrictEqual(deltaTypes(events), ['thinking_delta', 'signature_delta']);
         assert.equal(events[2].data.delta.signature, sig);
     });
 
@@ -282,12 +259,8 @@ describe('ContentBlockFSM', () => {
     it('§6.13 — full stream with thinking + text + tool_use produces correct event sequence', () => {
         const allEvents = [];
 
-        allEvents.push(
-            ...fsm.process({ thought: true, text: 'Let me think...' }),
-        );
-        allEvents.push(
-            ...fsm.process({ thought: true, text: 'I see.' }),
-        );
+        allEvents.push(...fsm.process({ thought: true, text: 'Let me think...' }));
+        allEvents.push(...fsm.process({ thought: true, text: 'I see.' }));
         allEvents.push(...fsm.process({ text: 'Here is my answer.' }));
         allEvents.push(
             ...fsm.process({
@@ -375,9 +348,7 @@ describe('ContentBlockFSM', () => {
         const events = fsm.process({
             functionCall: { name: 'test_fn', args: { a: 1 } },
         });
-        const startEvent = events.find(
-            (e) => e.event === 'content_block_start',
-        );
+        const startEvent = events.find((e) => e.event === 'content_block_start');
         assert.ok(startEvent.data.content_block.id.startsWith('toolu_'));
     });
 
@@ -398,10 +369,30 @@ describe('ContentBlockFSM', () => {
         assert.equal(delta.data.delta.partial_json, '{}');
     });
 
-    it('thinking with empty text emits empty string delta', () => {
+    it('thinking with empty text skips thinking_delta', () => {
         const events = fsm.process({ thought: true });
-        const delta = events.find((e) => e.event === 'content_block_delta');
-        assert.equal(delta.data.delta.thinking, '');
+        assert.equal(events.length, 1);
+        assert.equal(events[0].event, 'content_block_start');
+        assert.deepStrictEqual(events[0].data.content_block, {
+            type: 'thinking',
+            thinking: '',
+        });
+    });
+
+    it('final thinking chunk with empty text and signature emits only signature_delta', () => {
+        fsm.process({ thought: true, text: 'some thinking' });
+
+        const sig = 'a'.repeat(50);
+        const events = fsm.process({
+            thought: true,
+            text: '',
+            thoughtSignature: sig,
+        });
+
+        assert.equal(events.length, 1);
+        assert.equal(events[0].event, 'content_block_delta');
+        assert.equal(events[0].data.delta.type, 'signature_delta');
+        assert.equal(events[0].data.delta.signature, sig);
     });
 
     it('flush() is idempotent — second call returns empty', () => {

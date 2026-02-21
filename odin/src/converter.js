@@ -712,6 +712,7 @@ export function classifyPart(part) {
     if (part.thought === true) return 'thinking';
     if (part.text !== undefined) return 'text';
     if (part.functionCall) return 'tool_use';
+
     return null;
 }
 
@@ -762,14 +763,16 @@ export class ContentBlockFSM {
             });
         }
 
-        events.push({
-            event: 'content_block_delta',
-            data: {
-                type: 'content_block_delta',
-                index: this.#blockIndex,
-                delta: def.makeDelta(part),
-            },
-        });
+        if (type !== 'thinking' || part.text) {
+            events.push({
+                event: 'content_block_delta',
+                data: {
+                    type: 'content_block_delta',
+                    index: this.#blockIndex,
+                    delta: def.makeDelta(part),
+                },
+            });
+        }
 
         if (type === 'thinking' && part.thoughtSignature?.length >= 50) {
             events.push({
@@ -806,6 +809,7 @@ export class ContentBlockFSM {
             },
         ];
         this.#state = null;
+
         return events;
     }
 
@@ -829,6 +833,7 @@ function formatAndLog(event, data, debug) {
     if (debug) {
         console.error(`[Odin:debug] → SSE:`, sse.trimEnd());
     }
+
     return sse;
 }
 
@@ -861,7 +866,7 @@ export async function* streamSSEResponse(stream, model, debug = false) {
         if (usage) {
             inputTokens = usage.promptTokenCount || inputTokens;
             outputTokens = usage.candidatesTokenCount || outputTokens;
-            cacheReadTokens = usage.cachedContentTokenCount || cacheReadTokens;
+            cacheReadTokens = usage.cachedContentTokenCount ?? cacheReadTokens;
         }
 
         if (!hasEmittedStart && parts.length > 0) {
@@ -974,7 +979,7 @@ export function googleToAnthropic(googleResponse, model) {
 
     // Usage calculation
     const usage = response.usageMetadata || {};
-    const cachedTokens = usage.cachedContentTokenCount || 0;
+    const cachedTokens = usage.cachedContentTokenCount ?? 0;
 
     return {
         id: `msg_${randomHex(16)}`,
