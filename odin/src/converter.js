@@ -596,30 +596,18 @@ function formatSSE(event, data) {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-// ─── SSE Stream Conversion (Google → Anthropic) ─────────────────────────────
+// ─── SSE Stream Layer 1: Stream Framer ───────────────────────────────────────
 
 /**
- * Stream and convert Google SSE events to Anthropic format.
+ * Read a ReadableStream and yield individual text lines.
  *
- * Reads the response body stream from Cloud Code, parses each SSE data line,
- * and yields Anthropic-format SSE event strings. Handles thinking blocks,
- * text blocks, and tool use blocks with correct block indexing.
+ * Handles incremental decoding and line buffering. The final
+ * partial line (if any) is yielded when the stream closes.
  *
- * @param {ReadableStream} stream - Response body stream from Cloud Code
- * @param {string} model - Model name for the response
- * @param {boolean} [debug=false] - Enable debug logging of SSE chunks
- * @yields {string} Anthropic SSE event lines
+ * @param {ReadableStream} stream
+ * @yields {string} Individual text lines (without trailing newline)
  */
-export async function* streamSSEResponse(stream, model, debug = false) {
-    const messageId = `msg_${randomHex(16)}`;
-    let blockIndex = 0;
-    let currentBlockType = null;
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let cacheReadTokens = 0;
-    let stopReason = null;
-    let hasEmittedStart = false;
-
+async function* readSSELines(stream) {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -633,211 +621,309 @@ export async function* streamSSEResponse(stream, model, debug = false) {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-            if (!line.startsWith('data:')) continue;
-
-            const jsonText = line.slice(5).trim();
-            if (!jsonText) continue;
-
-            if (debug) {
-                console.error(`[Odin:debug] ← SSE:`, line.trimEnd());
-            }
-
-            try {
-                const data = JSON.parse(jsonText);
-                const innerResponse = data.response || data;
-
-                // Update usage
-                const usage = innerResponse.usageMetadata;
-                if (usage) {
-                    inputTokens = usage.promptTokenCount || inputTokens;
-                    outputTokens = usage.candidatesTokenCount || outputTokens;
-                    cacheReadTokens = usage.cachedContentTokenCount || cacheReadTokens;
-                }
-
-                const parts = innerResponse.candidates?.[0]?.content?.parts || [];
-
-                // Emit message_start on first content
-                if (!hasEmittedStart && parts.length > 0) {
-                    hasEmittedStart = true;
-                    const event = formatSSE('message_start', {
-                        type: 'message_start',
-                        message: {
-                            id: messageId,
-                            type: 'message',
-                            role: 'assistant',
-                            content: [],
-                            model,
-                            stop_reason: null,
-                            stop_sequence: null,
-                            usage: {
-                                input_tokens: inputTokens - cacheReadTokens,
-                                output_tokens: 0,
-                                cache_read_input_tokens: cacheReadTokens,
-                                cache_creation_input_tokens: 0,
-                            },
-                        },
-                    });
-                    if (debug) {
-                        console.error(`[Odin:debug] → SSE:`, event.trimEnd());
-                    }
-                    yield event;
-                }
-
-                // Process parts
-                for (const part of parts) {
-                    if (part.thought === true) {
-                        // Thinking block
-                        if (currentBlockType !== 'thinking') {
-                            if (currentBlockType !== null) {
-                                const stopEvent = formatSSE('content_block_stop', {
-                                    type: 'content_block_stop',
-                                    index: blockIndex,
-                                });
-                                if (debug)
-                                    console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
-                                yield stopEvent;
-                                blockIndex++;
-                            }
-                            currentBlockType = 'thinking';
-                            const startEvent = formatSSE('content_block_start', {
-                                type: 'content_block_start',
-                                index: blockIndex,
-                                content_block: { type: 'thinking', thinking: '' },
-                            });
-                            if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
-                            yield startEvent;
-                        }
-                        const deltaEvent = formatSSE('content_block_delta', {
-                            type: 'content_block_delta',
-                            index: blockIndex,
-                            delta: { type: 'thinking_delta', thinking: part.text || '' },
-                        });
-                        if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
-                        yield deltaEvent;
-
-                        // Emit signature if present
-                        if (part.thoughtSignature?.length >= 50) {
-                            const sigEvent = formatSSE('content_block_delta', {
-                                type: 'content_block_delta',
-                                index: blockIndex,
-                                delta: {
-                                    type: 'signature_delta',
-                                    signature: part.thoughtSignature,
-                                },
-                            });
-                            if (debug) console.error(`[Odin:debug] → SSE:`, sigEvent.trimEnd());
-                            yield sigEvent;
-                        }
-                    } else if (part.text !== undefined) {
-                        // Text block
-                        if (currentBlockType !== 'text') {
-                            if (currentBlockType !== null) {
-                                const stopEvent = formatSSE('content_block_stop', {
-                                    type: 'content_block_stop',
-                                    index: blockIndex,
-                                });
-                                if (debug)
-                                    console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
-                                yield stopEvent;
-                                blockIndex++;
-                            }
-                            currentBlockType = 'text';
-                            const startEvent = formatSSE('content_block_start', {
-                                type: 'content_block_start',
-                                index: blockIndex,
-                                content_block: { type: 'text', text: '' },
-                            });
-                            if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
-                            yield startEvent;
-                        }
-                        const deltaEvent = formatSSE('content_block_delta', {
-                            type: 'content_block_delta',
-                            index: blockIndex,
-                            delta: { type: 'text_delta', text: part.text },
-                        });
-                        if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
-                        yield deltaEvent;
-                    } else if (part.functionCall) {
-                        // Tool use block — each tool call gets its own block
-                        if (currentBlockType !== null) {
-                            const stopEvent = formatSSE('content_block_stop', {
-                                type: 'content_block_stop',
-                                index: blockIndex,
-                            });
-                            if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
-                            yield stopEvent;
-                            blockIndex++;
-                        }
-                        currentBlockType = 'tool_use';
-                        stopReason = 'tool_use';
-
-                        const toolId = part.functionCall.id || `toolu_${randomHex(12)}`;
-                        const startEvent = formatSSE('content_block_start', {
-                            type: 'content_block_start',
-                            index: blockIndex,
-                            content_block: {
-                                type: 'tool_use',
-                                id: toolId,
-                                name: part.functionCall.name,
-                                input: {},
-                            },
-                        });
-                        if (debug) console.error(`[Odin:debug] → SSE:`, startEvent.trimEnd());
-                        yield startEvent;
-
-                        const deltaEvent = formatSSE('content_block_delta', {
-                            type: 'content_block_delta',
-                            index: blockIndex,
-                            delta: {
-                                type: 'input_json_delta',
-                                partial_json: JSON.stringify(part.functionCall.args || {}),
-                            },
-                        });
-                        if (debug) console.error(`[Odin:debug] → SSE:`, deltaEvent.trimEnd());
-                        yield deltaEvent;
-                    }
-                }
-
-                // Check finish reason
-                const finishReason = innerResponse.candidates?.[0]?.finishReason;
-                if (finishReason && !stopReason) {
-                    stopReason = finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn';
-                }
-            } catch (e) {
-                // Skip malformed JSON
-                if (debug) {
-                    console.error(`[Odin:debug] ← SSE parse error:`, e.message);
-                }
-            }
+            yield line;
         }
     }
 
-    // Close final block
-    if (currentBlockType !== null) {
-        const stopEvent = formatSSE('content_block_stop', {
-            type: 'content_block_stop',
-            index: blockIndex,
+    if (buffer) {
+        yield buffer;
+    }
+}
+
+// ─── SSE Stream Layer 2: Event Parser ────────────────────────────────────────
+
+/**
+ * Parse SSE data lines into structured Google events.
+ *
+ * @param {AsyncIterable<string>} lines - Line stream from readSSELines
+ * @param {boolean} debug - Enable debug logging
+ * @yields {{ parts: Array, usage: Object|null, finishReason: string|null }}
+ */
+async function* parseGoogleSSEEvents(lines, debug) {
+    for await (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+
+        const jsonText = line.slice(5).trim();
+        if (!jsonText) continue;
+
+        if (debug) {
+            console.error(`[Odin:debug] ← SSE:`, line.trimEnd());
+        }
+
+        try {
+            const data = JSON.parse(jsonText);
+            const inner = data.response || data;
+
+            yield {
+                parts: inner.candidates?.[0]?.content?.parts || [],
+                usage: inner.usageMetadata || null,
+                finishReason: inner.candidates?.[0]?.finishReason || null,
+            };
+        } catch (e) {
+            if (debug) {
+                console.error(`[Odin:debug] ← SSE parse error:`, e.message);
+            }
+        }
+    }
+}
+
+// ─── SSE Stream Layer 3: Content Block FSM ───────────────────────────────────
+
+/**
+ * Block-type definitions: maps input type to block start/delta constructors.
+ *
+ * Each entry defines how to create the content_block for block_start,
+ * and how to create the delta for block_delta. This table replaces
+ * the triplicated if/else branches.
+ */
+const BLOCK_TYPES = {
+    thinking: {
+        makeStartBlock: () => ({ type: 'thinking', thinking: '' }),
+        makeDelta: (part) => ({ type: 'thinking_delta', thinking: part.text || '' }),
+        alwaysNewBlock: false,
+    },
+    text: {
+        makeStartBlock: () => ({ type: 'text', text: '' }),
+        makeDelta: (part) => ({ type: 'text_delta', text: part.text }),
+        alwaysNewBlock: false,
+    },
+    tool_use: {
+        makeStartBlock: (part) => ({
+            type: 'tool_use',
+            id: part.functionCall.id || `toolu_${randomHex(12)}`,
+            name: part.functionCall.name,
+            input: {},
+        }),
+        makeDelta: (part) => ({
+            type: 'input_json_delta',
+            partial_json: JSON.stringify(part.functionCall.args || {}),
+        }),
+        alwaysNewBlock: true,
+    },
+};
+
+/**
+ * Classify a Google part into a block type key.
+ *
+ * @param {Object} part - A Google content part
+ * @returns {string|null} One of 'thinking', 'text', 'tool_use', or null
+ */
+export function classifyPart(part) {
+    if (part.thought === true) return 'thinking';
+    if (part.text !== undefined) return 'text';
+    if (part.functionCall) return 'tool_use';
+    return null;
+}
+
+/**
+ * Content Block FSM.
+ *
+ * Manages content block lifecycle (start/delta/stop) with a
+ * table-driven transition model. Replaces the triplicated
+ * if/else branches in the original streamSSEResponse.
+ */
+export class ContentBlockFSM {
+    #state = null;
+    #blockIndex = 0;
+    #hasToolUse = false;
+
+    /**
+     * Process a single Google part and return the Anthropic SSE events to emit.
+     *
+     * @param {Object} part - Google content part
+     * @returns {Array<{event: string, data: Object}>} Events to emit
+     */
+    process(part) {
+        const type = classifyPart(part);
+        if (!type) return [];
+
+        const def = BLOCK_TYPES[type];
+        const events = [];
+
+        const needsNewBlock = this.#state !== type || def.alwaysNewBlock;
+
+        if (needsNewBlock) {
+            if (this.#state !== null) {
+                events.push({
+                    event: 'content_block_stop',
+                    data: { type: 'content_block_stop', index: this.#blockIndex },
+                });
+                this.#blockIndex++;
+            }
+
+            this.#state = type;
+            events.push({
+                event: 'content_block_start',
+                data: {
+                    type: 'content_block_start',
+                    index: this.#blockIndex,
+                    content_block: def.makeStartBlock(part),
+                },
+            });
+        }
+
+        events.push({
+            event: 'content_block_delta',
+            data: {
+                type: 'content_block_delta',
+                index: this.#blockIndex,
+                delta: def.makeDelta(part),
+            },
         });
-        if (debug) console.error(`[Odin:debug] → SSE:`, stopEvent.trimEnd());
-        yield stopEvent;
+
+        if (type === 'thinking' && part.thoughtSignature?.length >= 50) {
+            events.push({
+                event: 'content_block_delta',
+                data: {
+                    type: 'content_block_delta',
+                    index: this.#blockIndex,
+                    delta: {
+                        type: 'signature_delta',
+                        signature: part.thoughtSignature,
+                    },
+                },
+            });
+        }
+
+        if (type === 'tool_use') {
+            this.#hasToolUse = true;
+        }
+
+        return events;
     }
 
-    // Emit message_delta and message_stop
-    const msgDelta = formatSSE('message_delta', {
-        type: 'message_delta',
-        delta: { stop_reason: stopReason || 'end_turn', stop_sequence: null },
-        usage: {
-            output_tokens: outputTokens,
-            cache_read_input_tokens: cacheReadTokens,
-            cache_creation_input_tokens: 0,
-        },
-    });
-    if (debug) console.error(`[Odin:debug] → SSE:`, msgDelta.trimEnd());
-    yield msgDelta;
+    /**
+     * Flush: close the final open block (if any).
+     *
+     * @returns {Array<{event: string, data: Object}>} Final close event(s)
+     */
+    flush() {
+        if (this.#state === null) return [];
+        const events = [
+            {
+                event: 'content_block_stop',
+                data: { type: 'content_block_stop', index: this.#blockIndex },
+            },
+        ];
+        this.#state = null;
+        return events;
+    }
 
-    const msgStop = formatSSE('message_stop', { type: 'message_stop' });
-    if (debug) console.error(`[Odin:debug] → SSE:`, msgStop.trimEnd());
-    yield msgStop;
+    get hasToolUse() {
+        return this.#hasToolUse;
+    }
+}
+
+// ─── SSE Debug Helper ────────────────────────────────────────────────────────
+
+/**
+ * Format and optionally log an SSE event.
+ *
+ * @param {string} event - Event type
+ * @param {Object} data - Event data
+ * @param {boolean} debug - Whether to log
+ * @returns {string} Formatted SSE string
+ */
+function formatAndLog(event, data, debug) {
+    const sse = formatSSE(event, data);
+    if (debug) {
+        console.error(`[Odin:debug] → SSE:`, sse.trimEnd());
+    }
+    return sse;
+}
+
+// ─── SSE Stream Conversion (Google → Anthropic) ─────────────────────────────
+
+/**
+ * Stream and convert Google SSE events to Anthropic format.
+ *
+ * Composes three layers (stream framer, event parser, content block FSM)
+ * and handles the protocol envelope (message_start/delta/stop) inline.
+ *
+ * @param {ReadableStream} stream - Response body stream from Cloud Code
+ * @param {string} model - Model name for the response
+ * @param {boolean} [debug=false] - Enable debug logging of SSE chunks
+ * @yields {string} Anthropic SSE event lines
+ */
+export async function* streamSSEResponse(stream, model, debug = false) {
+    const messageId = `msg_${randomHex(16)}`;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let stopReason = null;
+    let hasEmittedStart = false;
+
+    const fsm = new ContentBlockFSM();
+
+    const events = parseGoogleSSEEvents(readSSELines(stream), debug);
+
+    for await (const { parts, usage, finishReason } of events) {
+        if (usage) {
+            inputTokens = usage.promptTokenCount || inputTokens;
+            outputTokens = usage.candidatesTokenCount || outputTokens;
+            cacheReadTokens = usage.cachedContentTokenCount || cacheReadTokens;
+        }
+
+        if (!hasEmittedStart && parts.length > 0) {
+            hasEmittedStart = true;
+            yield formatAndLog(
+                'message_start',
+                {
+                    type: 'message_start',
+                    message: {
+                        id: messageId,
+                        type: 'message',
+                        role: 'assistant',
+                        content: [],
+                        model,
+                        stop_reason: null,
+                        stop_sequence: null,
+                        usage: {
+                            input_tokens: inputTokens - cacheReadTokens,
+                            output_tokens: 0,
+                            cache_read_input_tokens: cacheReadTokens,
+                            cache_creation_input_tokens: 0,
+                        },
+                    },
+                },
+                debug,
+            );
+        }
+
+        for (const part of parts) {
+            for (const fsmEvent of fsm.process(part)) {
+                yield formatAndLog(fsmEvent.event, fsmEvent.data, debug);
+            }
+        }
+
+        if (finishReason && !stopReason) {
+            stopReason = finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn';
+        }
+    }
+
+    for (const fsmEvent of fsm.flush()) {
+        yield formatAndLog(fsmEvent.event, fsmEvent.data, debug);
+    }
+
+    if (fsm.hasToolUse && !stopReason) {
+        stopReason = 'tool_use';
+    }
+
+    yield formatAndLog(
+        'message_delta',
+        {
+            type: 'message_delta',
+            delta: { stop_reason: stopReason || 'end_turn', stop_sequence: null },
+            usage: {
+                output_tokens: outputTokens,
+                cache_read_input_tokens: cacheReadTokens,
+                cache_creation_input_tokens: 0,
+            },
+        },
+        debug,
+    );
+
+    yield formatAndLog('message_stop', { type: 'message_stop' }, debug);
 }
 
 // ─── Response Conversion (Google → Anthropic) ───────────────────────────────
