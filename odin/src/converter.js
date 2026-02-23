@@ -658,6 +658,7 @@ async function* parseGoogleSSEEvents(lines, debug) {
                 parts: inner.candidates?.[0]?.content?.parts || [],
                 usage: inner.usageMetadata || null,
                 finishReason: inner.candidates?.[0]?.finishReason || null,
+                responseId: inner.responseId || null,
             };
         } catch (e) {
             if (debug) {
@@ -851,7 +852,7 @@ function formatAndLog(event, data, debug) {
  * @yields {string} Anthropic SSE event lines
  */
 export async function* streamSSEResponse(stream, model, debug = false) {
-    const messageId = `msg_${randomHex(16)}`;
+    let messageId = null;
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheReadTokens = 0;
@@ -862,7 +863,10 @@ export async function* streamSSEResponse(stream, model, debug = false) {
 
     const events = parseGoogleSSEEvents(readSSELines(stream), debug);
 
-    for await (const { parts, usage, finishReason } of events) {
+    for await (const { parts, usage, finishReason, responseId } of events) {
+        if (responseId && !messageId) {
+            messageId = responseId;
+        }
         if (usage) {
             inputTokens = usage.promptTokenCount || inputTokens;
             outputTokens = usage.candidatesTokenCount || outputTokens;
@@ -871,6 +875,9 @@ export async function* streamSSEResponse(stream, model, debug = false) {
 
         if (!hasEmittedStart && parts.length > 0) {
             hasEmittedStart = true;
+            if (!messageId) {
+                throw new Error('Antigravity response missing required responseId field');
+            }
             yield formatAndLog(
                 'message_start',
                 {
@@ -929,71 +936,4 @@ export async function* streamSSEResponse(stream, model, debug = false) {
     );
 
     yield formatAndLog('message_stop', { type: 'message_stop' }, debug);
-}
-
-// ─── Response Conversion (Google → Anthropic) ───────────────────────────────
-
-/**
- * Convert Google response to Anthropic format.
- *
- * @param {Object} googleResponse - Google Generative AI response
- * @param {string} model - Model name for the response
- * @returns {Object} Anthropic Messages API response
- */
-export function googleToAnthropic(googleResponse, model) {
-    const response = googleResponse.response || googleResponse;
-    const candidates = response.candidates || [];
-    const firstCandidate = candidates[0] || {};
-    const parts = firstCandidate.content?.parts || [];
-
-    const content = [];
-    let hasToolCalls = false;
-
-    for (const part of parts) {
-        if (part.text !== undefined) {
-            if (part.thought === true) {
-                content.push({
-                    type: 'thinking',
-                    thinking: part.text,
-                    signature: part.thoughtSignature || '',
-                });
-            } else {
-                content.push({ type: 'text', text: part.text });
-            }
-        } else if (part.functionCall) {
-            content.push({
-                type: 'tool_use',
-                id: part.functionCall.id || `toolu_${randomHex(12)}`,
-                name: part.functionCall.name,
-                input: part.functionCall.args || {},
-            });
-            hasToolCalls = true;
-        }
-    }
-
-    // Determine stop reason
-    const finishReason = firstCandidate.finishReason;
-    let stopReason = 'end_turn';
-    if (finishReason === 'MAX_TOKENS') stopReason = 'max_tokens';
-    else if (hasToolCalls) stopReason = 'tool_use';
-
-    // Usage calculation
-    const usage = response.usageMetadata || {};
-    const cachedTokens = usage.cachedContentTokenCount ?? 0;
-
-    return {
-        id: `msg_${randomHex(16)}`,
-        type: 'message',
-        role: 'assistant',
-        content: content.length > 0 ? content : [{ type: 'text', text: '' }],
-        model,
-        stop_reason: stopReason,
-        stop_sequence: null,
-        usage: {
-            input_tokens: (usage.promptTokenCount || 0) - cachedTokens,
-            output_tokens: usage.candidatesTokenCount || 0,
-            cache_read_input_tokens: cachedTokens,
-            cache_creation_input_tokens: 0,
-        },
-    };
 }
