@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
 
 import { CLAUDE_THINKING_MAX_OUTPUT_TOKENS } from './constants.js';
 
@@ -596,46 +598,12 @@ function formatSSE(event, data) {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-// ─── SSE Stream Layer 1: Stream Framer ───────────────────────────────────────
-
-/**
- * Read a ReadableStream and yield individual text lines.
- *
- * Handles incremental decoding and line buffering. The final
- * partial line (if any) is yielded when the stream closes.
- *
- * @param {ReadableStream} stream
- * @yields {string} Individual text lines (without trailing newline)
- */
-async function* readSSELines(stream) {
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-            yield line;
-        }
-    }
-
-    if (buffer) {
-        yield buffer;
-    }
-}
-
 // ─── SSE Stream Layer 2: Event Parser ────────────────────────────────────────
 
 /**
  * Parse SSE data lines into structured Google events.
  *
- * @param {AsyncIterable<string>} lines - Line stream from readSSELines
+ * @param {AsyncIterable<string>} lines - Line stream from readline.createInterface()
  * @param {boolean} debug - Enable debug logging
  * @yields {{ parts: Array, usage: Object|null, finishReason: string|null }}
  */
@@ -861,7 +829,8 @@ export async function* streamSSEResponse(stream, model, debug = false) {
 
     const fsm = new ContentBlockFSM();
 
-    const events = parseGoogleSSEEvents(readSSELines(stream), debug);
+    const lines = createInterface({ input: Readable.fromWeb(stream), crlfDelay: Infinity });
+    const events = parseGoogleSSEEvents(lines, debug);
 
     for await (const { parts, usage, finishReason, responseId } of events) {
         if (responseId && !messageId) {
