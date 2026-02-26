@@ -45,7 +45,7 @@ The pattern is clear: the parser has no early-warning system for upstream API ch
 
 ### 2.2 Why Response Validation Matters
 
-Antigravity is an external API managed by a separate team within Google. Its response format has already evolved — the `thoughtSignature` field for thinking models and `cachedContentTokenCount` for prompt caching are additions that arrived without advance notice to downstream consumers.
+Antigravity is an external API managed by a separate team within Google. Its response format has already evolved — the `thoughtSignature` field for thinking models is an addition that arrived without advance notice to downstream consumers.
 
 RFC-003 introduced Ajv-based validation for the **request** path (Anthropic → Odin). This RFC completes the "validate at boundaries" strategy by adding validation on the **response** path (Antigravity → Odin):
 
@@ -230,8 +230,7 @@ data: {
     "usageMetadata": {
       "promptTokenCount": 304,
       "candidatesTokenCount": 4,
-      "totalTokenCount": 308,
-      "cachedContentTokenCount": 456               ← optional (prompt caching)
+      "totalTokenCount": 308
     },
     "modelVersion": "claude-opus-4-6-thinking",
     "responseId": "req_vrtx_011CYHicRkRQpGDXoLvsU921"
@@ -311,7 +310,6 @@ const antigravitySSEEventSchema = {
                         promptTokenCount: { type: 'integer', minimum: 0 },
                         candidatesTokenCount: { type: 'integer', minimum: 0 },
                         totalTokenCount: { type: 'integer', minimum: 0 },
-                        cachedContentTokenCount: { type: 'integer', minimum: 0 },
                     },
                 },
                 modelVersion: { type: 'string' },
@@ -337,7 +335,6 @@ const antigravitySSEEventSchema = {
 | `parts[]: functionCall` | Tool call events | `anyOf` branch 2: `required: ['functionCall']`, `name: string`, `args: object`, `id: string` | `part.functionCall` in `classifyPart()` and `BLOCK_TYPES.tool_use` |
 | `candidates[].finishReason` | Final event only | `type: 'string'`, `enum: ['STOP', 'MAX_TOKENS', 'OTHER']` | `finishReason` in `streamSSEResponse` → stop_reason mapping |
 | `response.usageMetadata` | Every event | `type: 'object'`, `required: [promptTokenCount, candidatesTokenCount, totalTokenCount]`, properties `integer >= 0` | Token counts in `streamSSEResponse` |
-| `response.usageMetadata.cachedContentTokenCount` | Prompt caching | `type: 'integer'`, `minimum: 0` | `usage.cachedContentTokenCount` in `streamSSEResponse` |
 | `response.modelVersion` | Every event | `type: 'string'` | Not consumed directly (informational) |
 | `response.responseId` | Every event | `required`, `type: 'string'` | `messageId` in `streamSSEResponse` — **required for message_start** |
 | `traceId` | Every event | `type: 'string'` | Not consumed (debugging) |

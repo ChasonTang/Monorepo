@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 
 import { CLAUDE_THINKING_MAX_OUTPUT_TOKENS } from './constants.js';
+import { validateSSEEvent } from './response-validator.js';
 
 // ─── Tool Schema Sanitization (RFC-006: Whitelist-based Sanitizer) ──────────
 
@@ -530,6 +531,20 @@ async function* parseGoogleSSEEvents(lines, debug) {
 
         try {
             const data = JSON.parse(jsonText);
+
+            try {
+                const validation = validateSSEEvent(data);
+                if (!validation.valid) {
+                    const rawSuffix = debug ? ` | raw: ${jsonText.slice(0, 500)}` : '';
+
+                    console.error(
+                        `[Odin] SSE response validation warning: ${validation.errors}${rawSuffix}`,
+                    );
+                }
+            } catch (validationError) {
+                console.error(`[Odin] SSE validator internal error:`, validationError.message);
+            }
+
             const inner = data.response || data;
 
             yield {
