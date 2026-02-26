@@ -1,6 +1,6 @@
 import http from 'node:http';
 
-import { anthropicToGoogle, streamSSEResponse, validateContentBlocks } from './converter.js';
+import { anthropicToGoogle, streamSSEResponse } from './converter.js';
 import { sendRequest } from './cloudcode.js';
 import { validateMessagesRequest } from './validator.js';
 
@@ -126,16 +126,6 @@ export function createServer({ apiKey, debug, logger }) {
             const validation = validateMessagesRequest(body);
             if (!validation.valid) {
                 sendError(res, 400, 'invalid_request_error', validation.message);
-                logger.log({ req, body, statusCode: 400, startTime });
-
-                return;
-            }
-
-            // Content block validation
-            const contentValidation = validateContentBlocks(body);
-            if (!contentValidation.valid) {
-                console.error(`[Odin] Unsupported content: ${contentValidation.message}`);
-                sendError(res, 400, 'invalid_request_error', contentValidation.message);
                 logger.log({ req, body, statusCode: 400, startTime });
 
                 return;

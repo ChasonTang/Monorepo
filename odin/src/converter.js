@@ -4,23 +4,6 @@ import { Readable } from 'node:stream';
 
 import { CLAUDE_THINKING_MAX_OUTPUT_TOKENS } from './constants.js';
 
-// ─── Unsupported Content Block Types ────────────────────────────────────────
-
-/**
- * Content block types that convertContentToParts() cannot convert.
- * Requests containing these types should be rejected before conversion
- * to prevent silent data loss.
- *
- * @see https://docs.anthropic.com/en/api/messages
- */
-const UNSUPPORTED_CONTENT_TYPES = new Set([
-    'document', // PDF content — no Google equivalent in current pipeline
-    'search_result', // Web search results — no conversion path
-    'redacted_thinking', // Redacted thinking — only produced by Anthropic native API, not in Odin proxy traffic
-    'server_tool_use', // Server-side tool invocations — not proxied
-    'web_search_tool_result', // Web search tool results — no conversion path
-]);
-
 // ─── Tool Schema Sanitization (RFC-006: Whitelist-based Sanitizer) ──────────
 
 /**
@@ -347,79 +330,6 @@ export function sanitizeSchemaForAntigravity(schema, logger) {
  */
 function randomHex(bytes) {
     return crypto.randomBytes(bytes).toString('hex');
-}
-
-// ─── Content Block Validation ────────────────────────────────────────────────
-
-/**
- * Validate that all content blocks in the request are supported by the converter.
- *
- * Checks three categories:
- * 1. Unsupported content block types (document, search_result, etc.)
- * 2. Image blocks with non-base64 sources (only base64 is supported)
- * 3. Non-text content inside tool_result blocks (only text is extractable)
- *
- * This function is designed to run AFTER Ajv schema validation (which ensures
- * structural correctness) and BEFORE anthropicToGoogle() (which performs conversion).
- *
- * @param {Object} anthropicRequest - Anthropic format request body
- * @returns {{ valid: true } | { valid: false, message: string }}
- */
-export function validateContentBlocks(anthropicRequest) {
-    const { messages } = anthropicRequest;
-    if (!Array.isArray(messages)) return { valid: true };
-
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        const content = msg.content;
-        if (!Array.isArray(content)) continue;
-
-        for (let j = 0; j < content.length; j++) {
-            const block = content[j];
-            if (!block || typeof block !== 'object') continue;
-
-            const path = `messages[${i}].content[${j}]`;
-
-            // Category 1: Unsupported content block types
-            if (UNSUPPORTED_CONTENT_TYPES.has(block.type)) {
-                return {
-                    valid: false,
-                    message:
-                        `Unsupported content block type "${block.type}" at ${path}. ` +
-                        `Odin does not support "${block.type}" blocks. ` +
-                        `Supported types: text, image (base64), tool_use, tool_result, thinking.`,
-                };
-            }
-
-            // Category 2: Image blocks with non-base64 source (whitelist approach)
-            if (block.type === 'image' && block.source?.type !== 'base64') {
-                return {
-                    valid: false,
-                    message:
-                        `Unsupported image source type "${block.source?.type ?? 'undefined'}" at ${path}.source. ` +
-                        `Only base64-encoded images (source.type: "base64") are supported.`,
-                };
-            }
-
-            // Category 3: Non-text content inside tool_result blocks
-            if (block.type === 'tool_result' && Array.isArray(block.content)) {
-                for (let k = 0; k < block.content.length; k++) {
-                    const inner = block.content[k];
-                    if (inner && typeof inner === 'object' && inner.type !== 'text') {
-                        return {
-                            valid: false,
-                            message:
-                                `Unsupported content type "${inner.type}" in tool_result ` +
-                                `at ${path}.content[${k}]. ` +
-                                `Only "text" content is supported inside tool_result blocks.`,
-                        };
-                    }
-                }
-            }
-        }
-    }
-
-    return { valid: true };
 }
 
 // ─── Content Block Conversion (Anthropic → Google) ──────────────────────────

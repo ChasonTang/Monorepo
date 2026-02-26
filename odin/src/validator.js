@@ -43,9 +43,57 @@ const messagesRequestSchema = {
                                 items: {
                                     type: 'object',
                                     required: ['type'],
-                                    properties: {
-                                        type: { type: 'string' },
-                                    },
+                                    discriminator: { propertyName: 'type' },
+                                    oneOf: [
+                                        {
+                                            properties: {
+                                                type: { const: 'text' },
+                                                text: { type: 'string' },
+                                            },
+                                            required: ['type', 'text'],
+                                        },
+                                        {
+                                            properties: {
+                                                type: { const: 'thinking' },
+                                                thinking: { type: 'string' },
+                                                signature: { type: 'string' },
+                                            },
+                                            required: ['type', 'thinking', 'signature'],
+                                        },
+                                        {
+                                            properties: {
+                                                type: { const: 'tool_use' },
+                                                id: { type: 'string' },
+                                                name: { type: 'string' },
+                                                input: { type: 'object' },
+                                            },
+                                            required: ['type', 'id', 'name', 'input'],
+                                        },
+                                        {
+                                            properties: {
+                                                type: { const: 'tool_result' },
+                                                tool_use_id: { type: 'string' },
+                                                content: {
+                                                    oneOf: [
+                                                        { type: 'string' },
+                                                        {
+                                                            type: 'array',
+                                                            minItems: 1,
+                                                            items: {
+                                                                type: 'object',
+                                                                required: ['type', 'text'],
+                                                                properties: {
+                                                                    type: { const: 'text' },
+                                                                    text: { type: 'string' },
+                                                                },
+                                                            },
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                            required: ['type', 'tool_use_id'],
+                                        },
+                                    ],
                                 },
                             },
                         ],
@@ -153,7 +201,7 @@ const messagesRequestSchema = {
 // ─── Ajv Compilation ─────────────────────────────────────────────────────────
 
 // Schema compiled once at module load — no per-request overhead
-const ajv = new Ajv({ allErrors: true });
+const ajv = new Ajv({ allErrors: true, discriminator: true });
 const validate = ajv.compile(messagesRequestSchema);
 
 // ─── Error Formatting ────────────────────────────────────────────────────────
@@ -173,6 +221,32 @@ function formatErrors(errors) {
     );
     if (streamError) {
         return 'Only streaming mode is supported. Set "stream": true in your request.';
+    }
+
+    // Special-case: unsupported content block type (discriminator rejects unknown type values)
+    const contentBlockError = errors.find(
+        (e) =>
+            e.keyword === 'discriminator' &&
+            e.params?.tag === 'type' &&
+            /^\/messages\/\d+\/content\/\d+$/.test(e.instancePath),
+    );
+    if (contentBlockError) {
+        const path = contentBlockError.instancePath.slice(1).replace(/\//g, '.');
+
+        return (
+            `Unsupported content block type "${contentBlockError.params.tagValue}" at ${path}. ` +
+            `Supported types: text, thinking, tool_use, tool_result.`
+        );
+    }
+
+    // Special-case: non-text content inside tool_result blocks
+    const toolResultContentError = errors.find(
+        (e) => e.keyword === 'const' && /\/content\/\d+\/content\/\d+\/type$/.test(e.instancePath),
+    );
+    if (toolResultContentError) {
+        const path = toolResultContentError.instancePath.slice(1).replace(/\//g, '.');
+
+        return `Only "text" content is supported inside tool_result blocks. Error at ${path}.`;
     }
 
     // Special-case: thinking oneOf produces verbose errors — collapse them
