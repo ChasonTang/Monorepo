@@ -15,7 +15,7 @@ Odin's SSE event parser (`parseGoogleSSEEvents`) processes Antigravity streaming
 
 ### 2.1 Current Response Processing State
 
-The SSE event parser in `converter.js` (lines 642–669) handles Antigravity responses with a pattern of optional chaining and fallback defaults:
+The SSE event parser in `converter.js` (lines 520–547) handles Antigravity responses with a pattern of optional chaining and fallback defaults:
 
 ```javascript
 const data = JSON.parse(jsonText);
@@ -107,8 +107,8 @@ Ajv is already a runtime dependency (added in RFC-003). Reusing it for response 
 
 - **Stream-level validation** (e.g., "responseId must appear in the first event", "finishReason must appear exactly once in the final event") — these are temporal/stateful invariants that JSON Schema cannot express. Deferred to future work as a potential FSM-level assertion layer.
 - **Blocking invalid events** — Odin must remain resilient to minor upstream deviations. Validation operates in warn mode only; events are always processed best-effort regardless of validation outcome.
-- **Validating the SSE transport layer** (line framing, `data:` prefix) — this is handled by Layer 1 (`readSSELines`) and is out of scope.
-- **Validating Antigravity error responses** (HTTP 4xx/5xx bodies) — error handling in `server.js` lines 169–219 already processes these. This RFC covers only successful streaming SSE event payloads.
+- **Validating the SSE transport layer** (line framing, `data:` prefix) — this is handled by Layer 1 (`readline.createInterface()`, see RFC-009) and is out of scope.
+- **Validating Antigravity error responses** (HTTP 4xx/5xx bodies) — error handling in `server.js` lines 158–209 already processes these. This RFC covers only successful streaming SSE event payloads.
 - **Enforcing `additionalProperties: false`** — Antigravity may add new fields at any time. The schema validates known structure without rejecting unknown additions.
 
 ## 4. Design
@@ -163,10 +163,10 @@ src/converter.js (modified)
 │      const data = JSON.parse(jsonText);          │
 │                                                  │
 │      // ── NEW: validate SSE event ──            │
-│      const result = validateSSEEvent(data);      │
-│      if (!result.valid) {                        │
-│        console.error("[Odin] SSE validation      │
-│          warning:", formatErrors(result));       │
+│      const v = validateSSEEvent(data);           │
+│      if (!v.valid) {                             │
+│        console.error("[Odin] SSE response        │
+│          validation warning:", v.errors);        │
 │      }                                           │
 │                                                  │
 │      // ── existing extraction (unchanged) ──    │
@@ -183,7 +183,7 @@ src/converter.js (modified)
 Antigravity SSE Stream
         │
         ▼
-Layer 1: readSSELines()          (byte stream → lines)
+Layer 1: readline.createInterface()  (byte stream → lines)
         │
         ▼
 Layer 2: parseGoogleSSEEvents()  (lines → structured events)
@@ -401,7 +401,7 @@ export function validateSSEEvent(data) {
 |--------|-------|-----------|
 | `allErrors` | `true` | Report all validation failures per event. A single log line captures every issue, enabling complete diagnosis without replaying the stream. Matches RFC-003 configuration. |
 
-The `strict` mode is left at default (`true` in Ajv v8) — same as the request validator. `additionalProperties` is not specified at any schema level, defaulting to "allow all" for forward compatibility.
+The `strict` mode is left at default (`true` in Ajv v8). The `discriminator` option (used by the request validator in `validator.js`) is not needed here — the response schema does not use discriminated unions. `additionalProperties` is not specified at any schema level, defaulting to "allow all" for forward compatibility.
 
 #### 4.2.3 Integration into SSE Event Parser
 
@@ -409,7 +409,7 @@ The `strict` mode is left at default (`true` in Ajv v8) — same as the request 
 
 Validation is inserted into `parseGoogleSSEEvents()` immediately after `JSON.parse()`, before the existing field extraction logic. The existing extraction is unchanged — validation is purely additive.
 
-**Before (lines 642–669):**
+**Before (lines 520–547):**
 
 ```javascript
 async function* parseGoogleSSEEvents(lines, debug) {
@@ -635,9 +635,9 @@ The testing approach validates the schema against real production traffic and sy
 - [RFC-007: SSE Stream Converter — Finite State Machine Refactor](rfc_007_sse_stream_finite_state_machine.md) — Defines the 3-layer SSE pipeline architecture (stream framer → event parser → content block FSM) that this RFC integrates into.
 - [Antigravity Unified Gateway API Specification](../../opencode-antigravity-auth/docs/ANTIGRAVITY_API_SPEC.md) — Response format documentation (§Response Format, §Streaming Response, §Thinking Response).
 - [Ajv JSON Schema Validator](https://ajv.js.org/) — Library documentation.
-- `odin/src/converter.js:642–669` — `parseGoogleSSEEvents()` function (modification target).
-- `odin/src/converter.js:712–718` — `classifyPart()` function (defines which part fields are consumed).
-- `odin/src/converter.js:854–939` — `streamSSEResponse()` function (consumes parsed events).
+- `odin/src/converter.js:520–547` — `parseGoogleSSEEvents()` function (modification target).
+- `odin/src/converter.js:590–596` — `classifyPart()` function (defines which part fields are consumed).
+- `odin/src/converter.js:732–818` — `streamSSEResponse()` function (consumes parsed events).
 - `odin/src/validator.js` — Existing request validator (architectural precedent).
 - `response.txt` — Captured Antigravity SSE traffic from `claude-opus-4-6-thinking` (354 events, used for schema derivation and validation testing).
 
@@ -647,5 +647,5 @@ The testing approach validates the schema against real production traffic and sy
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | 2026-02-22 | Chason Tang | Initial version |
 | 1.1 | 2026-02-22 | Chason Tang | Review fixes: added `required` constraints for critical fields in `response` and `usageMetadata`; removed Gemini thinking part references (Odin only supports Claude models); isolated validation `try/catch` from JSON parse error handler |
+| 1.0 | 2026-02-22 | Chason Tang | Initial version |

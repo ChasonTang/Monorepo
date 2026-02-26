@@ -3,7 +3,7 @@
 **Version:** 2.0  
 **Author:** Chason Tang  
 **Date:** 2026-02-26  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -389,33 +389,33 @@ Previously, a `{type: "text"}` block (missing `text` field) passed both Ajv and 
 
 ### Phase 1: Schema Changes — 15 minutes
 
-- [ ] Enable `discriminator: true` in the Ajv constructor options in `validator.js`.
-- [ ] Replace the content block `items` schema with the discriminated `oneOf` (four branches: `text`, `thinking`, `tool_use`, `tool_result`).
-- [ ] Add `formatErrors()` special cases for discriminator errors (unsupported content type) and `tool_result` inner content errors.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Enable `discriminator: true` in the Ajv constructor options in `validator.js`.
+- [x] Replace the content block `items` schema with the discriminated `oneOf` (four branches: `text`, `thinking`, `tool_use`, `tool_result`).
+- [x] Add `formatErrors()` special cases for discriminator errors (unsupported content type) and `tool_result` inner content errors.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** Schema rejects unsupported content types and malformed blocks; `formatErrors()` produces clear error messages for both cases.
 
 ### Phase 2: Code Removal — 5 minutes
 
-- [ ] Remove `UNSUPPORTED_CONTENT_TYPES` constant from `converter.js`.
-- [ ] Remove `validateContentBlocks()` function from `converter.js`.
-- [ ] Remove `validateContentBlocks` from the export statement in `converter.js`.
-- [ ] Remove `validateContentBlocks` from the import statement in `server.js`.
-- [ ] Remove the content block validation call and its early-return block in `server.js`.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Remove `UNSUPPORTED_CONTENT_TYPES` constant from `converter.js`.
+- [x] Remove `validateContentBlocks()` function from `converter.js`.
+- [x] Remove `validateContentBlocks` from the export statement in `converter.js`.
+- [x] Remove `validateContentBlocks` from the import statement in `server.js`.
+- [x] Remove the content block validation call and its early-return block in `server.js`.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** No references to `validateContentBlocks` remain in the codebase; `npm run check` passes.
 
 ### Phase 3: End-to-End Verification — 15 minutes
 
-- [ ] Start Odin and send a valid request with only supported content types (`text`, `tool_use`, `tool_result`, `thinking`). Verify it succeeds.
-- [ ] Send a request with an `image` content block. Verify HTTP 400 with error message listing supported types.
-- [ ] Send a request with a `document` content block. Verify HTTP 400.
-- [ ] Send a request with a hypothetical future type (e.g., `audio`). Verify HTTP 400.
-- [ ] Send a request with `tool_result` containing non-text inner content. Verify HTTP 400.
-- [ ] Send a request with a known type but missing required fields (e.g., `{type: "text"}`). Verify HTTP 400 with clear field-level error.
-- [ ] Run a normal Claude Code session through the proxy to verify no regression.
+- [x] Start Odin and send a valid request with only supported content types (`text`, `tool_use`, `tool_result`, `thinking`). Verify it succeeds.
+- [x] Send a request with an `image` content block. Verify HTTP 400 with error message listing supported types.
+- [x] Send a request with a `document` content block. Verify HTTP 400.
+- [x] Send a request with a hypothetical future type (e.g., `audio`). Verify HTTP 400.
+- [x] Send a request with `tool_result` containing non-text inner content. Verify HTTP 400.
+- [x] Send a request with a known type but missing required fields (e.g., `{type: "text"}`). Verify HTTP 400 with clear field-level error.
+- [x] Run a normal Claude Code session through the proxy to verify no regression.
 
 **Done when:** All rejection scenarios produce correct error responses, and normal Claude Code workflows are unaffected.
 
