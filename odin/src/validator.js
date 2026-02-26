@@ -126,20 +126,26 @@ const messagesRequestSchema = {
         },
 
         thinking: {
-            type: 'object',
-            required: ['type'],
-            properties: {
-                type: {
-                    type: 'string',
-                    enum: ['enabled', 'disabled', 'adaptive'],
+            oneOf: [
+                {
+                    type: 'object',
+                    required: ['type', 'budget_tokens'],
+                    properties: {
+                        type: { const: 'enabled' },
+                        budget_tokens: { type: 'integer', minimum: 1024 },
+                    },
                 },
-                budget_tokens: {
-                    type: 'integer',
-                    minimum: 1024,
+                {
+                    type: 'object',
+                    required: ['type'],
+                    properties: { type: { const: 'disabled' } },
                 },
-            },
-            if: { required: ['type'], properties: { type: { const: 'enabled' } } },
-            then: { required: ['type', 'budget_tokens'] },
+                {
+                    type: 'object',
+                    required: ['type'],
+                    properties: { type: { const: 'adaptive' } },
+                },
+            ],
         },
     },
 };
@@ -167,6 +173,21 @@ function formatErrors(errors) {
     );
     if (streamError) {
         return 'Only streaming mode is supported. Set "stream": true in your request.';
+    }
+
+    // Special-case: thinking oneOf produces verbose errors — collapse them
+    const thinkingOneOf = errors.find(
+        (e) => e.instancePath === '/thinking' && e.keyword === 'oneOf',
+    );
+    if (thinkingOneOf) {
+        const inner = errors.find(
+            (e) => e.instancePath.startsWith('/thinking/') && e.keyword === 'required',
+        );
+        if (inner) {
+            return `"thinking.${inner.params.missingProperty}" is required when thinking.type is "enabled"`;
+        }
+
+        return '"thinking" must match one of: {type:"enabled", budget_tokens}, {type:"disabled"}, or {type:"adaptive"}';
     }
 
     // General case: format all errors
