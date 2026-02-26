@@ -168,30 +168,34 @@ const messagesRequestSchema = {
                     },
                     input_schema: {
                         type: 'object',
+                        required: ['type'],
+                        properties: {
+                            type: { const: 'object' },
+                        },
                     },
                 },
             },
         },
 
         thinking: {
+            type: 'object',
+            required: ['type'],
+            discriminator: { propertyName: 'type' },
             oneOf: [
                 {
-                    type: 'object',
-                    required: ['type', 'budget_tokens'],
                     properties: {
                         type: { const: 'enabled' },
                         budget_tokens: { type: 'integer', minimum: 1024 },
                     },
+                    required: ['type', 'budget_tokens'],
                 },
                 {
-                    type: 'object',
-                    required: ['type'],
                     properties: { type: { const: 'disabled' } },
+                    required: ['type'],
                 },
                 {
-                    type: 'object',
-                    required: ['type'],
                     properties: { type: { const: 'adaptive' } },
+                    required: ['type'],
                 },
             ],
         },
