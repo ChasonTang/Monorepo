@@ -14,6 +14,26 @@ import Ajv from 'ajv';
 const messagesRequestSchema = {
     type: 'object',
     required: ['model', 'messages', 'max_tokens', 'stream'],
+    $defs: {
+        TextContentBlock: {
+            type: 'object',
+            required: ['type', 'text'],
+            properties: {
+                type: { const: 'text' },
+                text: { type: 'string' },
+            },
+        },
+        StringOrTextBlockArray: {
+            oneOf: [
+                { type: 'string' },
+                {
+                    type: 'array',
+                    minItems: 1,
+                    items: { $ref: '#/$defs/TextContentBlock' },
+                },
+            ],
+        },
+    },
     properties: {
         // ── Required Fields ──────────────────────────────────────────
 
@@ -45,13 +65,7 @@ const messagesRequestSchema = {
                                     required: ['type'],
                                     discriminator: { propertyName: 'type' },
                                     oneOf: [
-                                        {
-                                            properties: {
-                                                type: { const: 'text' },
-                                                text: { type: 'string' },
-                                            },
-                                            required: ['type', 'text'],
-                                        },
+                                        { $ref: '#/$defs/TextContentBlock' },
                                         {
                                             properties: {
                                                 type: { const: 'thinking' },
@@ -73,23 +87,7 @@ const messagesRequestSchema = {
                                             properties: {
                                                 type: { const: 'tool_result' },
                                                 tool_use_id: { type: 'string' },
-                                                content: {
-                                                    oneOf: [
-                                                        { type: 'string' },
-                                                        {
-                                                            type: 'array',
-                                                            minItems: 1,
-                                                            items: {
-                                                                type: 'object',
-                                                                required: ['type', 'text'],
-                                                                properties: {
-                                                                    type: { const: 'text' },
-                                                                    text: { type: 'string' },
-                                                                },
-                                                            },
-                                                        },
-                                                    ],
-                                                },
+                                                content: { $ref: '#/$defs/StringOrTextBlockArray' },
                                             },
                                             required: ['type', 'tool_use_id'],
                                         },
@@ -113,23 +111,7 @@ const messagesRequestSchema = {
 
         // ── Optional Fields ──────────────────────────────────────────
 
-        system: {
-            oneOf: [
-                { type: 'string' },
-                {
-                    type: 'array',
-                    minItems: 1,
-                    items: {
-                        type: 'object',
-                        required: ['type', 'text'],
-                        properties: {
-                            type: { const: 'text' },
-                            text: { type: 'string' },
-                        },
-                    },
-                },
-            ],
-        },
+        system: { $ref: '#/$defs/StringOrTextBlockArray' },
 
         temperature: {
             type: 'number',
