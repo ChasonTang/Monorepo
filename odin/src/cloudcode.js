@@ -1,5 +1,3 @@
-import crypto from 'node:crypto';
-
 import { STREAMING_URL, PROJECT_ID, buildHeaders } from './constants.js';
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
@@ -46,7 +44,7 @@ export async function sendRequest(googleRequest, model, apiKey, debug, incomingH
         request: googleRequest,
         userAgent: 'antigravity',
         requestType: 'agent',
-        requestId: `agent-${crypto.randomUUID()}`,
+        requestId: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
     };
 
     logUpstream(STREAMING_URL, headers, payload, debug);
