@@ -273,9 +273,9 @@ describe('sanitizeSchemaForAntigravity', () => {
         assert.ok(logger.logs.warn.some((m) => m.includes('"definitions"')));
     });
 
-    // ── Scenario 14: allOf/anyOf/oneOf passthrough ──────────────────────
+    // ── Scenario 14: allOf/oneOf passthrough, anyOf → oneOf (RFC-012) ──
 
-    it('Scenario 14: allOf/anyOf/oneOf pass through with recursive sanitization', () => {
+    it('Scenario 14: anyOf converted to oneOf (RFC-012 Phase 1c)', () => {
         const input = {
             anyOf: [{ type: 'string' }, { type: 'integer' }],
         };
@@ -283,11 +283,11 @@ describe('sanitizeSchemaForAntigravity', () => {
         const result = sanitizeSchemaForAntigravity(input, logger);
 
         assert.deepStrictEqual(result, {
-            anyOf: [{ type: 'string' }, { type: 'integer' }],
+            oneOf: [{ type: 'string' }, { type: 'integer' }],
         });
     });
 
-    it('Scenario 14b: sub-schemas within anyOf are recursively sanitized', () => {
+    it('Scenario 14b: sub-schemas within anyOf are recursively sanitized after conversion', () => {
         const input = {
             anyOf: [
                 { type: 'string', title: 'Name' },
@@ -298,7 +298,7 @@ describe('sanitizeSchemaForAntigravity', () => {
         const result = sanitizeSchemaForAntigravity(input, logger);
 
         assert.deepStrictEqual(result, {
-            anyOf: [{ type: 'string' }, { type: 'integer' }],
+            oneOf: [{ type: 'string' }, { type: 'integer' }],
         });
         // title is monitorable → warn
         assert.ok(logger.logs.warn.some((m) => m.includes('"title"')));
@@ -317,6 +317,116 @@ describe('sanitizeSchemaForAntigravity', () => {
         assert.equal(result.propertyNames, undefined);
         assert.deepStrictEqual(result, { type: 'object' });
         assert.ok(logger.logs.warn.some((m) => m.includes('"propertyNames"')));
+    });
+});
+
+// ─── RFC-012: anyOf → oneOf Conversion Tests ────────────────────────────────
+
+describe('RFC-012: anyOf → oneOf conversion (Phase 1c)', () => {
+    let logger;
+
+    beforeEach(() => {
+        logger = createMockLogger();
+    });
+
+    it('§6 #1: simple type union', () => {
+        const input = { anyOf: [{ type: 'string' }, { type: 'number' }] };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, { oneOf: [{ type: 'string' }, { type: 'number' }] });
+    });
+
+    it('§6 #2: nullable pattern (Python Optional[str])', () => {
+        const input = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, { oneOf: [{ type: 'string' }, { type: 'null' }] });
+    });
+
+    it('§6 #3: anyOf with sub-schema constraints preserved', () => {
+        const input = {
+            anyOf: [{ type: 'string', format: 'email' }, { type: 'number' }],
+        };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, {
+            oneOf: [{ type: 'string', format: 'email' }, { type: 'number' }],
+        });
+    });
+
+    it('§6 #4: nested anyOf in property', () => {
+        const input = {
+            properties: {
+                x: { anyOf: [{ type: 'string' }, { type: 'integer' }] },
+            },
+        };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, {
+            properties: {
+                x: { oneOf: [{ type: 'string' }, { type: 'integer' }] },
+            },
+        });
+    });
+
+    it('§6 #5: anyOf within anyOf branches (nested)', () => {
+        const input = {
+            anyOf: [{ anyOf: [{ type: 'string' }, { type: 'null' }] }, { type: 'number' }],
+        };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, {
+            oneOf: [{ oneOf: [{ type: 'string' }, { type: 'null' }] }, { type: 'number' }],
+        });
+    });
+
+    it('§6 #6: both anyOf and oneOf present — anyOf dropped, original oneOf preserved', () => {
+        const input = {
+            anyOf: [{ type: 'string' }],
+            oneOf: [{ type: 'number' }],
+        };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, { oneOf: [{ type: 'number' }] });
+    });
+
+    it('§6 #7: no anyOf in schema — unchanged', () => {
+        const input = { type: 'string', enum: ['a', 'b'] };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, { type: 'string', enum: ['a', 'b'] });
+    });
+
+    it('§6 #8: production payload — anyOf contact field', () => {
+        const input = {
+            type: 'object',
+            properties: {
+                contact: {
+                    anyOf: [{ type: 'string', format: 'email' }, { type: 'number' }],
+                },
+            },
+            required: ['contact'],
+        };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, {
+            type: 'object',
+            properties: {
+                contact: {
+                    oneOf: [{ type: 'string', format: 'email' }, { type: 'number' }],
+                },
+            },
+            required: ['contact'],
+        });
+    });
+
+    it('§6 #9: anyOf + Phase 2 interaction — title stripped after conversion', () => {
+        const input = { anyOf: [{ type: 'string', title: 'Name' }] };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, { oneOf: [{ type: 'string' }] });
+        assert.ok(logger.logs.warn.some((m) => m.includes('"title"')));
+    });
+
+    it('§6 #10: Phase 1a + 1c combined — const→enum + anyOf→oneOf', () => {
+        const input = {
+            anyOf: [{ const: 'active' }, { type: 'number' }],
+        };
+        const result = sanitizeSchemaForAntigravity(input, logger);
+        assert.deepStrictEqual(result, {
+            oneOf: [{ enum: ['active'] }, { type: 'number' }],
+        });
     });
 });
 
@@ -354,8 +464,7 @@ describe('sanitizeSchemaForAntigravity — edge cases', () => {
         assert.deepStrictEqual(result, { type: 'object' });
     });
 
-    it('all 23 allowed keywords pass through', () => {
-        // Build a schema with every allowed keyword (where semantically valid)
+    it('all 22 allowed keywords pass through', () => {
         const input = {
             type: 'object',
             enum: ['a', 'b'],
@@ -376,7 +485,6 @@ describe('sanitizeSchemaForAntigravity — edge cases', () => {
             additionalProperties: false,
             items: { type: 'string' },
             allOf: [{ type: 'object' }],
-            anyOf: [{ type: 'string' }],
             oneOf: [{ type: 'integer' }],
             not: { type: 'null' },
             prefixItems: [{ type: 'string' }],
@@ -384,7 +492,6 @@ describe('sanitizeSchemaForAntigravity — edge cases', () => {
 
         const result = sanitizeSchemaForAntigravity(input, logger);
 
-        // All 23 keywords should be present in the result
         const expectedKeys = [
             'type',
             'enum',
@@ -405,7 +512,6 @@ describe('sanitizeSchemaForAntigravity — edge cases', () => {
             'additionalProperties',
             'items',
             'allOf',
-            'anyOf',
             'oneOf',
             'not',
             'prefixItems',
@@ -415,6 +521,7 @@ describe('sanitizeSchemaForAntigravity — edge cases', () => {
             assert.ok(result[key] !== undefined, `Expected keyword "${key}" to be preserved`);
         }
 
+        assert.equal(result.anyOf, undefined, 'anyOf should not be in allowed keywords');
         assert.equal(logger.logs.warn.length, 0);
         assert.equal(logger.logs.info.length, 0);
     });

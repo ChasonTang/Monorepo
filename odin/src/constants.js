@@ -41,7 +41,7 @@ export function buildHeaders(apiKey, incomingHeaders = {}) {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
-        'User-Agent': `antigravity/1.15.8 ${platform()}/${arch() === 'x64' ? 'amd64' : 'arm64'}`,
+        'User-Agent': `antigravity/1.18.3 ${platform()}/${arch() === 'x64' ? 'amd64' : 'arm64'}`,
     };
 
     if (incomingHeaders['anthropic-beta']) {

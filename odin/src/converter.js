@@ -8,13 +8,12 @@ import { validateSSEEvent } from './response-validator.js';
 // ─── Tool Schema Sanitization (RFC-006: Whitelist-based Sanitizer) ──────────
 
 /**
- * Allowed keywords (23 total) — pass through unchanged.
+ * Allowed keywords (22 total) — pass through unchanged.
  * Only keywords in this set survive the whitelist filter.
  */
 const ALLOWED_KEYWORDS = new Set([
-    // Applicator (8 of 15)
+    // Applicator (7 of 15)
     'allOf',
-    'anyOf',
     'oneOf',
     'not',
     'prefixItems',
@@ -96,7 +95,7 @@ const MONITORABLE_KEYWORDS = new Set([
 ]);
 
 /**
- * All JSON Schema 2020-12 keywords NOT in the whitelist (34 standard + 4 deprecated = 38).
+ * All JSON Schema 2020-12 keywords NOT in the whitelist (35 standard + 4 deprecated = 39).
  * Keywords in this set but NOT in MONITORABLE_KEYWORDS are stripped silently
  * (they have no meaningful semantic-preserving transform potential).
  */
@@ -111,7 +110,8 @@ const KNOWN_UNSUPPORTED_KEYWORDS = new Set([
     '$vocabulary',
     '$comment',
     '$defs',
-    // ── Applicator (7 of 15 unsupported) ──
+    // ── Applicator (8 of 15 unsupported) ──
+    'anyOf', // Converted to oneOf in Phase 1c (RFC-012)
     'if',
     'then',
     'else',
@@ -223,6 +223,39 @@ function convertExclusiveBounds(schema) {
     return result;
 }
 
+/**
+ * Phase 1c: Convert anyOf → oneOf.
+ *
+ * oneOf is strictly more restrictive than anyOf (exclusive vs. inclusive OR).
+ * For type-union patterns — the dominant anyOf use case in tool schemas,
+ * where branches are mutually exclusive by type — the two are equivalent.
+ * For the model generation use case (not validation), both keywords carry
+ * identical guidance: "produce a value conforming to one of these schemas."
+ *
+ * oneOf is natively supported by Antigravity; anyOf is not.
+ *
+ * If a schema node has both anyOf and oneOf (extremely rare), anyOf is
+ * dropped to avoid conflict — Phase 2 whitelist strips the residual.
+ */
+function convertAnyOfToOneOf(schema) {
+    if (!schema || typeof schema !== 'object') return schema;
+    if (Array.isArray(schema)) return schema.map(convertAnyOfToOneOf);
+
+    const result = {};
+    for (const [key, value] of Object.entries(schema)) {
+        if (key === 'anyOf') {
+            if (!schema.oneOf) {
+                result.oneOf = Array.isArray(value) ? value.map(convertAnyOfToOneOf) : value;
+            }
+        } else {
+            result[key] =
+                typeof value === 'object' && value !== null ? convertAnyOfToOneOf(value) : value;
+        }
+    }
+
+    return result;
+}
+
 // ─── Phase 2: Whitelist Filter with Monitoring ──────────────────────────────
 
 /**
@@ -254,7 +287,7 @@ function filterToAllowedKeywords(schema, logger) {
             ) {
                 result[key] = filterToAllowedKeywords(value, logger);
             } else if (
-                (key === 'allOf' || key === 'anyOf' || key === 'oneOf' || key === 'prefixItems') &&
+                (key === 'allOf' || key === 'oneOf' || key === 'prefixItems') &&
                 Array.isArray(value)
             ) {
                 result[key] = value.map((item) => filterToAllowedKeywords(item, logger));
@@ -298,6 +331,7 @@ function filterToAllowedKeywords(schema, logger) {
  * Phase 1: Semantic transforms (only output-producing transforms)
  *   1a. const → enum
  *   1b. exclusiveMin/Max → min/max + description hint
+ *   1c. anyOf → oneOf (RFC-012)
  *
  * Phase 2: Whitelist filter — strip all non-allowed keywords with
  *   three-tier logging (monitorable/unknown/silent).
@@ -314,6 +348,7 @@ export function sanitizeSchemaForAntigravity(schema, logger) {
     // ── Phase 1: Semantic Transforms (only output-producing transforms) ──
     result = convertConstToEnum(result); // 1a: const → enum
     result = convertExclusiveBounds(result); // 1b: exclusiveMin/Max → min/max + hint
+    result = convertAnyOfToOneOf(result); // 1c: anyOf → oneOf (RFC-012)
 
     // ── Phase 2: Whitelist Filter ──
     result = filterToAllowedKeywords(result, logger); // 2a-c: strip + log (monitorable/unknown)

@@ -3,7 +3,7 @@
 **Version:** 1.1  
 **Author:** Chason Tang  
 **Date:** 2026-02-22  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -548,29 +548,29 @@ While every observed SSE event has `role: "model"`, the schema validates `role` 
 
 ### Phase 1: Create Response Validator Module — 20 minutes
 
-- [ ] Create `src/response-validator.js` with the JSON Schema from §4.2.1.
-- [ ] Implement Ajv compilation and `validateSSEEvent()` function from §4.2.2.
-- [ ] Implement `formatValidationErrors()` for structured error output.
-- [ ] Export `validateSSEEvent` as the public API.
-- [ ] Verify the module loads without errors: `node -e "import('./src/response-validator.js')"`.
+- [x] Create `src/response-validator.js` with the JSON Schema from §4.2.1.
+- [x] Implement Ajv compilation and `validateSSEEvent()` function from §4.2.2.
+- [x] Implement `formatValidationErrors()` for structured error output.
+- [x] Export `validateSSEEvent` as the public API.
+- [x] Verify the module loads without errors: `node -e "import('./src/response-validator.js')"`.
 
 **Done when:** The module exports a working `validateSSEEvent` function that accepts a parsed SSE event object and returns `{ valid: true }` or `{ valid: false, errors: string }`.
 
 ### Phase 2: Integrate into SSE Event Parser — 15 minutes
 
-- [ ] Import `validateSSEEvent` in `src/converter.js`.
-- [ ] Add validation call inside `parseGoogleSSEEvents()` per §4.2.3.
-- [ ] Ensure the existing `yield` is unchanged — validation is additive only.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Import `validateSSEEvent` in `src/converter.js`.
+- [x] Add validation call inside `parseGoogleSSEEvents()` per §4.2.3.
+- [x] Ensure the existing `yield` is unchanged — validation is additive only.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** `parseGoogleSSEEvents()` validates every parsed SSE event and logs warnings on failure, without altering the yielded event data. `npm run check` passes.
 
 ### Phase 3: Verification against Production Traffic — 30 minutes
 
-- [ ] Start Odin and send a request through the proxy to a thinking model (e.g., `claude-opus-4-6-thinking`). Verify the stream completes successfully with zero validation warnings.
-- [ ] Send a request to a non-thinking model (e.g., `claude-sonnet-4-6`). Verify zero warnings.
-- [ ] Replay the captured `response.txt` traffic through the validator (standalone test script). Verify all 354 events pass validation.
-- [ ] Manually inject a malformed event (e.g., `parts[0].text` as a number) and verify the validation warning is logged with the correct error path.
+- [x] Start Odin and send a request through the proxy to a thinking model (e.g., `claude-opus-4-6-thinking`). Verify the stream completes successfully with zero validation warnings.
+- [x] Send a request to a non-thinking model (e.g., `claude-sonnet-4-6`). Verify zero warnings.
+- [x] Replay the captured `response.txt` traffic through the validator (standalone test script). Verify all 354 events pass validation.
+- [x] Manually inject a malformed event (e.g., `parts[0].text` as a number) and verify the validation warning is logged with the correct error path.
 
 **Done when:** Real Antigravity traffic produces zero validation warnings, and synthetic malformed events produce accurate, path-specific warnings.
 

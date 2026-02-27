@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Author:** Chason Tang  
 **Date:** 2026-02-26  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -419,20 +419,20 @@ Only `TextContentBlock` is extracted as a `$ref` branch; `thinking`, `tool_use`,
 
 ### Phase 1: Add `$defs` and Replace Inline Duplicates — 20 minutes
 
-- [ ] Add `$defs` block to `messagesRequestSchema` in `src/validator.js` with `TextContentBlock` and `StringOrTextBlockArray` per §4.2.1.
-- [ ] Replace the text block `oneOf` branch in message content items (line 48–54) with `{ $ref: '#/$defs/TextContentBlock' }`.
-- [ ] Replace the `tool_result.content` inline `oneOf` (line 76–91) with `{ $ref: '#/$defs/StringOrTextBlockArray' }`.
-- [ ] Replace the `system` inline `oneOf` (line 117–131) with `{ $ref: '#/$defs/StringOrTextBlockArray' }`.
-- [ ] Verify Ajv compilation succeeds: `node -e "import('./src/validator.js')"`.
-- [ ] Run `npm run check` to verify ESLint and Prettier compliance.
+- [x] Add `$defs` block to `messagesRequestSchema` in `src/validator.js` with `TextContentBlock` and `StringOrTextBlockArray` per §4.2.1.
+- [x] Replace the text block `oneOf` branch in message content items (line 48–54) with `{ $ref: '#/$defs/TextContentBlock' }`.
+- [x] Replace the `tool_result.content` inline `oneOf` (line 76–91) with `{ $ref: '#/$defs/StringOrTextBlockArray' }`.
+- [x] Replace the `system` inline `oneOf` (line 117–131) with `{ $ref: '#/$defs/StringOrTextBlockArray' }`.
+- [x] Verify Ajv compilation succeeds: `node -e "import('./src/validator.js')"`.
+- [x] Run `npm run check` to verify ESLint and Prettier compliance.
 
 **Done when:** `validator.js` compiles without errors, `npm run check` passes, and all 3 inline duplicates are replaced with `$ref` pointers.
 
 ### Phase 2: Equivalence Verification — 20 minutes
 
-- [ ] Construct a test input matrix covering all content block types, `system` variants, `tool_result.content` variants, and error cases (§6 scenarios).
-- [ ] Run every test input through both the old and new schemas — assert identical `valid` / error results.
-- [ ] Run an end-to-end request through Odin to verify no behavioral regression.
+- [x] Construct a test input matrix covering all content block types, `system` variants, `tool_result.content` variants, and error cases (§6 scenarios).
+- [x] Run every test input through both the old and new schemas — assert identical `valid` / error results.
+- [x] Run an end-to-end request through Odin to verify no behavioral regression.
 
 **Done when:** Every test input produces identical validation results before and after refactoring. End-to-end request succeeds.
 
