@@ -9,7 +9,7 @@ export default [
 
     // ── Project configuration ───────────────────────────────────────────
     {
-        files: ['src/**/*.js'],
+        files: ['src/**/*.js', 'tests/**/*.js'],
         languageOptions: {
             ecmaVersion: 'latest',
             sourceType: 'module',
@@ -64,7 +64,7 @@ export default [
 
     // ── Padding rules (after Prettier config – no actual conflict) ─────
     {
-        files: ['src/**/*.js'],
+        files: ['src/**/*.js', 'tests/**/*.js'],
         rules: {
             '@stylistic/padding-line-between-statements': [
                 'error',

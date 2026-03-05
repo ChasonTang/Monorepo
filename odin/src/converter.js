@@ -783,7 +783,6 @@ export async function* streamSSEResponse(stream, model, debug = false) {
     let messageId = null;
     let inputTokens = 0;
     let outputTokens = 0;
-    let cacheReadTokens = 0;
     let stopReason = null;
     let hasEmittedStart = false;
 
@@ -799,7 +798,6 @@ export async function* streamSSEResponse(stream, model, debug = false) {
         if (usage) {
             inputTokens = usage.promptTokenCount || inputTokens;
             outputTokens = usage.candidatesTokenCount || outputTokens;
-            cacheReadTokens = usage.cachedContentTokenCount ?? cacheReadTokens;
         }
 
         if (!hasEmittedStart && parts.length > 0) {
@@ -820,9 +818,9 @@ export async function* streamSSEResponse(stream, model, debug = false) {
                         stop_reason: null,
                         stop_sequence: null,
                         usage: {
-                            input_tokens: inputTokens - cacheReadTokens,
-                            output_tokens: 0,
-                            cache_read_input_tokens: cacheReadTokens,
+                            input_tokens: inputTokens,
+                            output_tokens: outputTokens,
+                            cache_read_input_tokens: 0,
                             cache_creation_input_tokens: 0,
                         },
                     },
@@ -856,8 +854,9 @@ export async function* streamSSEResponse(stream, model, debug = false) {
             type: 'message_delta',
             delta: { stop_reason: stopReason || 'end_turn', stop_sequence: null },
             usage: {
+                input_tokens: inputTokens,
                 output_tokens: outputTokens,
-                cache_read_input_tokens: cacheReadTokens,
+                cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
             },
         },
