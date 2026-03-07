@@ -13,6 +13,12 @@ export const PROJECT_ID = 'rising-fact-p41fc';
 
 export const CLAUDE_THINKING_MAX_OUTPUT_TOKENS = 64_000;
 
+export const EFFORT_THINKING_BUDGET_MAP = {
+    low: 2048,
+    medium: 8192,
+    high: 16384,
+};
+
 // ─── Antigravity System Instruction ─────────────────────────────────────────
 
 /**

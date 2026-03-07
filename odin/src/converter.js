@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { Readable } from 'node:stream';
 
-import { CLAUDE_THINKING_MAX_OUTPUT_TOKENS } from './constants.js';
+import { CLAUDE_THINKING_MAX_OUTPUT_TOKENS, EFFORT_THINKING_BUDGET_MAP } from './constants.js';
 import { validateSSEEvent } from './response-validator.js';
 
 // ─── Tool Schema Sanitization (RFC-006: Whitelist-based Sanitizer) ──────────
@@ -459,6 +459,7 @@ export function anthropicToGoogle(anthropicRequest) {
         stop_sequences,
         tools,
         thinking,
+        output_config,
     } = anthropicRequest;
 
     const googleRequest = {
@@ -503,14 +504,18 @@ export function anthropicToGoogle(anthropicRequest) {
 
     // Thinking config for thinking models
     if (thinking) {
-        const thinkingBudget = thinking.budget_tokens;
+        let resolvedBudget = thinking.budget_tokens;
+
+        if (output_config?.effort) {
+            resolvedBudget = EFFORT_THINKING_BUDGET_MAP[output_config.effort];
+        }
+
         googleRequest.generationConfig.thinkingConfig = {
             include_thoughts: thinking.type !== 'disabled',
-            thinking_budget: thinkingBudget,
+            thinking_budget: resolvedBudget,
         };
 
-        // Validate max_tokens > thinking_budget (API requirement)
-        if (thinkingBudget !== undefined && max_tokens <= thinkingBudget) {
+        if (resolvedBudget !== undefined && max_tokens <= resolvedBudget) {
             googleRequest.generationConfig.maxOutputTokens = CLAUDE_THINKING_MAX_OUTPUT_TOKENS;
         }
     }

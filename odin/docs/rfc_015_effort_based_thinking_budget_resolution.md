@@ -3,7 +3,7 @@
 **Version:** 1.2  
 **Author:** Chason Tang  
 **Date:** 2026-03-06  
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -325,24 +325,24 @@ AJV excels at structural validation (types, enums, required fields) but expressi
 
 ### Phase 1: Core Implementation — 1 hour
 
-- [ ] Add `EFFORT_THINKING_BUDGET_MAP` constant to `constants.js`
-- [ ] Import `EFFORT_THINKING_BUDGET_MAP` in `converter.js`
-- [ ] Add `output_config` to destructuring in `anthropicToGoogle()`
-- [ ] Replace thinking budget assignment with effort-aware resolution logic (straight lookup, no `Math.max`)
-- [ ] Add `output_config` AJV schema to `validator.js`
-- [ ] Add `validateCrossFieldConstraints()` function to `validator.js`
-- [ ] Update `validateMessagesRequest()` to invoke cross-field validation after AJV
+- [x] Add `EFFORT_THINKING_BUDGET_MAP` constant to `constants.js`
+- [x] Import `EFFORT_THINKING_BUDGET_MAP` in `converter.js`
+- [x] Add `output_config` to destructuring in `anthropicToGoogle()`
+- [x] Replace thinking budget assignment with effort-aware resolution logic (straight lookup, no `Math.max`)
+- [x] Add `output_config` AJV schema to `validator.js`
+- [x] Add `validateCrossFieldConstraints()` function to `validator.js`
+- [x] Update `validateMessagesRequest()` to invoke cross-field validation after AJV
 
 **Done when:** `anthropicToGoogle()` correctly resolves thinking budget from effort for adaptive thinking. Validator accepts `adaptive + effort`, rejects `effort + no thinking`, `effort + disabled`, `effort + budget_tokens`, and `adaptive + no effort`.
 
 ### Phase 2: Test Coverage — 0.5 hours
 
-- [ ] Add converter unit tests for adaptive + effort (all three levels)
-- [ ] Add converter unit test for enabled + budget_tokens only (unchanged behavior)
-- [ ] Add converter unit test for `maxOutputTokens` bump when effort budget exceeds `max_tokens`
-- [ ] Add validator tests for the four cross-field rejection cases
-- [ ] Add validator tests for valid `adaptive + effort` payloads
-- [ ] Add validator test for invalid effort enum values
+- [x] Add converter unit tests for adaptive + effort (all three levels)
+- [x] Add converter unit test for enabled + budget_tokens only (unchanged behavior)
+- [x] Add converter unit test for `maxOutputTokens` bump when effort budget exceeds `max_tokens`
+- [x] Add validator tests for the four cross-field rejection cases
+- [x] Add validator tests for valid `adaptive + effort` payloads
+- [x] Add validator test for invalid effort enum values
 
 **Done when:** All test scenarios in §6 pass.
 

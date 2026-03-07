@@ -181,6 +181,16 @@ const messagesRequestSchema = {
                 },
             ],
         },
+
+        output_config: {
+            type: 'object',
+            properties: {
+                effort: {
+                    type: 'string',
+                    enum: ['low', 'medium', 'high'],
+                },
+            },
+        },
     },
 };
 
@@ -265,6 +275,52 @@ function formatErrors(errors) {
     return unique.length === 1 ? unique[0] : unique.join('; ');
 }
 
+// ─── Cross-Field Validation ──────────────────────────────────────────────────
+
+/**
+ * Validate semantic constraints that span multiple top-level fields.
+ * Runs after AJV structural validation passes.
+ *
+ * @param {Object} body - Parsed JSON request body (already structurally valid)
+ * @returns {string|null} Error message, or null if valid
+ */
+function validateCrossFieldConstraints(body) {
+    const effort = body.output_config?.effort;
+
+    if (effort) {
+        if (!body.thinking) {
+            return (
+                '"output_config.effort" requires a "thinking" block. ' +
+                'Set thinking.type to "adaptive" to use effort-based thinking budget.'
+            );
+        }
+
+        if (body.thinking.type === 'disabled') {
+            return (
+                '"output_config.effort" cannot be used with thinking.type "disabled". ' +
+                'Either remove output_config.effort or set thinking.type to "adaptive".'
+            );
+        }
+
+        if (body.thinking.budget_tokens !== undefined) {
+            return (
+                '"output_config.effort" and "thinking.budget_tokens" are mutually exclusive. ' +
+                'Use effort for automatic budget selection, ' +
+                'or budget_tokens for explicit control, but not both.'
+            );
+        }
+    }
+
+    if (body.thinking?.type === 'adaptive' && !effort) {
+        return (
+            'thinking.type "adaptive" requires "output_config.effort" to specify thinking intensity. ' +
+            'Add output_config: { effort: "low" | "medium" | "high" } to your request.'
+        );
+    }
+
+    return null;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -274,11 +330,16 @@ function formatErrors(errors) {
  * @returns {{ valid: true } | { valid: false, message: string }}
  */
 export function validateMessagesRequest(body) {
-    if (validate(body)) {
-        return { valid: true };
+    if (!validate(body)) {
+        const message = formatErrors(validate.errors);
+
+        return { valid: false, message };
     }
 
-    const message = formatErrors(validate.errors);
+    const crossFieldError = validateCrossFieldConstraints(body);
+    if (crossFieldError) {
+        return { valid: false, message: crossFieldError };
+    }
 
-    return { valid: false, message };
+    return { valid: true };
 }
