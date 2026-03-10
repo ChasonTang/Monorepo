@@ -159,6 +159,17 @@ const messagesRequestSchema = {
             },
         },
 
+        tool_choice: {
+            type: 'object',
+            required: ['type'],
+            properties: {
+                type: {
+                    type: 'string',
+                    enum: ['auto', 'any', 'none'],
+                },
+            },
+        },
+
         thinking: {
             type: 'object',
             required: ['type'],

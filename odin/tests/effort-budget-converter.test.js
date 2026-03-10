@@ -2,7 +2,7 @@
  * Tests for RFC-015: Effort-Based Thinking Budget Resolution — Converter
  *
  * Covers §6.2 scenarios:
- * - Adaptive + effort (low/medium/high) → resolved thinking_budget from lookup table
+ * - Adaptive + effort (low/medium/high) → resolved thinkingBudget from lookup table
  * - Enabled + budget_tokens only → unchanged behavior
  * - Disabled thinking → unchanged behavior
  * - Effort budget ≥ max_tokens → maxOutputTokens bumped to 64000
@@ -23,8 +23,8 @@ function baseRequest(overrides = {}) {
 }
 
 describe('RFC-015 Converter — Effort Budget Resolution', () => {
-    // §6.2 #1: Adaptive + effort low → thinking_budget: 2048
-    it('resolves effort "low" to thinking_budget 2048', () => {
+    // §6.2 #1: Adaptive + effort low → thinkingBudget: 2048
+    it('resolves effort "low" to thinkingBudget 2048', () => {
         const req = baseRequest({
             thinking: { type: 'adaptive' },
             output_config: { effort: 'low' },
@@ -32,13 +32,13 @@ describe('RFC-015 Converter — Effort Budget Resolution', () => {
         const result = anthropicToGoogle(req);
 
         assert.deepStrictEqual(result.generationConfig.thinkingConfig, {
-            include_thoughts: true,
-            thinking_budget: 2048,
+            includeThoughts: true,
+            thinkingBudget: 2048,
         });
     });
 
-    // §6.2 #2: Adaptive + effort medium → thinking_budget: 8192
-    it('resolves effort "medium" to thinking_budget 8192', () => {
+    // §6.2 #2: Adaptive + effort medium → thinkingBudget: 8192
+    it('resolves effort "medium" to thinkingBudget 8192', () => {
         const req = baseRequest({
             thinking: { type: 'adaptive' },
             output_config: { effort: 'medium' },
@@ -46,13 +46,13 @@ describe('RFC-015 Converter — Effort Budget Resolution', () => {
         const result = anthropicToGoogle(req);
 
         assert.deepStrictEqual(result.generationConfig.thinkingConfig, {
-            include_thoughts: true,
-            thinking_budget: 8192,
+            includeThoughts: true,
+            thinkingBudget: 8192,
         });
     });
 
-    // §6.2 #3: Adaptive + effort high → thinking_budget: 16384
-    it('resolves effort "high" to thinking_budget 16384', () => {
+    // §6.2 #3: Adaptive + effort high → thinkingBudget: 16384
+    it('resolves effort "high" to thinkingBudget 16384', () => {
         const req = baseRequest({
             thinking: { type: 'adaptive' },
             output_config: { effort: 'high' },
@@ -60,12 +60,12 @@ describe('RFC-015 Converter — Effort Budget Resolution', () => {
         const result = anthropicToGoogle(req);
 
         assert.deepStrictEqual(result.generationConfig.thinkingConfig, {
-            include_thoughts: true,
-            thinking_budget: 16384,
+            includeThoughts: true,
+            thinkingBudget: 16384,
         });
     });
 
-    // §6.2 #4: Enabled + budget_tokens only → thinking_budget from budget_tokens directly
+    // §6.2 #4: Enabled + budget_tokens only → thinkingBudget from budget_tokens directly
     it('passes through budget_tokens for enabled thinking (no effort)', () => {
         const req = baseRequest({
             thinking: { type: 'enabled', budget_tokens: 10000 },
@@ -73,21 +73,21 @@ describe('RFC-015 Converter — Effort Budget Resolution', () => {
         const result = anthropicToGoogle(req);
 
         assert.deepStrictEqual(result.generationConfig.thinkingConfig, {
-            include_thoughts: true,
-            thinking_budget: 10000,
+            includeThoughts: true,
+            thinkingBudget: 10000,
         });
     });
 
-    // §6.2 #5: Disabled thinking → include_thoughts: false, thinking_budget: undefined
-    it('sets include_thoughts false for disabled thinking', () => {
+    // §6.2 #5: Disabled thinking → includeThoughts: false, thinkingBudget: undefined
+    it('sets includeThoughts false for disabled thinking', () => {
         const req = baseRequest({
             thinking: { type: 'disabled' },
         });
         const result = anthropicToGoogle(req);
 
         assert.deepStrictEqual(result.generationConfig.thinkingConfig, {
-            include_thoughts: false,
-            thinking_budget: undefined,
+            includeThoughts: false,
+            thinkingBudget: undefined,
         });
     });
 
@@ -100,7 +100,7 @@ describe('RFC-015 Converter — Effort Budget Resolution', () => {
         });
         const result = anthropicToGoogle(req);
 
-        assert.equal(result.generationConfig.thinkingConfig.thinking_budget, 8192);
+        assert.equal(result.generationConfig.thinkingConfig.thinkingBudget, 8192);
         assert.equal(result.generationConfig.maxOutputTokens, CLAUDE_THINKING_MAX_OUTPUT_TOKENS);
     });
 
@@ -112,7 +112,7 @@ describe('RFC-015 Converter — Effort Budget Resolution', () => {
         });
         const result = anthropicToGoogle(req);
 
-        assert.equal(result.generationConfig.thinkingConfig.thinking_budget, 2048);
+        assert.equal(result.generationConfig.thinkingConfig.thinkingBudget, 2048);
         assert.equal(result.generationConfig.maxOutputTokens, 32000);
     });
 });

@@ -458,6 +458,7 @@ export function anthropicToGoogle(anthropicRequest) {
         top_k,
         stop_sequences,
         tools,
+        tool_choice,
         thinking,
         output_config,
     } = anthropicRequest;
@@ -511,8 +512,8 @@ export function anthropicToGoogle(anthropicRequest) {
         }
 
         googleRequest.generationConfig.thinkingConfig = {
-            include_thoughts: thinking.type !== 'disabled',
-            thinking_budget: resolvedBudget,
+            includeThoughts: thinking.type !== 'disabled',
+            thinkingBudget: resolvedBudget,
         };
 
         if (resolvedBudget !== undefined && max_tokens <= resolvedBudget) {
@@ -531,6 +532,15 @@ export function anthropicToGoogle(anthropicRequest) {
                 })),
             },
         ];
+    }
+
+    // Tool choice → toolConfig (RFC-016)
+    if (tool_choice) {
+        googleRequest.toolConfig = {
+            functionCallingConfig: {
+                mode: tool_choice.type.toUpperCase(),
+            },
+        };
     }
 
     return googleRequest;
