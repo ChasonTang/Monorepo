@@ -377,7 +377,7 @@ function randomHex(bytes) {
  * @param {string|Array|*} content - Anthropic content (string or block array)
  * @returns {Array} Google parts array
  */
-function convertContentToParts(content) {
+export function convertContentToParts(content) {
     if (typeof content === 'string') {
         return [{ text: content }];
     }
@@ -414,7 +414,9 @@ function convertContentToParts(content) {
                     functionResponse: {
                         id: block.tool_use_id,
                         name: block.tool_use_id,
-                        response: block.content,
+                        response: block.is_error
+                            ? { error: block.content }
+                            : { output: block.content },
                     },
                 });
                 break;
