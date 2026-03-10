@@ -45,8 +45,8 @@ describe('classifyPart', () => {
         assert.equal(classifyPart({ thought: true, text: 'x' }), 'thinking');
     });
 
-    it('classifies empty text as text', () => {
-        assert.equal(classifyPart({ text: '' }), 'text');
+    it('classifies empty text as null (filtered)', () => {
+        assert.equal(classifyPart({ text: '' }), null);
     });
 });
 
@@ -459,5 +459,90 @@ describe('ContentBlockFSM', () => {
             thoughtSignature: sig,
         });
         assert.equal(events.length, 2);
+    });
+
+    // ── RFC-018: Empty text part filtering ────────────────────────────────
+
+    it('RFC-018 §6.2.1 — preamble empty text before thinking produces no text block', () => {
+        const e1 = fsm.process({ text: '' });
+        const e2 = fsm.process({ thought: true, text: 'The user is asking...' });
+
+        assert.deepStrictEqual(e1, []);
+        assert.deepStrictEqual(eventTypes(e2), ['content_block_start', 'content_block_delta']);
+        assert.equal(e2[0].data.index, 0);
+        assert.equal(e2[0].data.content_block.type, 'thinking');
+    });
+
+    it('RFC-018 §6.2.2 — postamble empty text after tool_use produces no trailing text block', () => {
+        const e1 = fsm.process({
+            functionCall: { name: 'Read', args: { path: '/tmp' }, id: 'toolu_1' },
+        });
+        const e2 = fsm.process({ text: '' });
+        const e3 = fsm.flush();
+
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
+        assert.equal(e1[0].data.index, 0);
+        assert.equal(e1[0].data.content_block.type, 'tool_use');
+        assert.deepStrictEqual(e2, []);
+        assert.deepStrictEqual(eventTypes(e3), ['content_block_stop']);
+        assert.equal(e3[0].data.index, 0);
+    });
+
+    it('RFC-018 §6.2.3 — mid-stream empty text between text parts is skipped', () => {
+        const e1 = fsm.process({ text: 'a' });
+        const e2 = fsm.process({ text: '' });
+        const e3 = fsm.process({ text: 'b' });
+
+        assert.deepStrictEqual(eventTypes(e1), ['content_block_start', 'content_block_delta']);
+        assert.equal(e1[0].data.index, 0);
+        assert.deepStrictEqual(e2, []);
+        assert.deepStrictEqual(eventTypes(e3), ['content_block_delta']);
+        assert.equal(e3[0].data.index, 0);
+        assert.deepStrictEqual(e3[0].data.delta, { type: 'text_delta', text: 'b' });
+    });
+
+    it('RFC-018 §6.2.4 — empty text as sole part produces no content blocks', () => {
+        const e1 = fsm.process({ text: '' });
+        const e2 = fsm.flush();
+
+        assert.deepStrictEqual(e1, []);
+        assert.deepStrictEqual(e2, []);
+    });
+
+    it('RFC-018 §6.2.5 — full thinking + tool_use with preamble/postamble produces 2 blocks', () => {
+        const allEvents = [];
+        const sig = 'R'.repeat(60);
+
+        allEvents.push(...fsm.process({ text: '' }));
+        allEvents.push(...fsm.process({ thought: true, text: 'The user is asking...' }));
+        allEvents.push(...fsm.process({ thought: true, text: '' }));
+        allEvents.push(...fsm.process({ thought: true, thoughtSignature: sig, text: '' }));
+        allEvents.push(
+            ...fsm.process({
+                functionCall: { name: 'Read', args: { path: '/tmp' }, id: 'toolu_1' },
+            }),
+        );
+        allEvents.push(...fsm.process({ text: '' }));
+        allEvents.push(...fsm.flush());
+
+        const expectedSequence = [
+            'content_block_start',
+            'content_block_delta',
+            'content_block_delta',
+            'content_block_stop',
+            'content_block_start',
+            'content_block_delta',
+            'content_block_stop',
+        ];
+        assert.deepStrictEqual(eventTypes(allEvents), expectedSequence);
+
+        assert.equal(allEvents[0].data.index, 0);
+        assert.equal(allEvents[0].data.content_block.type, 'thinking');
+        assert.equal(allEvents[1].data.delta.type, 'thinking_delta');
+        assert.equal(allEvents[2].data.delta.type, 'signature_delta');
+        assert.equal(allEvents[3].data.index, 0);
+        assert.equal(allEvents[4].data.index, 1);
+        assert.equal(allEvents[4].data.content_block.type, 'tool_use');
+        assert.equal(allEvents[6].data.index, 1);
     });
 });

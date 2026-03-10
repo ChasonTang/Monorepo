@@ -654,7 +654,7 @@ const BLOCK_TYPES = {
  */
 export function classifyPart(part) {
     if (part.thought === true) return 'thinking';
-    if (part.text !== undefined) return 'text';
+    if (part.text !== undefined && part.text !== '') return 'text';
     if (part.functionCall) return 'tool_use';
 
     return null;
