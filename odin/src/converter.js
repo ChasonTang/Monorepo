@@ -859,7 +859,7 @@ export async function* streamSSEResponse(stream, model, debug = false) {
         yield formatAndLog(fsmEvent.event, fsmEvent.data, debug);
     }
 
-    if (fsm.hasToolUse && !stopReason) {
+    if (fsm.hasToolUse && (!stopReason || stopReason === 'end_turn')) {
         stopReason = 'tool_use';
     }
 
