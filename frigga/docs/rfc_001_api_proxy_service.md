@@ -1,6 +1,6 @@
 # RFC-001: Messages API Proxy Service
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Author:** Chason Tang  
 **Date:** 2026-03-12  
 **Status:** Proposed
@@ -9,7 +9,7 @@
 
 ## 1. Summary
 
-Frigga is a zero-runtime-dependency Node.js CLI proxy service that exposes `/v1/messages` and `/v1/messages/count_tokens` HTTP POST endpoints compatible with the Anthropic Messages API. The service validates incoming requests via `Authorization` header comparison against a startup-configured API key. In the future, validated requests will be forwarded to the Anthropic API with a separate upstream API key injected into the `Authorization` header; the current phase returns `501 Not Implemented` for the forwarding step. In development, the service runs over plain HTTP; in production, Nginx sits in front and provides TLS termination (HTTPS).
+Frigga is a zero-runtime-dependency Node.js CLI proxy service that exposes `/v1/messages` and `/v1/messages/count_tokens` HTTP POST endpoints compatible with the Anthropic Messages API. The service validates incoming requests via `Authorization` header comparison against a startup-configured API key. In the future, validated requests will be forwarded to the Anthropic API with a separate upstream API key injected into the `Authorization` header; the upstream response — either a JSON object or an SSE stream, depending on the request's `stream` parameter — is relayed back to the caller transparently. The current phase returns `501 Not Implemented` for the forwarding step. In development, the service runs over plain HTTP; in production, Nginx sits in front and provides TLS termination (HTTPS).
 
 ## 2. Motivation
 
@@ -26,7 +26,7 @@ A dedicated proxy service with a focused scope provides a minimal attack surface
 - Upstream forwarding (future) with a separate `--upstream-api-key` injected into the `Authorization` header for Anthropic API requests
 - Zero runtime dependencies — all functionality implemented using Node.js built-in modules (`http`, `https`, `crypto`, `url`)
 - Environment-agnostic: run over plain HTTP in development; production TLS (HTTPS) is handled entirely by Nginx with no code change
-- Transparent SSE passthrough with chunked streaming when upstream forwarding is implemented (no full-response buffering)
+- Transparent response passthrough when upstream forwarding is implemented: chunked SSE streaming for `stream: true` requests, JSON relay for `stream: false` requests (no full-response buffering in either case)
 
 **Non-Goals:**
 - TLS termination — delegated entirely to Nginx in production; the server always binds plain HTTP
@@ -54,7 +54,7 @@ Claude Code                      Frigga Server
      |<-------------------------------|
 ```
 
-**Future** (upstream forwarding implemented):
+**Future** (upstream forwarding implemented, `stream: true`):
 
 ```
 Claude Code                      Frigga Server                      Anthropic API
@@ -73,6 +73,25 @@ Claude Code                      Frigga Server                      Anthropic AP
      |<--- SSE stream (passthrough)   |                                  |
 ```
 
+**Future** (upstream forwarding implemented, `stream: false`):
+
+```
+Claude Code                      Frigga Server                      Anthropic API
+     |                                |                                  |
+     | POST /v1/messages              |                                  |
+     | Authorization: Bearer <key>    |                                  |
+     |------------------------------->|                                  |
+     |                                | validate auth                    |
+     |                                |                                  |
+     |                                | POST /v1/messages                |
+     |                                | Authorization: Bearer            |
+     |                                |   <upstream-api-key>             |
+     |                                |--------------------------------->|
+     |                                |<--- JSON response                |
+     |                                |                                  |
+     |<--- JSON response (relay)      |                                  |
+```
+
 **Production** (Nginx TLS termination in front):
 
 ```
@@ -89,7 +108,7 @@ The Frigga server always binds plain HTTP. Nginx, when present, terminates TLS a
 | Component | Role | Present in |
 |-----------|------|------------|
 | Nginx | TLS termination | Production only |
-| Frigga Server | API consumer authorization, upstream request forwarding with credential injection, SSE response streaming | Both |
+| Frigga Server | API consumer authorization, upstream request forwarding with credential injection, response relay (SSE streaming or JSON passthrough) | Both |
 
 ### 4.2 Detailed Design
 
@@ -106,7 +125,7 @@ node src/index.js --api-key=<key> [--upstream-api-key=<key>] [--port=<port>] [--
 | `--api-key` | Yes | — | Expected value in the `Authorization: Bearer` header on incoming requests. Requests with a mismatched or missing header receive `401`. |
 | `--upstream-api-key` | No | — | API key injected as `Authorization: Bearer <upstream-api-key>` into upstream Anthropic API requests. Required when upstream forwarding is implemented. |
 | `--port` | No | `3000` | HTTP listen port |
-| `--host` | No | `0.0.0.0` | HTTP listen address (IPv4 only; IPv6 is not supported in the current phase) |
+| `--host` | No | `127.0.0.1` | HTTP listen address (IPv4 only; IPv6 is not supported in the current phase) |
 
 #### 4.2.2 Server Endpoints
 
@@ -126,14 +145,14 @@ The server creates a single `http.createServer()` instance. The server exposes e
 
 **`POST /v1/messages`**
 
-From the API consumer's perspective, this endpoint will behave identically to the Anthropic Messages API once upstream forwarding is implemented. The consumer sends a standard request and receives an SSE stream in return.
+From the API consumer's perspective, this endpoint will behave identically to the Anthropic Messages API once upstream forwarding is implemented. The consumer sends a standard request and receives either an SSE stream (`stream: true`) or a JSON response (`stream: false`) in return, depending on the request body's `stream` parameter.
 
 Current behavior: After successful authorization validation, returns `501 Not Implemented` with a JSON body `{ "type": "error", "error": { "type": "not_implemented", "message": "Upstream forwarding is not yet implemented" } }`.
 
 Future behavior:
 1. Forward the request body and relevant headers to `https://api.anthropic.com/v1/messages`
 2. Inject `Authorization: Bearer <upstream-api-key>` header (replacing any existing value)
-3. Stream the upstream SSE response back to the caller transparently (`Content-Type: text/event-stream`)
+3. Relay the upstream response back to the caller transparently — the proxy does not inspect the `stream` parameter; it simply pipes the upstream response (headers and body) through to the client regardless of content type (`text/event-stream` for SSE, `application/json` for JSON)
 
 **`POST /v1/messages/count_tokens`**
 
@@ -162,9 +181,11 @@ All error responses use `Content-Type: application/json` and follow the [Anthrop
 | `405` | `invalid_request_error` | Non-POST request method |
 | `501` | `not_implemented` | Upstream forwarding not yet implemented (current phase) |
 
-#### 4.2.3 Future: SSE Relay Pipeline
+#### 4.2.3 Future: Response Relay Pipeline
 
-When upstream forwarding is implemented, the SSE relay will avoid buffering by operating as a streaming pipeline:
+When upstream forwarding is implemented, the proxy relays the upstream response back to the client without buffering, regardless of response type. The same streaming pipeline handles both SSE and JSON responses — the proxy does not inspect or branch on the `stream` parameter or `Content-Type`. It copies the upstream status code, response headers, and body through to the client as-is.
+
+**SSE response** (`stream: true` — `Content-Type: text/event-stream`):
 
 ```
 Claude Code              Frigga Server              Anthropic API
@@ -183,7 +204,23 @@ Claude Code              Frigga Server              Anthropic API
      |<-- res.end()           |                          |
 ```
 
-Each data chunk from the upstream response is written directly to the client response using `response.write()`. No intermediate buffering occurs — data flows through the proxy as fast as the slowest link allows.
+**JSON response** (`stream: false` — `Content-Type: application/json`):
+
+```
+Claude Code              Frigga Server              Anthropic API
+     |                        |                          |
+     |  POST /v1/messages     |                          |
+     |----------------------->|                          |
+     |                        | POST /v1/messages        |
+     |                        |  + upstream auth         |
+     |                        |------------------------->|
+     |                        |                          |
+     |                        |<-- response body --------|
+     |<-- res.write(body)     |                          |
+     |<-- res.end()           |                          |
+```
+
+In both cases, each data chunk from the upstream response is written directly to the client response using `response.write()`. No intermediate buffering occurs — data flows through the proxy as fast as the slowest link allows. The only difference is behavioral: SSE responses arrive as a long-lived chunked stream, while JSON responses typically complete in a single chunk or a small number of chunks.
 
 **Timeout strategy** (future, when upstream forwarding is implemented):
 
@@ -192,9 +229,9 @@ Each data chunk from the upstream response is written directly to the client res
 | Connection timeout | `UPSTREAM_CONNECT_TIMEOUT_MS` | 10 000 | Maximum time to establish a TCP connection with the upstream |
 | First-byte timeout | `UPSTREAM_FIRST_BYTE_TIMEOUT_MS` | 120 000 | Maximum time from request sent to first response byte received |
 
-The existing `FORWARD_TIMEOUT_MS` constant is replaced by the two finer-grained timeouts above. No idle timeout is applied to the SSE stream itself — the proxy relies on the upstream to close the connection when the response is complete.
+The existing `FORWARD_TIMEOUT_MS` constant is replaced by the two finer-grained timeouts above. No idle timeout is applied to the response stream — the proxy relies on the upstream to close the connection when the response is complete. For SSE responses this may take minutes; for JSON responses completion is typically immediate after the first byte.
 
-**Client disconnect handling**: The proxy listens for the `close` event on the incoming request (`req.on('close')`). If the client disconnects mid-stream, the proxy immediately aborts the in-flight upstream request (`upstreamReq.destroy()`) to release resources. This prevents orphaned upstream connections from accumulating.
+**Client disconnect handling**: The proxy listens for the `close` event on the incoming request (`req.on('close')`). If the client disconnects mid-response (SSE or JSON), the proxy immediately aborts the in-flight upstream request (`upstreamReq.destroy()`) to release resources. This prevents orphaned upstream connections from accumulating.
 
 #### 4.2.4 Project Structure
 
@@ -210,7 +247,7 @@ frigga/
     └── server.js
 ```
 
-**`package.json`** — Project manifest with zero runtime `dependencies`. Sets `"type": "module"` for ES module support and `"engines": { "node": ">=24.0.0" }` to match the production environment's standardized Node.js version.
+**`package.json`** — Project manifest with zero runtime `dependencies`. Sets `"type": "module"` for ES module support to match the production environment's standardized Node.js version.
 
 **`src/index.js`** — Shebang entry point (`#!/usr/bin/env node`). Parses CLI arguments via `cli.js`, validates required arguments, and starts the server. Installs `SIGINT`/`SIGTERM` handlers for graceful shutdown.
 
@@ -220,7 +257,7 @@ frigga/
 - `resolveArgs(args)` → `{ port, host, apiKey, upstreamApiKey }` — validate and extract arguments with defaults.
 
 **`src/constants.js`** — Shared constants exported as named values:
-- Network defaults: `DEFAULT_PORT` (3000), `DEFAULT_HOST` ('0.0.0.0')
+- Network defaults: `DEFAULT_PORT` (3000), `DEFAULT_HOST` ('127.0.0.1')
 - Upstream timeouts (future): `UPSTREAM_CONNECT_TIMEOUT_MS` (10 000), `UPSTREAM_FIRST_BYTE_TIMEOUT_MS` (120 000)
 - Shutdown: `SHUTDOWN_TIMEOUT_MS` (30 000)
 
@@ -235,7 +272,7 @@ The server implements a two-phase shutdown sequence triggered by `SIGINT` or `SI
 2. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
 3. **Force exit** — if active connections remain after the drain timeout, destroy all remaining sockets and call `process.exit(1)`.
 
-Future consideration: when SSE streaming is implemented, in-flight SSE streams will be terminated at the drain timeout boundary. The proxy will not wait indefinitely for long-running streams to complete.
+Future consideration: when upstream forwarding is implemented, in-flight responses (SSE streams or pending JSON responses) will be terminated at the drain timeout boundary. The proxy will not wait indefinitely for long-running streams to complete.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
@@ -248,7 +285,7 @@ The server writes structured log lines to `stderr` (keeping `stdout` clean for p
 **Startup log** (once, on successful listen):
 
 ```
-[INFO] Frigga listening on 0.0.0.0:3000
+[INFO] Frigga listening on 127.0.0.1:3000
 ```
 
 **Request log** (one line per completed request):
@@ -287,7 +324,7 @@ Sensitive values (`--api-key`, `--upstream-api-key`, `Authorization` header valu
 
 ### Phase 1: Project Scaffolding & CLI — 0.5 day
 
-- [ ] Create `frigga/package.json` — zero runtime dependencies, `"type": "module"`, `"engines": { "node": ">=24.0.0" }`
+- [ ] Create `frigga/package.json` — zero runtime dependencies, `"type": "module"`
 - [ ] Implement `src/cli.js` — `parseArgs()`, `printUsage()`, `resolveArgs()`
 - [ ] Implement `src/constants.js` — all shared constants
 - [ ] Implement `src/index.js` — shebang, parse args, validate required arguments, start server, register signal handlers
@@ -311,12 +348,12 @@ Sensitive values (`--api-key`, `--upstream-api-key`, `Authorization` header valu
 ### Phase 3: Upstream Forwarding (Future)
 
 - [ ] Implement request forwarding to Anthropic API with `--upstream-api-key` injection
-- [ ] Implement SSE streaming passthrough for `/v1/messages`
+- [ ] Implement transparent response relay pipeline — pipe upstream status code, headers, and body to client without content-type branching; handles both SSE (`stream: true`) and JSON (`stream: false`) responses for `/v1/messages`
 - [ ] Implement JSON response passthrough for `/v1/messages/count_tokens`
 - [ ] Upstream timeout handling (`UPSTREAM_CONNECT_TIMEOUT_MS` 10s, `UPSTREAM_FIRST_BYTE_TIMEOUT_MS` 120s)
 - [ ] Client disconnect detection — abort upstream request on `req.close`
 
-**Done when:** Full end-to-end flow: Claude Code → `POST /v1/messages` on Frigga → Anthropic API → SSE streams back through proxy → Claude Code receives SSE. Tested against a real Anthropic API.
+**Done when:** Full end-to-end flow: Claude Code → `POST /v1/messages` on Frigga → Anthropic API → response (SSE or JSON) relays back through proxy → Claude Code receives response. Tested against a real Anthropic API with both `stream: true` and `stream: false`.
 
 ## 6. Testing Strategy
 
@@ -349,13 +386,13 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Memory pressure from large SSE responses (when forwarding is implemented) | Med | Med | Pure streaming pipeline with no full-response buffering; observe `response.write()` return value for backpressure |
+| Memory pressure from large responses (SSE streams or large JSON bodies, when forwarding is implemented) | Med | Med | Pure streaming pipeline with no full-response buffering for both response types; observe `response.write()` return value for backpressure |
 | Upstream API key exposure through error messages or logs | Low | High | Never include `--upstream-api-key` in error responses or log output; scrub sensitive headers before logging |
 | Timing attack on API key comparison | Low | Low | SHA-256 hash both values before `crypto.timingSafeEqual` comparison; normalizes length and prevents length leakage |
 
 ## 8. Future Work
 
-- **Upstream forwarding** — Forward validated requests to the Anthropic API with `--upstream-api-key` injection; stream SSE responses back transparently
+- **Upstream forwarding** — Forward validated requests to the Anthropic API with `--upstream-api-key` injection; relay responses (SSE streams or JSON) back transparently
 - **Health check endpoint** — `GET /health` returning `200 OK` for Nginx / load balancer probes
 - **Structured JSON logging** — Upgrade plain-text request logs to structured JSON for log aggregation systems
 - **Rate limiting** — Application-level rate limiting to protect the upstream API key from abuse
@@ -375,7 +412,8 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.4 | 2026-03-12 | Chason Tang | Fix `timingSafeEqual` to use SHA-256 hashing; align error responses with Anthropic API error shape; add graceful shutdown details (§4.2.5); add logging specification (§4.2.6); refine SSE timeout strategy with connect/first-byte split; add client disconnect handling; update Node.js target to >=24.0.0; clarify IPv4-only listening; introduce automated integration tests |
+| 1.5 | 2026-03-12 | Chason Tang | Support both SSE and JSON response relay — the proxy transparently pipes upstream responses regardless of content type; update §4.1 diagrams, §4.2.2 endpoint descriptions, rename §4.2.3 to "Response Relay Pipeline" with dual-mode coverage; update implementation plan, risks, and future work accordingly |
+| 1.4 | 2026-03-12 | Chason Tang | Fix `timingSafeEqual` to use SHA-256 hashing; align error responses with Anthropic API error shape; add graceful shutdown details (§4.2.5); add logging specification (§4.2.6); refine SSE timeout strategy with connect/first-byte split; add client disconnect handling; clarify IPv4-only listening; introduce automated integration tests |
 | 1.3 | 2026-03-12 | Chason Tang | Remove WebSocket relay architecture and client mode; simplify to HTTP proxy service; add `/v1/messages/count_tokens` endpoint; separate `--api-key` (incoming auth) and `--upstream-api-key` (upstream auth); current phase returns 501 for upstream forwarding |
 | 1.2 | 2026-03-11 | Chason Tang | Merge `/register` + `/ws` into single `/ws` endpoint with shared-secret authentication; add `--client-secret` CLI option to both modes; eliminate token lifecycle; add `crypto.timingSafeEqual` for all secret comparisons; simplify client lifecycle (remove registration step) |
 | 1.1 | 2026-03-11 | Chason Tang | Rename `/forward` to `/v1/messages`; add server-side Authorization validation via `--api-key`; remove `clientId` (single-client simplification); add dev/prod deployment modes; add §4.2.7 Project Structure; restructure CLI arguments |
