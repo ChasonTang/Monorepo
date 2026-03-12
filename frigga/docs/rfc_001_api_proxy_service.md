@@ -1,15 +1,15 @@
 # RFC-001: Messages API Proxy Service
 
-**Version:** 1.5  
+**Version:** 1.9  
 **Author:** Chason Tang  
-**Date:** 2026-03-12  
+**Date:** 2026-03-13  
 **Status:** Proposed
 
 ---
 
 ## 1. Summary
 
-Frigga is a zero-runtime-dependency Node.js CLI proxy service that exposes `/v1/messages` and `/v1/messages/count_tokens` HTTP POST endpoints compatible with the Anthropic Messages API. The service validates incoming requests via `Authorization` header comparison against a startup-configured API key. In the future, validated requests will be forwarded to the Anthropic API with a separate upstream API key injected into the `Authorization` header; the upstream response — either a JSON object or an SSE stream, depending on the request's `stream` parameter — is relayed back to the caller transparently. The current phase returns `501 Not Implemented` for the forwarding step. In development, the service runs over plain HTTP; in production, Nginx sits in front and provides TLS termination (HTTPS).
+Frigga is a zero-runtime-dependency Node.js CLI proxy service that exposes `/v1/messages` and `/v1/messages/count_tokens` HTTP POST endpoints compatible with the Anthropic Messages API. The service validates incoming requests via `Authorization` header comparison against a startup-configured API key. In the future, validated requests will be forwarded to the Anthropic API with an upstream API key injected into the `Authorization` header; the upstream response is relayed back to the caller transparently. The primary consumer (Claude Code) uses `stream: true`, so responses are predominantly SSE streams; non-streaming JSON responses are also supported for API compatibility. The current phase returns `501 Not Implemented` for the forwarding step. In development, the service runs over plain HTTP; in production, Nginx sits in front and provides TLS termination (HTTPS).
 
 ## 2. Motivation
 
@@ -23,10 +23,10 @@ A dedicated proxy service with a focused scope provides a minimal attack surface
 - Single CLI entry point that starts an HTTP proxy server
 - `/v1/messages` and `/v1/messages/count_tokens` POST endpoints compatible with the Anthropic Messages API path
 - Incoming request validation via `--api-key` matched against the `Authorization: Bearer` header
-- Upstream forwarding (future) with a separate `--upstream-api-key` injected into the `Authorization` header for Anthropic API requests
+- Upstream forwarding (future) with an upstream API key injected into the `Authorization` header for Anthropic API requests
 - Zero runtime dependencies — all functionality implemented using Node.js built-in modules (`http`, `https`, `crypto`, `url`)
 - Environment-agnostic: run over plain HTTP in development; production TLS (HTTPS) is handled entirely by Nginx with no code change
-- Transparent response passthrough when upstream forwarding is implemented: chunked SSE streaming for `stream: true` requests, JSON relay for `stream: false` requests (no full-response buffering in either case)
+- Transparent response passthrough when upstream forwarding is implemented: the proxy pipes upstream responses without content-type branching or full-response buffering. The primary consumer (Claude Code) uses `stream: true` (SSE); non-streaming JSON responses are also supported for API compatibility
 
 **Non-Goals:**
 - TLS termination — delegated entirely to Nginx in production; the server always binds plain HTTP
@@ -54,7 +54,7 @@ Claude Code                      Frigga Server
      |<-------------------------------|
 ```
 
-**Future** (upstream forwarding implemented, `stream: true`):
+**Future** (upstream forwarding implemented — shown with `stream: true`, the primary path for Claude Code):
 
 ```
 Claude Code                      Frigga Server                      Anthropic API
@@ -73,25 +73,6 @@ Claude Code                      Frigga Server                      Anthropic AP
      |<--- SSE stream (passthrough)   |                                  |
 ```
 
-**Future** (upstream forwarding implemented, `stream: false`):
-
-```
-Claude Code                      Frigga Server                      Anthropic API
-     |                                |                                  |
-     | POST /v1/messages              |                                  |
-     | Authorization: Bearer <key>    |                                  |
-     |------------------------------->|                                  |
-     |                                | validate auth                    |
-     |                                |                                  |
-     |                                | POST /v1/messages                |
-     |                                | Authorization: Bearer            |
-     |                                |   <upstream-api-key>             |
-     |                                |--------------------------------->|
-     |                                |<--- JSON response                |
-     |                                |                                  |
-     |<--- JSON response (relay)      |                                  |
-```
-
 **Production** (Nginx TLS termination in front):
 
 ```
@@ -108,7 +89,7 @@ The Frigga server always binds plain HTTP. Nginx, when present, terminates TLS a
 | Component | Role | Present in |
 |-----------|------|------------|
 | Nginx | TLS termination | Production only |
-| Frigga Server | API consumer authorization, upstream request forwarding with credential injection, response relay (SSE streaming or JSON passthrough) | Both |
+| Frigga Server | API consumer authorization, upstream request forwarding with credential injection (future), response relay | Both |
 
 ### 4.2 Detailed Design
 
@@ -117,24 +98,27 @@ The Frigga server always binds plain HTTP. Nginx, when present, terminates TLS a
 The CLI entry point (`src/index.js`) starts the proxy server. Arguments use the `--key=value` form exclusively (no space-separated values), parsed by a minimal hand-written parser operating on `process.argv`.
 
 ```
-node src/index.js --api-key=<key> [--upstream-api-key=<key>] [--port=<port>] [--host=<host>]
+node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]
 ```
 
 | Argument | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `--api-key` | Yes | — | Expected value in the `Authorization: Bearer` header on incoming requests. Requests with a mismatched or missing header receive `401`. |
-| `--upstream-api-key` | No | — | API key injected as `Authorization: Bearer <upstream-api-key>` into upstream Anthropic API requests. Required when upstream forwarding is implemented. |
 | `--port` | No | `3000` | HTTP listen port |
 | `--host` | No | `127.0.0.1` | HTTP listen address (IPv4 only; IPv6 is not supported in the current phase) |
 
+**Startup error handling**: If the server fails to start (e.g., `EADDRINUSE` from port conflict, `EADDRNOTAVAIL` from invalid host address), the error message is written to `stderr` and the process exits with code `1`. No retry is attempted.
+
 #### 4.2.2 Server Endpoints
 
-The server creates a single `http.createServer()` instance. The server exposes exactly two endpoints:
+The server creates a single `http.createServer()` instance. The server exposes exactly two endpoints, both handled by a shared request pipeline (authorization → forwarding → response relay) parameterized only by the upstream URL path:
 
 | Path | Method | Purpose |
 |------|--------|---------|
 | `/v1/messages` | POST | Messages API proxy |
 | `/v1/messages/count_tokens` | POST | Token counting API proxy |
+
+**Request body handling**: The proxy treats the request body as an opaque byte stream. No JSON parsing, schema validation, or size enforcement is performed at the proxy layer — the body is forwarded to the upstream as-is via `stream.pipeline(req, upstreamReq)` when upstream forwarding is implemented (see §8 Future Work). The upstream Anthropic API enforces its own request size limits. In the current phase (501), the server responds immediately after authorization validation without consuming the request body.
 
 **Authorization validation** (common to both endpoints):
 
@@ -143,22 +127,9 @@ The server creates a single `http.createServer()` instance. The server exposes e
 3. Hash both the extracted token and the `--api-key` value with SHA-256 (`crypto.createHash('sha256')`), then compare the fixed-length digests via `crypto.timingSafeEqual`. Hashing normalizes both values to 32 bytes, avoiding the `RangeError` that `timingSafeEqual` throws when inputs differ in length, and prevents leaking key length information.
 4. If missing, malformed, or mismatched → `401 Unauthorized`
 
-**`POST /v1/messages`**
+**Current behavior** (both endpoints): After successful authorization validation, returns `501 Not Implemented` with a JSON body `{ "type": "error", "error": { "type": "not_implemented", "message": "Upstream forwarding is not yet implemented" } }`.
 
-From the API consumer's perspective, this endpoint will behave identically to the Anthropic Messages API once upstream forwarding is implemented. The consumer sends a standard request and receives either an SSE stream (`stream: true`) or a JSON response (`stream: false`) in return, depending on the request body's `stream` parameter.
-
-Current behavior: After successful authorization validation, returns `501 Not Implemented` with a JSON body `{ "type": "error", "error": { "type": "not_implemented", "message": "Upstream forwarding is not yet implemented" } }`.
-
-Future behavior:
-1. Forward the request body and relevant headers to `https://api.anthropic.com/v1/messages`
-2. Inject `Authorization: Bearer <upstream-api-key>` header (replacing any existing value)
-3. Relay the upstream response back to the caller transparently — the proxy does not inspect the `stream` parameter; it simply pipes the upstream response (headers and body) through to the client regardless of content type (`text/event-stream` for SSE, `application/json` for JSON)
-
-**`POST /v1/messages/count_tokens`**
-
-Follows the same pattern as `/v1/messages` — identical authorization validation, currently returns `501 Not Implemented`.
-
-Future behavior: Forward to `https://api.anthropic.com/v1/messages/count_tokens` with the upstream API key injected.
+When upstream forwarding is implemented (see §8 Future Work), the proxy will forward requests to the corresponding Anthropic API endpoint and relay responses transparently. The primary consumer (Claude Code) uses `stream: true`, so responses are predominantly SSE streams (`text/event-stream`); non-streaming JSON responses are also supported for API compatibility. The proxy does not branch on the `stream` parameter — it pipes upstream responses through as-is.
 
 **Error responses** (common to both endpoints):
 
@@ -181,59 +152,7 @@ All error responses use `Content-Type: application/json` and follow the [Anthrop
 | `405` | `invalid_request_error` | Non-POST request method |
 | `501` | `not_implemented` | Upstream forwarding not yet implemented (current phase) |
 
-#### 4.2.3 Future: Response Relay Pipeline
-
-When upstream forwarding is implemented, the proxy relays the upstream response back to the client without buffering, regardless of response type. The same streaming pipeline handles both SSE and JSON responses — the proxy does not inspect or branch on the `stream` parameter or `Content-Type`. It copies the upstream status code, response headers, and body through to the client as-is.
-
-**SSE response** (`stream: true` — `Content-Type: text/event-stream`):
-
-```
-Claude Code              Frigga Server              Anthropic API
-     |                        |                          |
-     |  POST /v1/messages     |                          |
-     |----------------------->|                          |
-     |                        | POST /v1/messages        |
-     |                        |  + upstream auth         |
-     |                        |------------------------->|
-     |                        |                          |
-     |                        |<-- chunk 1 --------------|
-     |<-- res.write(chunk 1)  |                          |
-     |                        |<-- chunk 2 --------------|
-     |<-- res.write(chunk 2)  |                          |
-     |                        |<-- END ------------------|
-     |<-- res.end()           |                          |
-```
-
-**JSON response** (`stream: false` — `Content-Type: application/json`):
-
-```
-Claude Code              Frigga Server              Anthropic API
-     |                        |                          |
-     |  POST /v1/messages     |                          |
-     |----------------------->|                          |
-     |                        | POST /v1/messages        |
-     |                        |  + upstream auth         |
-     |                        |------------------------->|
-     |                        |                          |
-     |                        |<-- response body --------|
-     |<-- res.write(body)     |                          |
-     |<-- res.end()           |                          |
-```
-
-In both cases, each data chunk from the upstream response is written directly to the client response using `response.write()`. No intermediate buffering occurs — data flows through the proxy as fast as the slowest link allows. The only difference is behavioral: SSE responses arrive as a long-lived chunked stream, while JSON responses typically complete in a single chunk or a small number of chunks.
-
-**Timeout strategy** (future, when upstream forwarding is implemented):
-
-| Timeout | Constant | Value | Description |
-|---------|----------|-------|-------------|
-| Connection timeout | `UPSTREAM_CONNECT_TIMEOUT_MS` | 10 000 | Maximum time to establish a TCP connection with the upstream |
-| First-byte timeout | `UPSTREAM_FIRST_BYTE_TIMEOUT_MS` | 120 000 | Maximum time from request sent to first response byte received |
-
-The existing `FORWARD_TIMEOUT_MS` constant is replaced by the two finer-grained timeouts above. No idle timeout is applied to the response stream — the proxy relies on the upstream to close the connection when the response is complete. For SSE responses this may take minutes; for JSON responses completion is typically immediate after the first byte.
-
-**Client disconnect handling**: The proxy listens for the `close` event on the incoming request (`req.on('close')`). If the client disconnects mid-response (SSE or JSON), the proxy immediately aborts the in-flight upstream request (`upstreamReq.destroy()`) to release resources. This prevents orphaned upstream connections from accumulating.
-
-#### 4.2.4 Project Structure
+#### 4.2.3 Project Structure
 
 ```
 frigga/
@@ -254,41 +173,42 @@ frigga/
 **`src/cli.js`** — Pure-function module for CLI concerns:
 - `parseArgs(argv)` → `Record<string, string | true>` — iterate `process.argv`, extract `--key=value` and `--flag` forms.
 - `printUsage()` — write usage text to `stderr`.
-- `resolveArgs(args)` → `{ port, host, apiKey, upstreamApiKey }` — validate and extract arguments with defaults.
+- `resolveArgs(args)` → `{ port, host, apiKey }` — validate and extract arguments with defaults.
 
 **`src/constants.js`** — Shared constants exported as named values:
 - Network defaults: `DEFAULT_PORT` (3000), `DEFAULT_HOST` ('127.0.0.1')
-- Upstream timeouts (future): `UPSTREAM_CONNECT_TIMEOUT_MS` (10 000), `UPSTREAM_FIRST_BYTE_TIMEOUT_MS` (120 000)
 - Shutdown: `SHUTDOWN_TIMEOUT_MS` (30 000)
 
 **`src/server.js`** — Server implementation:
-- `startServer({ port, host, apiKey, upstreamApiKey })` — create HTTP server, register `/v1/messages` and `/v1/messages/count_tokens` routes with authorization validation, manage graceful shutdown.
+- `startServer({ port, host, apiKey })` — create HTTP server, register `/v1/messages` and `/v1/messages/count_tokens` routes with shared authorization validation pipeline, manage graceful shutdown. The request handler core logic is implemented as a pure function that takes request metadata (method, URL, headers) and returns response data (status code, headers, body), enabling direct unit testing without HTTP overhead.
 
-#### 4.2.5 Graceful Shutdown
+#### 4.2.4 Graceful Shutdown
 
-The server implements a two-phase shutdown sequence triggered by `SIGINT` or `SIGTERM`:
+The server implements a shutdown sequence triggered by `SIGINT` or `SIGTERM`:
 
 1. **Stop accepting** — call `server.close()` to stop accepting new connections immediately.
-2. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
-3. **Force exit** — if active connections remain after the drain timeout, destroy all remaining sockets and call `process.exit(1)`.
-
-Future consideration: when upstream forwarding is implemented, in-flight responses (SSE streams or pending JSON responses) will be terminated at the drain timeout boundary. The proxy will not wait indefinitely for long-running streams to complete.
+2. **Close idle connections** — immediately destroy all keep-alive connections that have no in-flight request. HTTP/1.1 defaults to `Connection: keep-alive`, so idle connections will accumulate during normal operation; these must be closed proactively to avoid blocking the shutdown sequence until the drain timeout.
+3. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
+4. **Exit** — if all connections drain within the timeout, exit with code `0`. If active connections remain after the drain timeout, destroy all remaining sockets and call `process.exit(1)`.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `SHUTDOWN_TIMEOUT_MS` | 30 000 | Maximum time to wait for active connections to drain before forced exit |
 
-#### 4.2.6 Logging
+#### 4.2.5 Logging
 
-The server writes structured log lines to `stderr` (keeping `stdout` clean for potential future piping). All log output is plain text, with no runtime logging dependencies.
+The server writes plain-text structured log lines with no runtime logging dependencies. Log output is split by severity following cloud-native conventions (12-Factor App, Kubernetes):
 
-**Startup log** (once, on successful listen):
+- **`stdout`** — INFO-level operational logs: startup, request, shutdown
+- **`stderr`** — error-level output: `printUsage()` (triggered by invalid CLI arguments)
+
+**Startup log** (once, on successful listen — `stdout`):
 
 ```
 [INFO] Frigga listening on 127.0.0.1:3000
 ```
 
-**Request log** (one line per completed request):
+**Request log** (one line per completed request — `stdout`):
 
 ```
 [INFO] POST /v1/messages 401 2ms
@@ -297,74 +217,50 @@ The server writes structured log lines to `stderr` (keeping `stdout` clean for p
 
 Format: `[LEVEL] METHOD PATH STATUS DURATION`
 
-**Shutdown log**:
+**Shutdown log** (`stdout`):
 
 ```
 [INFO] Shutting down: stop accepting new connections
 [INFO] Shutdown complete
 ```
 
-Sensitive values (`--api-key`, `--upstream-api-key`, `Authorization` header values) are never included in any log output.
+Sensitive values (`--api-key`, `Authorization` header values) are never included in any log output.
 
 ### 4.3 Design Rationale
 
 **Endpoint path `/v1/messages` instead of a generic `/proxy`**: By exposing the same path as the Anthropic Messages API, the Frigga server is transparent to the API consumer. Any client SDK or tool configured to call the Anthropic API can be redirected to Frigga simply by changing the base URL — no request-wrapping or format changes required.
 
+**Endpoint `/v1/messages/count_tokens`**: Included for complete Anthropic Messages API compatibility. Although the primary use case is message streaming, Claude Code and other API consumers may use token counting for prompt size estimation. Exposing the same path ensures the proxy is a transparent drop-in replacement for the Anthropic API base URL.
+
 **Server-side `Authorization` validation**: Even though Nginx can enforce access control in production, the server must also validate authorization because: (a) development environments have no Nginx, (b) defense-in-depth prevents misconfigured Nginx from exposing the proxy, and (c) it keeps the access control logic explicit and testable in the application layer.
 
 **Constant-time key comparison via SHA-256**: Both the incoming token and the `--api-key` are hashed with SHA-256 before comparison via `crypto.timingSafeEqual`. This serves two purposes: (a) `timingSafeEqual` requires equal-length inputs — hashing normalizes both values to 32 bytes, and (b) it prevents leaking the key length through a direct length check. The implementation cost is minimal and it eliminates an entire class of timing side-channel vulnerabilities.
 
-**Separate `--api-key` and `--upstream-api-key`**: The incoming request validation key and the upstream Anthropic API key are intentionally separate. This allows the proxy operator to issue a local API key for consumers without exposing the upstream credentials. The two keys serve different trust boundaries: `--api-key` controls who can access the proxy, while `--upstream-api-key` controls what the proxy can access on the upstream.
+**Separate incoming and upstream API keys**: The incoming request validation key (`--api-key`) and the upstream Anthropic API key (to be added as `--upstream-api-key` when upstream forwarding is implemented) are intentionally separate. This allows the proxy operator to issue a local API key for consumers without exposing the upstream credentials. The two keys serve different trust boundaries: the incoming key controls who can access the proxy, while the upstream key controls what the proxy can access on the upstream.
 
 **Environment-agnostic HTTP server**: The Frigga server always binds plain HTTP. This keeps the implementation simple (no certificate management, no TLS configuration) and follows the standard reverse-proxy deployment pattern. In development, the API consumer connects directly over HTTP. In production, Nginx handles TLS and proxies to the same HTTP server.
 
 **501 Not Implemented for current phase**: Returning 501 for the forwarding step makes the authentication layer independently testable. Consumers can verify that their Authorization header is accepted (or rejected) without needing a live Anthropic API connection. The forwarding logic can be added later without changing the external API surface.
 
-## 5. Implementation Plan
-
-### Phase 1: Project Scaffolding & CLI — 0.5 day
-
-- [ ] Create `frigga/package.json` — zero runtime dependencies, `"type": "module"`
-- [ ] Implement `src/cli.js` — `parseArgs()`, `printUsage()`, `resolveArgs()`
-- [ ] Implement `src/constants.js` — all shared constants
-- [ ] Implement `src/index.js` — shebang, parse args, validate required arguments, start server, register signal handlers
-- [ ] Create stub `src/server.js` (`startServer()` prints config and listens)
-
-**Done when:**
-- `node src/index.js --api-key=test --port=3000` prints server config to stderr and starts listening
-- Missing or invalid arguments produce a usage message and exit code 1
-
-### Phase 2: Server Endpoints & Auth — 1 day
-
-- [ ] Implement authorization validation (extract Bearer token, SHA-256 hash + `crypto.timingSafeEqual` comparison with `--api-key`)
-- [ ] Implement `POST /v1/messages` — validate auth, return `501 Not Implemented`
-- [ ] Implement `POST /v1/messages/count_tokens` — validate auth, return `501 Not Implemented`
-- [ ] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error`)
-- [ ] Graceful shutdown on SIGINT/SIGTERM — stop accepting, drain with `SHUTDOWN_TIMEOUT_MS` (30s), force exit
-- [ ] Request logging to stderr: method, path, status code, duration per request
-
-**Done when:** Server validates `Authorization: Bearer <api-key>` on both endpoints, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 for non-POST methods. All error responses follow the Anthropic API error shape. Request logs appear on stderr.
-
-### Phase 3: Upstream Forwarding (Future)
-
-- [ ] Implement request forwarding to Anthropic API with `--upstream-api-key` injection
-- [ ] Implement transparent response relay pipeline — pipe upstream status code, headers, and body to client without content-type branching; handles both SSE (`stream: true`) and JSON (`stream: false`) responses for `/v1/messages`
-- [ ] Implement JSON response passthrough for `/v1/messages/count_tokens`
-- [ ] Upstream timeout handling (`UPSTREAM_CONNECT_TIMEOUT_MS` 10s, `UPSTREAM_FIRST_BYTE_TIMEOUT_MS` 120s)
-- [ ] Client disconnect detection — abort upstream request on `req.close`
-
-**Done when:** Full end-to-end flow: Claude Code → `POST /v1/messages` on Frigga → Anthropic API → response (SSE or JSON) relays back through proxy → Claude Code receives response. Tested against a real Anthropic API with both `stream: true` and `stream: false`.
-
-## 6. Testing Strategy
+## 5. Testing Strategy
 
 All automated tests use the Node.js built-in test runner (`node --test`), consistent with the zero-runtime-dependency design. Tests are organized into two levels:
 
-**Unit tests** — pure-function tests for the CLI argument parser (`src/cli.js`):
+**Unit tests** — pure-function tests with no HTTP overhead:
+
+*CLI argument parser* (`src/cli.js`):
 - `parseArgs()` correctly extracts `--key=value` and `--flag` forms
 - `resolveArgs()` applies defaults and validates required arguments
 - Edge cases: empty argv, duplicate keys, missing `=` separator
 
-**Integration tests** — start a real HTTP server instance per test, send requests via `http.request`, and assert status codes and response bodies:
+*Request handler* (`src/server.js`): The core request handling logic (routing, authorization validation, error response formatting) is extracted into a pure function that accepts request metadata `{ method, url, headers }` and returns response data `{ statusCode, headers, body }`. This enables unit testing all endpoint behavior without starting an HTTP server:
+- Route matching: correct paths return expected responses, unknown paths return 404
+- Authorization validation: missing, malformed, wrong key → 401; correct key → 501
+- Method validation: non-POST methods → 405
+
+**Integration tests** — start a real HTTP server instance per test, send requests via `http.request`, and verify end-to-end HTTP behavior (TCP connection, chunked transfer, header serialization, concurrent request handling):
+
+**Key Scenarios:**
 
 | # | Scenario | Input | Expected |
 |---|----------|-------|----------|
@@ -375,24 +271,67 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 | 5 | Malformed Authorization | `POST /v1/messages` with `Authorization: <key>` (no Bearer prefix) | `401`, body `error.type === "authentication_error"` |
 | 6 | GET instead of POST | `GET /v1/messages` | `405`, body `error.type === "invalid_request_error"` |
 | 7 | Unknown path | `POST /v1/unknown` | `404`, body `error.type === "not_found_error"` |
+| 8 | Concurrent requests | 10 simultaneous `POST /v1/messages` with correct auth | All 10 receive `501`; no request blocked or dropped |
+| 9 | Startup with port conflict | Start server on an already-occupied port | Process exits with code `1`, error message on stderr |
 
 **Manual tests:**
 
 | # | Scenario | Method |
 |---|----------|--------|
-| 8 | Graceful shutdown | Send SIGINT while server is running; verify clean exit |
+| 10 | Graceful shutdown | Send SIGINT while server is running; verify clean exit |
+
+## 6. Implementation Plan
+
+Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 establishes the prerequisite project structure and module stubs that tests depend on.
+
+### Phase 1: Project Scaffolding & CLI — 0.5 day
+
+- [ ] Create `frigga/package.json` — zero runtime dependencies, `"type": "module"`
+- [ ] Implement `src/cli.js` — `parseArgs()`, `printUsage()`, `resolveArgs()`
+- [ ] Implement `src/constants.js` — all shared constants (`DEFAULT_PORT`, `DEFAULT_HOST`, `SHUTDOWN_TIMEOUT_MS`)
+- [ ] Implement `src/index.js` — shebang, parse args, validate required arguments, start server, register signal handlers
+- [ ] Create stub `src/server.js` (`startServer()` prints config and listens)
+
+**Done when:**
+- `node src/index.js --api-key=test --port=3000` prints startup log to stdout and starts listening
+- Missing or invalid arguments produce a usage message on stderr and exit code 1
+- Startup failures (e.g., port already in use) produce an error message on stderr and exit code 1
+
+### Phase 2: Unit Tests — 0.5 day
+
+- [ ] Define test cases based on key scenarios from Section 5
+- [ ] Implement unit tests for CLI argument parser (`parseArgs`, `resolveArgs`)
+- [ ] Implement unit tests for request handler pure function (routing, authorization, error formatting)
+- [ ] Implement integration tests for end-to-end HTTP behavior
+
+**Done when:** All key scenario tests written and initially failing (red)
+
+### Phase 3: Server Endpoints & Auth — 1 day
+
+- [ ] Extract request handler as pure function: accept `{ method, url, headers }`, return `{ statusCode, headers, body }`
+- [ ] Implement shared authorization validation (extract Bearer token, SHA-256 hash + `crypto.timingSafeEqual` comparison with `--api-key`)
+- [ ] Implement shared request pipeline for both endpoints — validate auth, return `501 Not Implemented`
+- [ ] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error`)
+- [ ] Graceful shutdown on SIGINT/SIGTERM — stop accepting, drain with `SHUTDOWN_TIMEOUT_MS` (30s), exit 0 on success or exit 1 on timeout
+- [ ] Request logging: INFO-level logs to stdout (startup, request, shutdown); error output to stderr (`printUsage`)
+
+**Done when:** All unit and integration tests passing (green). Server validates `Authorization: Bearer <api-key>` on both endpoints via shared handler, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 for non-POST methods. All error responses follow the Anthropic API error shape. INFO logs appear on stdout.
 
 ## 7. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Memory pressure from large responses (SSE streams or large JSON bodies, when forwarding is implemented) | Med | Med | Pure streaming pipeline with no full-response buffering for both response types; observe `response.write()` return value for backpressure |
-| Upstream API key exposure through error messages or logs | Low | High | Never include `--upstream-api-key` in error responses or log output; scrub sensitive headers before logging |
+| Memory pressure from large responses (when forwarding is implemented) | Med | Med | Pure streaming pipeline via `stream.pipeline` with no full-response buffering; observe `response.write()` return value for backpressure |
+| Upstream API key exposure through error messages or logs (when forwarding is implemented) | Low | High | Never include upstream API keys in error responses or log output; scrub sensitive headers before logging |
 | Timing attack on API key comparison | Low | Low | SHA-256 hash both values before `crypto.timingSafeEqual` comparison; normalizes length and prevents length leakage |
 
 ## 8. Future Work
 
-- **Upstream forwarding** — Forward validated requests to the Anthropic API with `--upstream-api-key` injection; relay responses (SSE streams or JSON) back transparently
+- **Upstream forwarding** — Add `--upstream-api-key` CLI option; forward validated requests to the Anthropic API (`https://api.anthropic.com`) with credential injection. The upstream base URL is hardcoded — no `--upstream-base-url` option is provided. Request bodies are forwarded via `stream.pipeline(req, upstreamReq)` without buffering or size enforcement — the upstream Anthropic API enforces its own limits. The proxy relays the upstream response back to the client via `stream.pipeline(upstreamRes, res)`, regardless of response type (SSE or JSON). The proxy does not inspect or branch on the `stream` parameter or `Content-Type` — it copies the upstream response through as-is.
+- **Header forwarding strategy** — Use a blacklist approach: forward all client request headers to the upstream by default, excluding a known set of proxy-layer headers (e.g., Nginx-injected headers such as `X-Forwarded-For`, `X-Real-IP`). A blacklist is preferred over a whitelist because Claude Code may add new headers at any time, and the set of headers to exclude is small and empirically determinable.
+- **Client disconnect handling** — When the client disconnects mid-request (e.g., Claude Code user pressing ESC — a frequent and expected operation), the `stream.pipeline` callback fires with an error, and all streams in the pipeline are automatically destroyed, aborting the in-flight upstream request. The primary motivation is cost savings: Anthropic API charges per output token, and continuing to generate tokens for a cancelled request wastes inference compute resources. `stream.pipeline` is preferred over `.pipe()` because `.pipe()` does **not** automatically destroy the writable end (`upstreamReq`) when the readable end (`req`) is destroyed — the upstream request would continue indefinitely. `stream.pipeline` propagates errors and destruction across all streams in the chain.
+- **Upstream timeout strategy** — Split into two finer-grained timeouts: connection timeout (`UPSTREAM_CONNECT_TIMEOUT_MS`, 10 000 ms) for TCP establishment, and first-byte timeout (`UPSTREAM_FIRST_BYTE_TIMEOUT_MS`, 120 000 ms) for time from request sent to first response byte. No idle timeout on the response stream — the proxy relies on the upstream to close the connection when the response is complete.
+- **Double SIGINT/SIGTERM handling** — Second signal triggers immediate `process.exit(1)` instead of waiting for the drain timeout. Low priority for the current scale (< 5 concurrent connections).
 - **Health check endpoint** — `GET /health` returning `200 OK` for Nginx / load balancer probes
 - **Structured JSON logging** — Upgrade plain-text request logs to structured JSON for log aggregation systems
 - **Rate limiting** — Application-level rate limiting to protect the upstream API key from abuse
@@ -412,6 +351,10 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.9 | 2026-03-13 | Chason Tang | Remove request body size limit (`MAX_REQUEST_BODY_BYTES`, `413`) — the proxy forwards request bodies via `stream.pipeline` without buffering; upstream Anthropic API enforces its own limits. Replace `.pipe()` with `stream.pipeline` in Future Work for automatic stream cleanup on client disconnect. Remove `bodyLength` from pure function signature. Update client disconnect handling to explain `stream.pipeline` vs `.pipe()` behavior |
+| 1.8 | 2026-03-13 | Chason Tang | Clarify request body size enforcement mechanism (two-layer: `Content-Length` fast-reject + streaming byte counter); fix unit inconsistency (32 MB → 32 MiB); add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add keep-alive idle connection cleanup to graceful shutdown; clarify request body is treated as opaque byte stream (no JSON parsing); add concurrent request and startup failure test scenarios; hardcode upstream base URL to `https://api.anthropic.com` in Future Work |
+| 1.7 | 2026-03-13 | Chason Tang | Scope reduction: defer `--upstream-api-key` CLI option and Response Relay Pipeline to §8 Future Work; add shared request pipeline for both endpoints; add 32 MB request body size limit (`413`); split log output by severity (INFO→stdout, errors→stderr); extract handler as pure function for unit testability; add `/v1/messages/count_tokens` design rationale; clarify `stream: true` as primary consumer path; add exit code 0 for clean shutdown; add client disconnect business motivation, header blacklist strategy, upstream timeout strategy, and double SIGINT to Future Work |
+| 1.6 | 2026-03-13 | Chason Tang | Align with updated design doc template: reorder Testing Strategy (§5) before Implementation Plan (§6); add Unit Tests phase (Phase 2) to Implementation Plan with test-first guidance; renumber subsequent phases |
 | 1.5 | 2026-03-12 | Chason Tang | Support both SSE and JSON response relay — the proxy transparently pipes upstream responses regardless of content type; update §4.1 diagrams, §4.2.2 endpoint descriptions, rename §4.2.3 to "Response Relay Pipeline" with dual-mode coverage; update implementation plan, risks, and future work accordingly |
 | 1.4 | 2026-03-12 | Chason Tang | Fix `timingSafeEqual` to use SHA-256 hashing; align error responses with Anthropic API error shape; add graceful shutdown details (§4.2.5); add logging specification (§4.2.6); refine SSE timeout strategy with connect/first-byte split; add client disconnect handling; clarify IPv4-only listening; introduce automated integration tests |
 | 1.3 | 2026-03-12 | Chason Tang | Remove WebSocket relay architecture and client mode; simplify to HTTP proxy service; add `/v1/messages/count_tokens` endpoint; separate `--api-key` (incoming auth) and `--upstream-api-key` (upstream auth); current phase returns 501 for upstream forwarding |

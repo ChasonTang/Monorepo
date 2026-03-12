@@ -69,24 +69,7 @@ What value does solving this bring? Describe the expected benefits — e.g., imp
 - **Breaking changes:** {List any behaviors, APIs, or configurations that will stop working or change semantics.}
 - **Migration path:** {How should existing users adapt? Provide concrete steps or code examples.}
 
-## 7. Implementation Plan
-
-{Break the work into phases. Each phase should be independently shippable or at least independently verifiable.}
-
-### Phase 1: {Name} — {Estimated Time}
-
-- [ ] {Task with enough detail to be a work item}
-- [ ] {Task}
-
-**Done when:** {Specific acceptance criteria}
-
-### Phase 2: {Name} — {Estimated Time}
-
-- [ ] {Task}
-
-**Done when:** {Specific acceptance criteria}
-
-## 8. Testing Strategy
+## 7. Testing Strategy
 
 {Describe the overall testing approach: what types of testing are planned (unit, integration, end-to-end, manual), what areas require the most coverage, and any testing infrastructure or tooling needed.}
 
@@ -97,6 +80,32 @@ What value does solving this bring? Describe the expected benefits — e.g., imp
 | 1 | {Happy path} | {Input} | {Expected} |
 | 2 | {Edge case} | {Input} | {Expected} |
 | 3 | {Error case} | {Input} | {Expected} |
+
+## 8. Implementation Plan
+
+{Break the work into phases. Each phase should be independently shippable or at least independently verifiable. Unit tests should be written as early as possible to define expected behavior and serve as the specification for subsequent implementation work.
+
+Unit test phase placement: By default, unit tests are Phase 1 — this applies when building new features on an existing codebase. If prerequisite work (e.g., project scaffolding, infrastructure setup) must be completed before tests can be written, defer the unit test phase to the earliest point where it becomes feasible. If the proposal involves no unit-testable logic (e.g., pure configuration changes, documentation), this phase may be omitted.}
+
+### Phase 1: Unit Tests — {Estimated Time}
+
+- [ ] {Define test cases based on key scenarios from Section 7}
+- [ ] {Implement unit tests for core logic}
+
+**Done when:** {All key scenario tests written and initially failing (red)}
+
+### Phase 2: {Core Implementation} — {Estimated Time}
+
+- [ ] {Task with enough detail to be a work item}
+- [ ] {Task}
+
+**Done when:** {All unit tests passing (green) + specific acceptance criteria}
+
+### Phase N: {Name} — {Estimated Time}
+
+- [ ] {Task}
+
+**Done when:** {Specific acceptance criteria}
 
 ## 9. Risks
 
