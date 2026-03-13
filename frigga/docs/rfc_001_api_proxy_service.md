@@ -1,6 +1,6 @@
 # RFC-001: Messages API Proxy Service
 
-**Version:** 3.0  
+**Version:** 3.1
 **Author:** Chason Tang  
 **Date:** 2026-03-14  
 **Status:** Proposed
@@ -120,7 +120,7 @@ The server exposes exactly two endpoints. Incoming requests are processed throug
 | `/v1/messages` | POST | Messages API proxy |
 | `/v1/messages/count_tokens` | POST | Token counting API proxy |
 
-**Request body handling**: The proxy treats the request body as an opaque byte stream. No JSON parsing, schema validation, or size enforcement is performed at the proxy layer — the body is forwarded to the upstream as-is via `stream.pipeline(req, upstreamReq)` when upstream forwarding is implemented (see §8 Future Work). The upstream Anthropic API enforces its own request size limits. In the current phase (501), the server responds immediately after authorization validation without consuming the request body.
+**Request body handling**: The proxy treats the request body as an opaque byte stream. No JSON parsing, schema validation, or size enforcement is performed at the proxy layer — the body is forwarded to the upstream as-is via `stream.pipeline(req, upstreamReq)` when upstream forwarding is implemented (see §8 Future Work). The upstream Anthropic API enforces its own request size limits.
 
 **Authorization validation** (common to both endpoints):
 
@@ -153,8 +153,6 @@ All error responses use `Content-Type: application/json` and follow the [Anthrop
 | `404` | `not_found_error` | Unrecognized path |
 | `405` | `invalid_request_error` | Non-POST request method. Response includes `Allow: POST` header per RFC 9110 §15.5.6 |
 | `501` | `not_implemented` | Upstream forwarding not yet implemented (current phase) |
-
-**Request body drain on error responses**: When the server sends an error response (`401`, `404`, `405`, `501`) before the client has finished transmitting the request body, the unconsumed body data could cause the client to receive a TCP RST before reading the response. To avoid this, the server calls `req.resume()` before sending any error response. This causes Node.js to read and discard the remaining request body data in the background, allowing the TCP connection to close cleanly after the response is fully sent. `req.resume()` is safe to call unconditionally — it is a no-op on an already-ended stream.
 
 #### 4.2.3 Project Structure
 
@@ -206,13 +204,7 @@ The server implements a shutdown sequence triggered by `SIGINT` or `SIGTERM`. Du
 |----------|-------|-------------|
 | `SHUTDOWN_TIMEOUT_MS` | 30 000 | Maximum time to wait for active connections to drain before forced exit |
 
-**`Connection: close` and HTTP version compatibility**: The `Connection` header is an HTTP/1.1 hop-by-hop mechanism (RFC 9110 §7.6.1). Its behavior differs across protocol versions:
-
-- **HTTP/1.1** — The only protocol spoken by the Frigga server (`http.createServer()`). `Connection: close` is the standard way to signal the server will close the connection after the current response. Clients that receive this header will not attempt to pipeline or reuse the connection. Safe and correct.
-- **HTTP/2** — The `Connection` header is explicitly prohibited (RFC 9113 §8.2.2); compliant implementations must treat it as malformed. However, this does not affect Frigga: Node.js `http.createServer()` speaks HTTP/1.1 only. If Nginx terminates HTTP/2 from clients, it proxies to Frigga over HTTP/1.1 and handles HTTP/2 GOAWAY frames on the client-facing side independently.
-- **HTTP/3** — HTTP/3 (RFC 9114) similarly prohibits the `Connection` header and uses its own GOAWAY mechanism over QUIC. Node.js has no built-in HTTP/3 support. As with HTTP/2, Nginx handles the protocol translation; Frigga always speaks HTTP/1.1 to Nginx.
-
-Since Frigga exclusively uses `http.createServer()` (HTTP/1.1), attaching `Connection: close` during shutdown is both safe and correct. Protocol-level shutdown signaling (GOAWAY) for HTTP/2 and HTTP/3 clients is the responsibility of the reverse proxy (Nginx) when present.
+`Connection: close` is an HTTP/1.1 hop-by-hop mechanism (RFC 9110 §7.6.1) that signals the server will close the connection after the current response. Frigga exclusively uses `http.createServer()` (HTTP/1.1), so this is safe and correct. Higher-protocol shutdown signaling (HTTP/2 GOAWAY, HTTP/3 GOAWAY over QUIC) is the responsibility of Nginx when present.
 
 #### 4.2.5 Logging
 
@@ -357,7 +349,8 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 3.1 | 2026-03-14 | Chason Tang | Remove request body drain (`req.resume()`) on error responses — Nginx `proxy_request_buffering on` (default) eliminates the TCP RST scenario; simplify `Connection: close` HTTP version compatibility analysis — Frigga only speaks HTTP/1.1, higher-protocol concerns are Nginx's responsibility; remove redundant body-handling caveat for current 501 phase |
 | 3.0 | 2026-03-14 | Chason Tang | Define request pipeline evaluation order (route → method → auth); rewrite graceful shutdown using Node.js 24 `server.closeIdleConnections()` / `server.closeAllConnections()`; specify duplicate signal behavior (ignored); add `DURATION` measurement definition; require Node.js >= 24; add boundary test scenarios (empty Bearer token); move graceful shutdown to automated tests; clarify Phase 2 TDD red phase; trim Future Work scope |
-| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add request body drain (`req.resume()`) for error responses; add `Connection: close` during shutdown drain phase with HTTP version compatibility analysis; add ISO 8601 UTC timestamps; add `tests/` directory to project structure; remove request body size limit — upstream enforces limits; extract handler as pure function for unit testability; split log output by severity; add keep-alive idle connection cleanup to graceful shutdown; add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add concurrent request and startup failure test scenarios |
+| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add `Connection: close` during shutdown drain phase; add ISO 8601 UTC timestamps; add `tests/` directory to project structure; remove request body size limit — upstream enforces limits; extract handler as pure function for unit testability; split log output by severity; add keep-alive idle connection cleanup to graceful shutdown; add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add concurrent request and startup failure test scenarios |
 | 1.3 | 2026-03-12 | Chason Tang | Remove WebSocket relay architecture; simplify to HTTP proxy service; add `/v1/messages/count_tokens`; separate `--api-key` (incoming auth) and `--upstream-api-key` (upstream auth); add SHA-256 hashing for `timingSafeEqual`; add Anthropic-compatible error responses; add graceful shutdown; add SSE + JSON response relay; reorder Testing Strategy before Implementation Plan |
 | 1.0 | 2026-03-11 | Chason Tang | Initial version |
