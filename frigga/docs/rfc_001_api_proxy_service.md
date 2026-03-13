@@ -1,15 +1,15 @@
 # RFC-001: Messages API Proxy Service
 
-**Version:** 2.1  
+**Version:** 3.0  
 **Author:** Chason Tang  
-**Date:** 2026-03-13  
+**Date:** 2026-03-14  
 **Status:** Proposed
 
 ---
 
 ## 1. Summary
 
-Frigga is a zero-runtime-dependency Node.js CLI proxy service that exposes `/v1/messages` and `/v1/messages/count_tokens` HTTP POST endpoints compatible with the Anthropic Messages API. The service validates incoming requests via `Authorization` header comparison against a startup-configured API key. In the future, validated requests will be forwarded to the Anthropic API with an upstream API key injected into the `Authorization` header; the upstream response is relayed back to the caller transparently. The primary consumer (Claude Code) uses `stream: true`, so responses are predominantly SSE streams; non-streaming JSON responses are also supported for API compatibility. The current phase returns `501 Not Implemented` for the forwarding step. In development, the service runs over plain HTTP; in production, Nginx sits in front and provides TLS termination (HTTPS).
+Frigga is a zero-runtime-dependency Node.js (>= 24) CLI proxy service that exposes `/v1/messages` and `/v1/messages/count_tokens` HTTP POST endpoints compatible with the Anthropic Messages API. The service validates incoming requests via `Authorization` header comparison against a startup-configured API key. In the future, validated requests will be forwarded to the Anthropic API with an upstream API key injected into the `Authorization` header; the upstream response is relayed back to the caller transparently. The primary consumer (Claude Code) uses `stream: true`, so responses are predominantly SSE streams; non-streaming JSON responses are also supported for API compatibility. The current phase returns `501 Not Implemented` for the forwarding step. In development, the service runs over plain HTTP; in production, Nginx sits in front and provides TLS termination (HTTPS).
 
 ## 2. Motivation
 
@@ -105,7 +105,7 @@ node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]
 |----------|----------|---------|-------------|
 | `--api-key` | Yes | — | Expected value in the `Authorization: Bearer` header on incoming requests. Requests with a mismatched or missing header receive `401`. |
 | `--port` | No | `3000` | HTTP listen port |
-| `--host` | No | `127.0.0.1` | HTTP listen address (IPv4 only; IPv6 is not supported in the current phase) |
+| `--host` | No | `127.0.0.1` | HTTP listen address (IPv4 only) |
 
 **Startup error handling**: If the server fails to start (e.g., `EADDRINUSE` from port conflict, `EADDRNOTAVAIL` from invalid host address), the error message is written to `stderr` and the process exits with code `1`. No retry is attempted.
 
@@ -113,7 +113,7 @@ node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]
 
 The server creates a single `http.createServer()` instance. The server registers a `checkContinue` handler to support clients that send `Expect: 100-continue`. Node.js does not emit the `request` event for such requests — it emits `checkContinue` instead. The handler calls `res.writeContinue()` to send a `100 Continue` interim response, then delegates to the same request pipeline as the `request` event. Without this handler, requests with `Expect: 100-continue` would hang indefinitely.
 
-The server exposes exactly two endpoints, both handled by a shared request pipeline (authorization → forwarding → response relay) parameterized only by the upstream URL path:
+The server exposes exactly two endpoints. Incoming requests are processed through a fixed evaluation order: route matching → method validation → authorization → forwarding → response relay. Route matching and method validation occur before authorization to avoid unnecessary computation on invalid paths or methods. This order means unauthenticated requests to unknown paths receive `404` (not `401`), and unauthenticated non-POST requests to valid paths receive `405` (not `401`) — neither response leaks sensitive information.
 
 | Path | Method | Purpose |
 |------|--------|---------|
@@ -173,7 +173,7 @@ frigga/
     └── server.test.js
 ```
 
-**`package.json`** — Project manifest with zero runtime `dependencies`. Sets `"type": "module"` for ES module support to match the production environment's standardized Node.js version.
+**`package.json`** — Project manifest with zero runtime `dependencies`. Sets `"type": "module"` for ES module support. Requires Node.js >= 24 — the project uses the built-in test runner (`node --test`) and `server.closeIdleConnections()` / `server.closeAllConnections()` for graceful shutdown.
 
 **`src/index.js`** — Shebang entry point (`#!/usr/bin/env node`). Parses CLI arguments via `cli.js`, validates required arguments, and starts the server. Installs `SIGINT`/`SIGTERM` handlers for graceful shutdown.
 
@@ -195,12 +195,12 @@ frigga/
 
 #### 4.2.4 Graceful Shutdown
 
-The server implements a shutdown sequence triggered by `SIGINT` or `SIGTERM`:
+The server implements a shutdown sequence triggered by `SIGINT` or `SIGTERM`. Duplicate signals received during an in-progress shutdown are ignored.
 
-1. **Stop accepting** — call `server.close()` to stop accepting new connections immediately.
-2. **Close idle connections** — immediately destroy all keep-alive connections that have no in-flight request. HTTP/1.1 defaults to `Connection: keep-alive`, so idle connections will accumulate during normal operation; these must be closed proactively to avoid blocking the shutdown sequence until the drain timeout.
+1. **Stop accepting** — call `server.close()` to stop accepting new connections. The `server.close()` callback fires when all existing connections have ended.
+2. **Close idle connections** — call `server.closeIdleConnections()` to immediately close all keep-alive connections that have no in-flight request. HTTP/1.1 defaults to `Connection: keep-alive`, so idle connections will accumulate during normal operation; `closeIdleConnections()` ensures these do not delay shutdown.
 3. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). During the drain phase, all responses include the `Connection: close` header to signal that the server will not accept further requests on the same connection. This prevents clients from sending new requests on an existing keep-alive connection after their in-flight response completes. For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
-4. **Exit** — if all connections drain within the timeout, exit with code `0`. If active connections remain after the drain timeout, destroy all remaining sockets and call `process.exit(1)`.
+4. **Exit** — if all connections drain within the timeout (the `server.close()` callback fires), exit with code `0`. If active connections remain after the drain timeout, call `server.closeAllConnections()` to forcefully terminate all remaining connections and exit with code `1`.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
@@ -237,6 +237,8 @@ All log lines are prefixed with an ISO 8601 UTC timestamp (`new Date().toISOStri
 ```
 
 Format: `[TIMESTAMP] [LEVEL] METHOD PATH STATUS DURATION`
+
+`DURATION` measures the time from the `request` event (or `checkContinue` event) firing to the `res.end()` callback completing.
 
 **Shutdown log** (`stdout`):
 
@@ -285,17 +287,13 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 | 3 | Missing Authorization | `POST /v1/messages` without header | `401`, body `error.type === "authentication_error"` |
 | 4 | Wrong Authorization | `POST /v1/messages` with wrong key | `401`, body `error.type === "authentication_error"` |
 | 5 | Malformed Authorization | `POST /v1/messages` with `Authorization: <key>` (no Bearer prefix) | `401`, body `error.type === "authentication_error"` |
-| 6 | GET instead of POST | `GET /v1/messages` | `405`, `Allow: POST` header present, body `error.type === "invalid_request_error"` |
-| 7 | Unknown path | `POST /v1/unknown` | `404`, body `error.type === "not_found_error"` |
-| 8 | Concurrent requests | 10 simultaneous `POST /v1/messages` with correct auth | All 10 receive `501`; no request blocked or dropped |
-| 9 | Startup with port conflict | Start server on an already-occupied port | Process exits with code `1`, error message on stderr |
-| 10 | `Expect: 100-continue` | `POST /v1/messages` with correct auth and `Expect: 100-continue` header | Server sends `100 Continue`, then `501` response |
-
-**Manual tests:**
-
-| # | Scenario | Method |
-|---|----------|--------|
-| 11 | Graceful shutdown | Send SIGINT while server is running; verify clean exit |
+| 6 | Empty Bearer token | `POST /v1/messages` with `Authorization: Bearer ` (empty token after space) | `401`, body `error.type === "authentication_error"` |
+| 7 | GET instead of POST | `GET /v1/messages` | `405`, `Allow: POST` header present, body `error.type === "invalid_request_error"` |
+| 8 | Unknown path | `POST /v1/unknown` | `404`, body `error.type === "not_found_error"` |
+| 9 | Concurrent requests | 10 simultaneous `POST /v1/messages` with correct auth | All 10 receive `501`; no request blocked or dropped |
+| 10 | Startup with port conflict | Start server on an already-occupied port | Process exits with code `1`, error message on stderr |
+| 11 | `Expect: 100-continue` | `POST /v1/messages` with correct auth and `Expect: 100-continue` header | Server sends `100 Continue`, then `501` response |
+| 12 | Graceful shutdown | Start server as child process, send `SIGTERM` | Process exits with code `0`, shutdown logs on stdout |
 
 ## 6. Implementation Plan
 
@@ -320,7 +318,7 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 - [ ] Implement unit tests for request handler pure function (routing, authorization, error formatting) in `tests/handler.test.js`
 - [ ] Implement integration tests for end-to-end HTTP behavior in `tests/server.test.js`
 
-**Done when:** All key scenario tests written and executable
+**Done when:** All key scenario tests written and runnable (expected to fail — red phase of TDD)
 
 ### Phase 3: Server Endpoints & Auth — 1 day
 
@@ -347,13 +345,6 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 - **Upstream forwarding** — Add `--upstream-api-key` CLI option; forward validated requests to the Anthropic API (`https://api.anthropic.com`) with credential injection. The upstream base URL is hardcoded — no `--upstream-base-url` option is provided. Request bodies are forwarded via `stream.pipeline(req, upstreamReq)` without buffering or size enforcement — the upstream Anthropic API enforces its own limits. The proxy relays the upstream response back to the client via `stream.pipeline(upstreamRes, res)`, regardless of response type (SSE or JSON). The proxy does not inspect or branch on the `stream` parameter or `Content-Type` — it copies the upstream response through as-is.
 - **Header forwarding strategy** — Use a blacklist approach: forward all client request headers to the upstream by default, excluding a known set of proxy-layer headers (e.g., Nginx-injected headers such as `X-Forwarded-For`, `X-Real-IP`). A blacklist is preferred over a whitelist because Claude Code may add new headers at any time, and the set of headers to exclude is small and empirically determinable.
 - **Client disconnect handling** — When the client disconnects mid-request (e.g., Claude Code user pressing ESC — a frequent and expected operation), the `stream.pipeline` callback fires with an error, and all streams in the pipeline are automatically destroyed, aborting the in-flight upstream request. The primary motivation is cost savings: Anthropic API charges per output token, and continuing to generate tokens for a cancelled request wastes inference compute resources. `stream.pipeline` is preferred over `.pipe()` because `.pipe()` does **not** automatically destroy the writable end (`upstreamReq`) when the readable end (`req`) is destroyed — the upstream request would continue indefinitely. `stream.pipeline` propagates errors and destruction across all streams in the chain.
-- **Upstream timeout strategy** — Split into two finer-grained timeouts: connection timeout (`UPSTREAM_CONNECT_TIMEOUT_MS`, 10 000 ms) for TCP establishment, and first-byte timeout (`UPSTREAM_FIRST_BYTE_TIMEOUT_MS`, 120 000 ms) for time from request sent to first response byte. No idle timeout on the response stream — the proxy relies on the upstream to close the connection when the response is complete.
-- **Double SIGINT/SIGTERM handling** — Second signal triggers immediate `process.exit(1)` instead of waiting for the drain timeout. Low priority for the current scale (< 5 concurrent connections).
-- **Health check endpoint** — `GET /health` returning `200 OK` for Nginx / load balancer probes
-- **Structured JSON logging** — Upgrade plain-text request logs to structured JSON for log aggregation systems
-- **Rate limiting** — Application-level rate limiting to protect the upstream API key from abuse
-- **Prometheus-compatible `/metrics` endpoint** — deferred until production deployment patterns are established
-- **IPv6 support** — Dual-stack listening via `::` host binding
 
 ## 9. References
 
@@ -368,15 +359,7 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add `checkContinue` handler for `Expect: 100-continue` requests to prevent request hang; add integration test scenario #10 for `Expect: 100-continue` |
-| 2.0 | 2026-03-13 | Chason Tang | Add `tests/` directory to project structure (`handler.test.js`, `server.test.js`); remove CLI unit tests from testing scope; add `Connection: close` header during graceful shutdown drain phase with HTTP/1.1, HTTP/2, HTTP/3 compatibility analysis; add ISO 8601 UTC timestamps to all log formats; add request body drain (`req.resume()`) behavior for error responses |
-| 1.9 | 2026-03-13 | Chason Tang | Remove request body size limit (`MAX_REQUEST_BODY_BYTES`, `413`) — the proxy forwards request bodies via `stream.pipeline` without buffering; upstream Anthropic API enforces its own limits. Replace `.pipe()` with `stream.pipeline` in Future Work for automatic stream cleanup on client disconnect. Remove `bodyLength` from pure function signature. Update client disconnect handling to explain `stream.pipeline` vs `.pipe()` behavior |
-| 1.8 | 2026-03-13 | Chason Tang | Clarify request body size enforcement mechanism (two-layer: `Content-Length` fast-reject + streaming byte counter); fix unit inconsistency (32 MB → 32 MiB); add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add keep-alive idle connection cleanup to graceful shutdown; clarify request body is treated as opaque byte stream (no JSON parsing); add concurrent request and startup failure test scenarios; hardcode upstream base URL to `https://api.anthropic.com` in Future Work |
-| 1.7 | 2026-03-13 | Chason Tang | Scope reduction: defer `--upstream-api-key` CLI option and Response Relay Pipeline to §8 Future Work; add shared request pipeline for both endpoints; add 32 MB request body size limit (`413`); split log output by severity (INFO→stdout, errors→stderr); extract handler as pure function for unit testability; add `/v1/messages/count_tokens` design rationale; clarify `stream: true` as primary consumer path; add exit code 0 for clean shutdown; add client disconnect business motivation, header blacklist strategy, upstream timeout strategy, and double SIGINT to Future Work |
-| 1.6 | 2026-03-13 | Chason Tang | Align with updated design doc template: reorder Testing Strategy (§5) before Implementation Plan (§6); add Unit Tests phase (Phase 2) to Implementation Plan with test-first guidance; renumber subsequent phases |
-| 1.5 | 2026-03-12 | Chason Tang | Support both SSE and JSON response relay — the proxy transparently pipes upstream responses regardless of content type; update §4.1 diagrams, §4.2.2 endpoint descriptions, rename §4.2.3 to "Response Relay Pipeline" with dual-mode coverage; update implementation plan, risks, and future work accordingly |
-| 1.4 | 2026-03-12 | Chason Tang | Fix `timingSafeEqual` to use SHA-256 hashing; align error responses with Anthropic API error shape; add graceful shutdown details (§4.2.5); add logging specification (§4.2.6); refine SSE timeout strategy with connect/first-byte split; add client disconnect handling; clarify IPv4-only listening; introduce automated integration tests |
-| 1.3 | 2026-03-12 | Chason Tang | Remove WebSocket relay architecture and client mode; simplify to HTTP proxy service; add `/v1/messages/count_tokens` endpoint; separate `--api-key` (incoming auth) and `--upstream-api-key` (upstream auth); current phase returns 501 for upstream forwarding |
-| 1.2 | 2026-03-11 | Chason Tang | Merge `/register` + `/ws` into single `/ws` endpoint with shared-secret authentication; add `--client-secret` CLI option to both modes; eliminate token lifecycle; add `crypto.timingSafeEqual` for all secret comparisons; simplify client lifecycle (remove registration step) |
-| 1.1 | 2026-03-11 | Chason Tang | Rename `/forward` to `/v1/messages`; add server-side Authorization validation via `--api-key`; remove `clientId` (single-client simplification); add dev/prod deployment modes; add §4.2.7 Project Structure; restructure CLI arguments |
+| 3.0 | 2026-03-14 | Chason Tang | Define request pipeline evaluation order (route → method → auth); rewrite graceful shutdown using Node.js 24 `server.closeIdleConnections()` / `server.closeAllConnections()`; specify duplicate signal behavior (ignored); add `DURATION` measurement definition; require Node.js >= 24; add boundary test scenarios (empty Bearer token); move graceful shutdown to automated tests; clarify Phase 2 TDD red phase; trim Future Work scope |
+| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add `checkContinue` handler for `Expect: 100-continue`; add request body drain (`req.resume()`) for error responses; add `Connection: close` during shutdown drain phase with HTTP version compatibility analysis; add ISO 8601 UTC timestamps; add `tests/` directory to project structure; remove request body size limit — upstream enforces limits; extract handler as pure function for unit testability; split log output by severity; add keep-alive idle connection cleanup to graceful shutdown; add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add concurrent request and startup failure test scenarios |
+| 1.3 | 2026-03-12 | Chason Tang | Remove WebSocket relay architecture; simplify to HTTP proxy service; add `/v1/messages/count_tokens`; separate `--api-key` (incoming auth) and `--upstream-api-key` (upstream auth); add SHA-256 hashing for `timingSafeEqual`; add Anthropic-compatible error responses; add graceful shutdown; add SSE + JSON response relay; reorder Testing Strategy before Implementation Plan |
 | 1.0 | 2026-03-11 | Chason Tang | Initial version |
