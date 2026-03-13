@@ -1,6 +1,6 @@
 # RFC-001: Messages API Proxy Service
 
-**Version:** 1.9  
+**Version:** 2.1  
 **Author:** Chason Tang  
 **Date:** 2026-03-13  
 **Status:** Proposed
@@ -111,7 +111,9 @@ node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]
 
 #### 4.2.2 Server Endpoints
 
-The server creates a single `http.createServer()` instance. The server exposes exactly two endpoints, both handled by a shared request pipeline (authorization → forwarding → response relay) parameterized only by the upstream URL path:
+The server creates a single `http.createServer()` instance. The server registers a `checkContinue` handler to support clients that send `Expect: 100-continue`. Node.js does not emit the `request` event for such requests — it emits `checkContinue` instead. The handler calls `res.writeContinue()` to send a `100 Continue` interim response, then delegates to the same request pipeline as the `request` event. Without this handler, requests with `Expect: 100-continue` would hang indefinitely.
+
+The server exposes exactly two endpoints, both handled by a shared request pipeline (authorization → forwarding → response relay) parameterized only by the upstream URL path:
 
 | Path | Method | Purpose |
 |------|--------|---------|
@@ -149,8 +151,10 @@ All error responses use `Content-Type: application/json` and follow the [Anthrop
 |--------|-------------|-----------|
 | `401` | `authentication_error` | Missing, malformed, or invalid `Authorization` header |
 | `404` | `not_found_error` | Unrecognized path |
-| `405` | `invalid_request_error` | Non-POST request method |
+| `405` | `invalid_request_error` | Non-POST request method. Response includes `Allow: POST` header per RFC 9110 §15.5.6 |
 | `501` | `not_implemented` | Upstream forwarding not yet implemented (current phase) |
+
+**Request body drain on error responses**: When the server sends an error response (`401`, `404`, `405`, `501`) before the client has finished transmitting the request body, the unconsumed body data could cause the client to receive a TCP RST before reading the response. To avoid this, the server calls `req.resume()` before sending any error response. This causes Node.js to read and discard the remaining request body data in the background, allowing the TCP connection to close cleanly after the response is fully sent. `req.resume()` is safe to call unconditionally — it is a no-op on an already-ended stream.
 
 #### 4.2.3 Project Structure
 
@@ -159,11 +163,14 @@ frigga/
 ├── package.json
 ├── docs/
 │   └── rfc_001_api_proxy_service.md
-└── src/
-    ├── index.js
-    ├── cli.js
-    ├── constants.js
-    └── server.js
+├── src/
+│   ├── index.js
+│   ├── cli.js
+│   ├── constants.js
+│   └── server.js
+└── tests/
+    ├── handler.test.js
+    └── server.test.js
 ```
 
 **`package.json`** — Project manifest with zero runtime `dependencies`. Sets `"type": "module"` for ES module support to match the production environment's standardized Node.js version.
@@ -182,18 +189,30 @@ frigga/
 **`src/server.js`** — Server implementation:
 - `startServer({ port, host, apiKey })` — create HTTP server, register `/v1/messages` and `/v1/messages/count_tokens` routes with shared authorization validation pipeline, manage graceful shutdown. The request handler core logic is implemented as a pure function that takes request metadata (method, URL, headers) and returns response data (status code, headers, body), enabling direct unit testing without HTTP overhead.
 
+**`tests/handler.test.js`** — Unit tests for the request handler pure function: route matching, authorization validation, method validation, error response formatting. No HTTP server started.
+
+**`tests/server.test.js`** — Integration tests: start a real HTTP server instance per test, send requests via `http.request`, verify end-to-end HTTP behavior (status codes, headers, body content, concurrent requests, startup failures).
+
 #### 4.2.4 Graceful Shutdown
 
 The server implements a shutdown sequence triggered by `SIGINT` or `SIGTERM`:
 
 1. **Stop accepting** — call `server.close()` to stop accepting new connections immediately.
 2. **Close idle connections** — immediately destroy all keep-alive connections that have no in-flight request. HTTP/1.1 defaults to `Connection: keep-alive`, so idle connections will accumulate during normal operation; these must be closed proactively to avoid blocking the shutdown sequence until the drain timeout.
-3. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
+3. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). During the drain phase, all responses include the `Connection: close` header to signal that the server will not accept further requests on the same connection. This prevents clients from sending new requests on an existing keep-alive connection after their in-flight response completes. For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
 4. **Exit** — if all connections drain within the timeout, exit with code `0`. If active connections remain after the drain timeout, destroy all remaining sockets and call `process.exit(1)`.
 
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `SHUTDOWN_TIMEOUT_MS` | 30 000 | Maximum time to wait for active connections to drain before forced exit |
+
+**`Connection: close` and HTTP version compatibility**: The `Connection` header is an HTTP/1.1 hop-by-hop mechanism (RFC 9110 §7.6.1). Its behavior differs across protocol versions:
+
+- **HTTP/1.1** — The only protocol spoken by the Frigga server (`http.createServer()`). `Connection: close` is the standard way to signal the server will close the connection after the current response. Clients that receive this header will not attempt to pipeline or reuse the connection. Safe and correct.
+- **HTTP/2** — The `Connection` header is explicitly prohibited (RFC 9113 §8.2.2); compliant implementations must treat it as malformed. However, this does not affect Frigga: Node.js `http.createServer()` speaks HTTP/1.1 only. If Nginx terminates HTTP/2 from clients, it proxies to Frigga over HTTP/1.1 and handles HTTP/2 GOAWAY frames on the client-facing side independently.
+- **HTTP/3** — HTTP/3 (RFC 9114) similarly prohibits the `Connection` header and uses its own GOAWAY mechanism over QUIC. Node.js has no built-in HTTP/3 support. As with HTTP/2, Nginx handles the protocol translation; Frigga always speaks HTTP/1.1 to Nginx.
+
+Since Frigga exclusively uses `http.createServer()` (HTTP/1.1), attaching `Connection: close` during shutdown is both safe and correct. Protocol-level shutdown signaling (GOAWAY) for HTTP/2 and HTTP/3 clients is the responsibility of the reverse proxy (Nginx) when present.
 
 #### 4.2.5 Logging
 
@@ -202,26 +221,28 @@ The server writes plain-text structured log lines with no runtime logging depend
 - **`stdout`** — INFO-level operational logs: startup, request, shutdown
 - **`stderr`** — error-level output: `printUsage()` (triggered by invalid CLI arguments)
 
+All log lines are prefixed with an ISO 8601 UTC timestamp (`new Date().toISOString()`), enabling event ordering without reliance on external timestamp injection.
+
 **Startup log** (once, on successful listen — `stdout`):
 
 ```
-[INFO] Frigga listening on 127.0.0.1:3000
+[2026-03-13T10:15:30.000Z] [INFO] Frigga listening on 127.0.0.1:3000
 ```
 
 **Request log** (one line per completed request — `stdout`):
 
 ```
-[INFO] POST /v1/messages 401 2ms
-[INFO] POST /v1/messages 501 0ms
+[2026-03-13T10:15:32.100Z] [INFO] POST /v1/messages 401 2ms
+[2026-03-13T10:15:33.042Z] [INFO] POST /v1/messages 501 0ms
 ```
 
-Format: `[LEVEL] METHOD PATH STATUS DURATION`
+Format: `[TIMESTAMP] [LEVEL] METHOD PATH STATUS DURATION`
 
 **Shutdown log** (`stdout`):
 
 ```
-[INFO] Shutting down: stop accepting new connections
-[INFO] Shutdown complete
+[2026-03-13T10:20:00.000Z] [INFO] Shutting down: stop accepting new connections
+[2026-03-13T10:20:00.050Z] [INFO] Shutdown complete
 ```
 
 Sensitive values (`--api-key`, `Authorization` header values) are never included in any log output.
@@ -246,19 +267,14 @@ Sensitive values (`--api-key`, `Authorization` header values) are never included
 
 All automated tests use the Node.js built-in test runner (`node --test`), consistent with the zero-runtime-dependency design. Tests are organized into two levels:
 
-**Unit tests** — pure-function tests with no HTTP overhead:
-
-*CLI argument parser* (`src/cli.js`):
-- `parseArgs()` correctly extracts `--key=value` and `--flag` forms
-- `resolveArgs()` applies defaults and validates required arguments
-- Edge cases: empty argv, duplicate keys, missing `=` separator
+**Unit tests** (`tests/handler.test.js`) — pure-function tests with no HTTP overhead:
 
 *Request handler* (`src/server.js`): The core request handling logic (routing, authorization validation, error response formatting) is extracted into a pure function that accepts request metadata `{ method, url, headers }` and returns response data `{ statusCode, headers, body }`. This enables unit testing all endpoint behavior without starting an HTTP server:
 - Route matching: correct paths return expected responses, unknown paths return 404
 - Authorization validation: missing, malformed, wrong key → 401; correct key → 501
-- Method validation: non-POST methods → 405
+- Method validation: non-POST methods → 405 with `Allow: POST` header
 
-**Integration tests** — start a real HTTP server instance per test, send requests via `http.request`, and verify end-to-end HTTP behavior (TCP connection, chunked transfer, header serialization, concurrent request handling):
+**Integration tests** (`tests/server.test.js`) — start a real HTTP server instance per test, send requests via `http.request`, and verify end-to-end HTTP behavior (TCP connection, chunked transfer, header serialization, concurrent request handling):
 
 **Key Scenarios:**
 
@@ -269,16 +285,17 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 | 3 | Missing Authorization | `POST /v1/messages` without header | `401`, body `error.type === "authentication_error"` |
 | 4 | Wrong Authorization | `POST /v1/messages` with wrong key | `401`, body `error.type === "authentication_error"` |
 | 5 | Malformed Authorization | `POST /v1/messages` with `Authorization: <key>` (no Bearer prefix) | `401`, body `error.type === "authentication_error"` |
-| 6 | GET instead of POST | `GET /v1/messages` | `405`, body `error.type === "invalid_request_error"` |
+| 6 | GET instead of POST | `GET /v1/messages` | `405`, `Allow: POST` header present, body `error.type === "invalid_request_error"` |
 | 7 | Unknown path | `POST /v1/unknown` | `404`, body `error.type === "not_found_error"` |
 | 8 | Concurrent requests | 10 simultaneous `POST /v1/messages` with correct auth | All 10 receive `501`; no request blocked or dropped |
 | 9 | Startup with port conflict | Start server on an already-occupied port | Process exits with code `1`, error message on stderr |
+| 10 | `Expect: 100-continue` | `POST /v1/messages` with correct auth and `Expect: 100-continue` header | Server sends `100 Continue`, then `501` response |
 
 **Manual tests:**
 
 | # | Scenario | Method |
 |---|----------|--------|
-| 10 | Graceful shutdown | Send SIGINT while server is running; verify clean exit |
+| 11 | Graceful shutdown | Send SIGINT while server is running; verify clean exit |
 
 ## 6. Implementation Plan
 
@@ -297,25 +314,25 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 - Missing or invalid arguments produce a usage message on stderr and exit code 1
 - Startup failures (e.g., port already in use) produce an error message on stderr and exit code 1
 
-### Phase 2: Unit Tests — 0.5 day
+### Phase 2: Tests — 0.5 day
 
 - [ ] Define test cases based on key scenarios from Section 5
-- [ ] Implement unit tests for CLI argument parser (`parseArgs`, `resolveArgs`)
-- [ ] Implement unit tests for request handler pure function (routing, authorization, error formatting)
-- [ ] Implement integration tests for end-to-end HTTP behavior
+- [ ] Implement unit tests for request handler pure function (routing, authorization, error formatting) in `tests/handler.test.js`
+- [ ] Implement integration tests for end-to-end HTTP behavior in `tests/server.test.js`
 
-**Done when:** All key scenario tests written and initially failing (red)
+**Done when:** All key scenario tests written and executable
 
 ### Phase 3: Server Endpoints & Auth — 1 day
 
 - [ ] Extract request handler as pure function: accept `{ method, url, headers }`, return `{ statusCode, headers, body }`
 - [ ] Implement shared authorization validation (extract Bearer token, SHA-256 hash + `crypto.timingSafeEqual` comparison with `--api-key`)
 - [ ] Implement shared request pipeline for both endpoints — validate auth, return `501 Not Implemented`
-- [ ] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error`)
+- [ ] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error` with `Allow: POST` header)
+- [ ] Register `checkContinue` handler: send `100 Continue` then delegate to the shared request pipeline
 - [ ] Graceful shutdown on SIGINT/SIGTERM — stop accepting, drain with `SHUTDOWN_TIMEOUT_MS` (30s), exit 0 on success or exit 1 on timeout
 - [ ] Request logging: INFO-level logs to stdout (startup, request, shutdown); error output to stderr (`printUsage`)
 
-**Done when:** All unit and integration tests passing (green). Server validates `Authorization: Bearer <api-key>` on both endpoints via shared handler, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 for non-POST methods. All error responses follow the Anthropic API error shape. INFO logs appear on stdout.
+**Done when:** All unit and integration tests passing (green). Server validates `Authorization: Bearer <api-key>` on both endpoints via shared handler, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 (with `Allow: POST` header) for non-POST methods. Requests with `Expect: 100-continue` receive `100 Continue` before the normal response. All error responses follow the Anthropic API error shape. INFO logs appear on stdout.
 
 ## 7. Risks
 
@@ -351,6 +368,8 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add `checkContinue` handler for `Expect: 100-continue` requests to prevent request hang; add integration test scenario #10 for `Expect: 100-continue` |
+| 2.0 | 2026-03-13 | Chason Tang | Add `tests/` directory to project structure (`handler.test.js`, `server.test.js`); remove CLI unit tests from testing scope; add `Connection: close` header during graceful shutdown drain phase with HTTP/1.1, HTTP/2, HTTP/3 compatibility analysis; add ISO 8601 UTC timestamps to all log formats; add request body drain (`req.resume()`) behavior for error responses |
 | 1.9 | 2026-03-13 | Chason Tang | Remove request body size limit (`MAX_REQUEST_BODY_BYTES`, `413`) — the proxy forwards request bodies via `stream.pipeline` without buffering; upstream Anthropic API enforces its own limits. Replace `.pipe()` with `stream.pipeline` in Future Work for automatic stream cleanup on client disconnect. Remove `bodyLength` from pure function signature. Update client disconnect handling to explain `stream.pipeline` vs `.pipe()` behavior |
 | 1.8 | 2026-03-13 | Chason Tang | Clarify request body size enforcement mechanism (two-layer: `Content-Length` fast-reject + streaming byte counter); fix unit inconsistency (32 MB → 32 MiB); add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add keep-alive idle connection cleanup to graceful shutdown; clarify request body is treated as opaque byte stream (no JSON parsing); add concurrent request and startup failure test scenarios; hardcode upstream base URL to `https://api.anthropic.com` in Future Work |
 | 1.7 | 2026-03-13 | Chason Tang | Scope reduction: defer `--upstream-api-key` CLI option and Response Relay Pipeline to §8 Future Work; add shared request pipeline for both endpoints; add 32 MB request body size limit (`413`); split log output by severity (INFO→stdout, errors→stderr); extract handler as pure function for unit testability; add `/v1/messages/count_tokens` design rationale; clarify `stream: true` as primary consumer path; add exit code 0 for clean shutdown; add client disconnect business motivation, header blacklist strategy, upstream timeout strategy, and double SIGINT to Future Work |
