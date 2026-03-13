@@ -111,7 +111,7 @@ node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]
 
 #### 4.2.2 Server Endpoints
 
-The server creates a single `http.createServer()` instance. The server registers a `checkContinue` handler to support clients that send `Expect: 100-continue`. Node.js does not emit the `request` event for such requests — it emits `checkContinue` instead. The handler calls `res.writeContinue()` to send a `100 Continue` interim response, then delegates to the same request pipeline as the `request` event. Without this handler, requests with `Expect: 100-continue` would hang indefinitely.
+The server creates a single `http.createServer()` instance.
 
 The server exposes exactly two endpoints. Incoming requests are processed through a fixed evaluation order: route matching → method validation → authorization → forwarding → response relay. Route matching and method validation occur before authorization to avoid unnecessary computation on invalid paths or methods. This order means unauthenticated requests to unknown paths receive `404` (not `401`), and unauthenticated non-POST requests to valid paths receive `405` (not `401`) — neither response leaks sensitive information.
 
@@ -238,7 +238,7 @@ All log lines are prefixed with an ISO 8601 UTC timestamp (`new Date().toISOStri
 
 Format: `[TIMESTAMP] [LEVEL] METHOD PATH STATUS DURATION`
 
-`DURATION` measures the time from the `request` event (or `checkContinue` event) firing to the `res.end()` callback completing.
+`DURATION` measures the time from the `request` event firing to the `res.end()` callback completing.
 
 **Shutdown log** (`stdout`):
 
@@ -292,8 +292,7 @@ All automated tests use the Node.js built-in test runner (`node --test`), consis
 | 8 | Unknown path | `POST /v1/unknown` | `404`, body `error.type === "not_found_error"` |
 | 9 | Concurrent requests | 10 simultaneous `POST /v1/messages` with correct auth | All 10 receive `501`; no request blocked or dropped |
 | 10 | Startup with port conflict | Start server on an already-occupied port | Process exits with code `1`, error message on stderr |
-| 11 | `Expect: 100-continue` | `POST /v1/messages` with correct auth and `Expect: 100-continue` header | Server sends `100 Continue`, then `501` response |
-| 12 | Graceful shutdown | Start server as child process, send `SIGTERM` | Process exits with code `0`, shutdown logs on stdout |
+| 11 | Graceful shutdown | Start server as child process, send `SIGTERM` | Process exits with code `0`, shutdown logs on stdout |
 
 ## 6. Implementation Plan
 
@@ -326,11 +325,10 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 - [ ] Implement shared authorization validation (extract Bearer token, SHA-256 hash + `crypto.timingSafeEqual` comparison with `--api-key`)
 - [ ] Implement shared request pipeline for both endpoints — validate auth, return `501 Not Implemented`
 - [ ] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error` with `Allow: POST` header)
-- [ ] Register `checkContinue` handler: send `100 Continue` then delegate to the shared request pipeline
 - [ ] Graceful shutdown on SIGINT/SIGTERM — stop accepting, drain with `SHUTDOWN_TIMEOUT_MS` (30s), exit 0 on success or exit 1 on timeout
 - [ ] Request logging: INFO-level logs to stdout (startup, request, shutdown); error output to stderr (`printUsage`)
 
-**Done when:** All unit and integration tests passing (green). Server validates `Authorization: Bearer <api-key>` on both endpoints via shared handler, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 (with `Allow: POST` header) for non-POST methods. Requests with `Expect: 100-continue` receive `100 Continue` before the normal response. All error responses follow the Anthropic API error shape. INFO logs appear on stdout.
+**Done when:** All unit and integration tests passing (green). Server validates `Authorization: Bearer <api-key>` on both endpoints via shared handler, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 (with `Allow: POST` header) for non-POST methods. All error responses follow the Anthropic API error shape. INFO logs appear on stdout.
 
 ## 7. Risks
 
@@ -360,6 +358,6 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 3.0 | 2026-03-14 | Chason Tang | Define request pipeline evaluation order (route → method → auth); rewrite graceful shutdown using Node.js 24 `server.closeIdleConnections()` / `server.closeAllConnections()`; specify duplicate signal behavior (ignored); add `DURATION` measurement definition; require Node.js >= 24; add boundary test scenarios (empty Bearer token); move graceful shutdown to automated tests; clarify Phase 2 TDD red phase; trim Future Work scope |
-| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add `checkContinue` handler for `Expect: 100-continue`; add request body drain (`req.resume()`) for error responses; add `Connection: close` during shutdown drain phase with HTTP version compatibility analysis; add ISO 8601 UTC timestamps; add `tests/` directory to project structure; remove request body size limit — upstream enforces limits; extract handler as pure function for unit testability; split log output by severity; add keep-alive idle connection cleanup to graceful shutdown; add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add concurrent request and startup failure test scenarios |
+| 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add request body drain (`req.resume()`) for error responses; add `Connection: close` during shutdown drain phase with HTTP version compatibility analysis; add ISO 8601 UTC timestamps; add `tests/` directory to project structure; remove request body size limit — upstream enforces limits; extract handler as pure function for unit testability; split log output by severity; add keep-alive idle connection cleanup to graceful shutdown; add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add concurrent request and startup failure test scenarios |
 | 1.3 | 2026-03-12 | Chason Tang | Remove WebSocket relay architecture; simplify to HTTP proxy service; add `/v1/messages/count_tokens`; separate `--api-key` (incoming auth) and `--upstream-api-key` (upstream auth); add SHA-256 hashing for `timingSafeEqual`; add Anthropic-compatible error responses; add graceful shutdown; add SSE + JSON response relay; reorder Testing Strategy before Implementation Plan |
 | 1.0 | 2026-03-11 | Chason Tang | Initial version |
