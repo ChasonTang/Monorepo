@@ -1,8 +1,8 @@
 # RFC-001: Messages API Proxy Service
 
-**Version:** 3.1
-**Author:** Chason Tang  
-**Date:** 2026-03-14  
+**Version:** 3.2
+**Author:** Chason Tang
+**Date:** 2026-03-15
 **Status:** Proposed
 
 ---
@@ -111,7 +111,7 @@ node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]
 
 #### 4.2.2 Server Endpoints
 
-The server creates a single `http.createServer()` instance.
+The server creates a single `http.createServer()` instance. The server relies on Node.js built-in timeout defaults — `server.requestTimeout` (300 000 ms) limits the total time for receiving the complete request (headers + body), and `server.headersTimeout` (60 000 ms) limits the time for headers to arrive. No custom timeout values are set. These defaults are sufficient for the current phase (immediate error/501 responses) and for future upstream forwarding, where upstream response time is bounded by the Anthropic API's own timeout and client disconnects are handled by `stream.pipeline` error propagation (see §8 Future Work).
 
 The server exposes exactly two endpoints. Incoming requests are processed through a fixed evaluation order: route matching → method validation → authorization → forwarding → response relay. Route matching and method validation occur before authorization to avoid unnecessary computation on invalid paths or methods. This order means unauthenticated requests to unknown paths receive `404` (not `401`), and unauthenticated non-POST requests to valid paths receive `405` (not `401`) — neither response leaks sensitive information.
 
@@ -197,7 +197,7 @@ The server implements a shutdown sequence triggered by `SIGINT` or `SIGTERM`. Du
 
 1. **Stop accepting** — call `server.close()` to stop accepting new connections. The `server.close()` callback fires when all existing connections have ended.
 2. **Close idle connections** — call `server.closeIdleConnections()` to immediately close all keep-alive connections that have no in-flight request. HTTP/1.1 defaults to `Connection: keep-alive`, so idle connections will accumulate during normal operation; `closeIdleConnections()` ensures these do not delay shutdown.
-3. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). During the drain phase, all responses include the `Connection: close` header to signal that the server will not accept further requests on the same connection. This prevents clients from sending new requests on an existing keep-alive connection after their in-flight response completes. For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
+3. **Drain active connections** — wait for in-flight requests to complete, up to `SHUTDOWN_TIMEOUT_MS` (30 000 ms). A closure-scoped boolean flag (`isShuttingDown`) is set to `true` when the shutdown sequence begins. The request handler checks this flag and sets the `Connection: close` response header when true, signaling that the server will not accept further requests on the same connection. This is safe without synchronization because Node.js is single-threaded — the flag is set synchronously in the signal handler before any subsequent request handler invocations. This prevents clients from sending new requests on an existing keep-alive connection after their in-flight response completes. For the current phase (no SSE streaming), all requests are short-lived and should complete well within this window.
 4. **Exit** — if all connections drain within the timeout (the `server.close()` callback fires), exit with code `0`. If active connections remain after the drain timeout, call `server.closeAllConnections()` to forcefully terminate all remaining connections and exit with code `1`.
 
 | Constant | Value | Description |
@@ -333,7 +333,9 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 ## 8. Future Work
 
 - **Upstream forwarding** — Add `--upstream-api-key` CLI option; forward validated requests to the Anthropic API (`https://api.anthropic.com`) with credential injection. The upstream base URL is hardcoded — no `--upstream-base-url` option is provided. Request bodies are forwarded via `stream.pipeline(req, upstreamReq)` without buffering or size enforcement — the upstream Anthropic API enforces its own limits. The proxy relays the upstream response back to the client via `stream.pipeline(upstreamRes, res)`, regardless of response type (SSE or JSON). The proxy does not inspect or branch on the `stream` parameter or `Content-Type` — it copies the upstream response through as-is.
-- **Header forwarding strategy** — Use a blacklist approach: forward all client request headers to the upstream by default, excluding a known set of proxy-layer headers (e.g., Nginx-injected headers such as `X-Forwarded-For`, `X-Real-IP`). A blacklist is preferred over a whitelist because Claude Code may add new headers at any time, and the set of headers to exclude is small and empirically determinable.
+- **Header forwarding strategy** — Use a blacklist approach: forward all client request headers to the upstream by default, removing or rewriting specific categories. A blacklist is preferred over a whitelist because Claude Code may add new headers at any time, and the set of headers to exclude is small and empirically determinable.
+  - **Remove** (not forwarded to upstream): hop-by-hop headers per RFC 9110 §7.6.1 — `Connection` (and any header name listed in the `Connection` header value), `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Proxy-Authorization`, `Proxy-Connection` (non-standard but common); Nginx-injected headers present in production — `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Real-IP`.
+  - **Rewrite**: `Host` → `api.anthropic.com` (the client sends the proxy's hostname, e.g. `localhost:3000`; the upstream requires its own); `Authorization` → `Bearer <upstream-api-key>` (replace the proxy-layer credential with the upstream credential).
 - **Client disconnect handling** — When the client disconnects mid-request (e.g., Claude Code user pressing ESC — a frequent and expected operation), the `stream.pipeline` callback fires with an error, and all streams in the pipeline are automatically destroyed, aborting the in-flight upstream request. The primary motivation is cost savings: Anthropic API charges per output token, and continuing to generate tokens for a cancelled request wastes inference compute resources. `stream.pipeline` is preferred over `.pipe()` because `.pipe()` does **not** automatically destroy the writable end (`upstreamReq`) when the readable end (`req`) is destroyed — the upstream request would continue indefinitely. `stream.pipeline` propagates errors and destruction across all streams in the chain.
 
 ## 9. References
@@ -349,6 +351,7 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 3.2 | 2026-03-15 | Chason Tang | Document Node.js built-in request timeout defaults (`server.requestTimeout`, `server.headersTimeout`); specify `isShuttingDown` closure flag mechanism for `Connection: close` during drain phase; expand §8 header forwarding strategy with explicit remove/rewrite categories (hop-by-hop headers, Nginx-injected headers, `Host` and `Authorization` rewrite) |
 | 3.1 | 2026-03-14 | Chason Tang | Remove request body drain (`req.resume()`) on error responses — Nginx `proxy_request_buffering on` (default) eliminates the TCP RST scenario; simplify `Connection: close` HTTP version compatibility analysis — Frigga only speaks HTTP/1.1, higher-protocol concerns are Nginx's responsibility; remove redundant body-handling caveat for current 501 phase |
 | 3.0 | 2026-03-14 | Chason Tang | Define request pipeline evaluation order (route → method → auth); rewrite graceful shutdown using Node.js 24 `server.closeIdleConnections()` / `server.closeAllConnections()`; specify duplicate signal behavior (ignored); add `DURATION` measurement definition; require Node.js >= 24; add boundary test scenarios (empty Bearer token); move graceful shutdown to automated tests; clarify Phase 2 TDD red phase; trim Future Work scope |
 | 2.1 | 2026-03-13 | Chason Tang | Add `Allow: POST` header to `405` responses per RFC 9110 §15.5.6; add `Connection: close` during shutdown drain phase; add ISO 8601 UTC timestamps; add `tests/` directory to project structure; remove request body size limit — upstream enforces limits; extract handler as pure function for unit testability; split log output by severity; add keep-alive idle connection cleanup to graceful shutdown; add startup error handling (`EADDRINUSE`, `EADDRNOTAVAIL`); add concurrent request and startup failure test scenarios |
