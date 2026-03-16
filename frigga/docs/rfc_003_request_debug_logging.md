@@ -1,6 +1,6 @@
 # RFC-003: NDJSON Request Debug Logging
 
-**Version:** 1.0
+**Version:** 1.1
 **Author:** Chason Tang
 **Date:** 2026-03-16
 **Status:** Proposed
@@ -89,18 +89,18 @@ All log entries share the common envelope fields:
 **Request** (`event: "request"`, stdout):
 
 ```json
-{"timestamp":"2026-03-16T10:15:32.100Z","level":"INFO","event":"request","method":"POST","path":"/v1/messages","status":401,"duration_ms":2,"request_headers":{"content-type":"application/json","authorization":"Bearer test-key","user-agent":"claude-code/1.0"},"request_body":"{\"model\":\"claude-sonnet-4-20250514\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}","response_headers":{"content-type":"application/json"},"response_body":"{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"Invalid API key\"}}"}
+{"timestamp":"2026-03-16T10:15:32.100Z","level":"INFO","event":"request","method":"POST","url":"/v1/messages","status":401,"duration_ms":2,"request_headers":{"content-type":"application/json","authorization":"Bearer test-key","user-agent":"claude-code/1.0"},"request_body":"{\"model\":\"claude-sonnet-4-20250514\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}","response_headers":{"content-type":"application/json"},"response_body":"{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"Invalid API key\"}}"}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `method` | string | HTTP request method |
-| `path` | string | Request URL (includes query string if present) |
+| `url` | string | Request URL (includes query string if present) |
 | `status` | number | HTTP response status code |
 | `duration_ms` | number | Time from `request` event to `res.end()` callback |
 | `request_headers` | object | All request headers (Node.js `req.headers` — lowercase keys) |
 | `request_body` | string | Full request body decoded as UTF-8; `""` if no body sent |
-| `response_headers` | object | Response headers set by `handleRequest` |
+| `response_headers` | object | All response headers from `res.getHeaders()`, captured in the `res.end()` callback |
 | `response_body` | string | Response body string |
 
 **Shutdown** (`event: "shutdown"`, stdout):
@@ -144,6 +144,8 @@ request event → collect body chunks via data/end events → handleRequest() �
 
 The body is collected via `req.on('data')` / `req.on('end')` and concatenated into a single UTF-8 string. The pure `handleRequest` function is unchanged — it still receives `{ method, url, headers }` and returns `{ statusCode, headers, body }`. Body collection and log emission are the responsibility of the HTTP server callback in `startServer`.
 
+If the request stream emits an `error` event before `end`, the collected partial body is discarded, `handleRequest` is not called, and no request log entry is emitted.
+
 #### 4.2.3 stdout / stderr Split
 
 The severity-based output split is preserved:
@@ -182,7 +184,7 @@ The severity-based output split is preserved:
 
 ```
 {"timestamp":"2026-03-16T10:15:30.000Z","level":"INFO","event":"startup","host":"127.0.0.1","port":3000}
-{"timestamp":"2026-03-16T10:15:32.100Z","level":"INFO","event":"request","method":"POST","path":"/v1/messages","status":401,"duration_ms":2,"request_headers":{...},"request_body":"...","response_headers":{...},"response_body":"..."}
+{"timestamp":"2026-03-16T10:15:32.100Z","level":"INFO","event":"request","method":"POST","url":"/v1/messages","status":401,"duration_ms":2,"request_headers":{...},"request_body":"...","response_headers":{...},"response_body":"..."}
 {"timestamp":"2026-03-16T10:20:00.000Z","level":"INFO","event":"shutdown","message":"stop accepting new connections"}
 {"timestamp":"2026-03-16T10:20:00.050Z","level":"INFO","event":"shutdown","message":"complete"}
 ```
@@ -197,7 +199,7 @@ All tests use the Node.js built-in test runner (`node --test`). The pure `handle
 
 | # | Scenario | Input | Expected |
 |---|----------|-------|----------|
-| 1 | Request log is valid NDJSON | `POST /v1/messages` with auth and JSON body | stdout line parses as JSON; contains `event`, `method`, `path`, `status`, `duration_ms`, `request_headers`, `request_body`, `response_headers`, `response_body` |
+| 1 | Request log is valid NDJSON | `POST /v1/messages` with auth and JSON body | stdout line parses as JSON; contains `event`, `method`, `url`, `status`, `duration_ms`, `request_headers`, `request_body`, `response_headers`, `response_body` |
 | 2 | Request headers logged correctly | Request with `Content-Type` and `Authorization` headers | `request_headers` object contains both headers with correct values |
 | 3 | Request body logged correctly | `POST` with `{"model": "claude-sonnet-4-20250514"}` body | `request_body` equals the sent JSON string |
 | 4 | Empty request body | `POST` with no body | `request_body` is `""` |
@@ -232,6 +234,7 @@ Unit tests for the pure `handleRequest` function are unaffected by this change. 
 | Large request bodies increase memory usage | Low | Low | Current phase returns immediate responses with no concurrent upstream I/O; practical body sizes are bounded by Anthropic API request limits. Revisit when upstream forwarding requires simultaneous request + response buffering |
 | Body collection delays response delivery | Low | Low | Body is fully received before `handleRequest` runs, but current-phase responses are immediate (no upstream latency). No measurable impact on response time |
 | `JSON.stringify` on large bodies is slow | Low | Low | Log emission occurs in the `res.end()` callback, after the response is sent to the client; serialization cost does not affect response latency |
+| Log format breaking change breaks existing test assertions and external log parsing scripts | High | Low | Implementation Phase 1 updates all test assertions first; no external consumers exist at current scale |
 
 ## 9. Future Work
 
@@ -252,4 +255,5 @@ Unit tests for the pure `handleRequest` function are unaffected by this change. 
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.1 | 2026-03-16 | Chason Tang | Rename `path` field to `url`; change `response_headers` to capture `res.getHeaders()` instead of `handleRequest` headers; specify error handling for request body collection failures; add log format breaking change to risk table |
 | 1.0 | 2026-03-16 | Chason Tang | Initial version |
