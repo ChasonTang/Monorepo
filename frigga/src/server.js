@@ -131,20 +131,60 @@ export function startServer({ port, host, apiKey }) {
 
   const server = http.createServer((req, res) => {
     const startTime = Date.now();
+    const chunks = [];
+    let errored = false;
 
-    const result = handleRequest(
-      { method: req.method, url: req.url, headers: req.headers },
-      apiKeyHash,
-      isShuttingDown,
-    );
+    req.on("data", (chunk) => {
+      chunks.push(chunk);
+    });
 
-    res.writeHead(result.statusCode, result.headers);
-    res.end(result.body, () => {
-      const duration = Date.now() - startTime;
-      const timestamp = new Date().toISOString();
-      process.stdout.write(
-        `[${timestamp}] [INFO] ${req.method} ${req.url} ${result.statusCode} ${duration}ms\n`,
+    req.on("error", (err) => {
+      errored = true;
+      res.destroy();
+      process.stderr.write(
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "ERROR",
+          event: "request_error",
+          method: req.method,
+          url: req.url,
+          request_headers: req.headers,
+          message: err.message,
+        })}\n`,
       );
+    });
+
+    req.on("end", () => {
+      if (errored) return;
+      const requestBody = Buffer.concat(chunks).toString("utf-8");
+
+      const result = handleRequest(
+        { method: req.method, url: req.url, headers: req.headers },
+        apiKeyHash,
+        isShuttingDown,
+      );
+
+      for (const [name, value] of Object.entries(result.headers)) {
+        res.setHeader(name, value);
+      }
+      res.writeHead(result.statusCode);
+      res.end(result.body, () => {
+        process.stdout.write(
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: "INFO",
+            event: "request",
+            method: req.method,
+            url: req.url,
+            status: result.statusCode,
+            duration_ms: Date.now() - startTime,
+            request_headers: req.headers,
+            request_body: requestBody,
+            response_headers: res.getHeaders(),
+            response_body: result.body,
+          })}\n`,
+        );
+      });
     });
   });
 
@@ -152,18 +192,26 @@ export function startServer({ port, host, apiKey }) {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    const timestamp = new Date().toISOString();
     process.stdout.write(
-      `[${timestamp}] [INFO] Shutting down: stop accepting new connections\n`,
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "INFO",
+        event: "shutdown",
+        message: "stop accepting new connections",
+      })}\n`,
     );
 
     server.close();
     server.closeIdleConnections();
 
     forceTimer = setTimeout(() => {
-      const ts = new Date().toISOString();
       process.stderr.write(
-        `[${ts}] [WARN] Shutdown timed out, forcing close\n`,
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "WARN",
+          event: "shutdown",
+          message: "timed out, forcing close",
+        })}\n`,
       );
       server.closeAllConnections();
       process.exit(1);
@@ -179,8 +227,14 @@ export function startServer({ port, host, apiKey }) {
     process.removeListener("SIGINT", shutdown);
     process.removeListener("SIGTERM", shutdown);
     if (isShuttingDown) {
-      const ts = new Date().toISOString();
-      process.stdout.write(`[${ts}] [INFO] Shutdown complete\n`);
+      process.stdout.write(
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "INFO",
+          event: "shutdown",
+          message: "complete",
+        })}\n`,
+      );
     }
   });
 
@@ -197,16 +251,25 @@ export function startServer({ port, host, apiKey }) {
       server.removeListener("error", onStartupError);
 
       server.on("error", (err) => {
-        const timestamp = new Date().toISOString();
         process.stderr.write(
-          `[${timestamp}] [ERROR] Server error: ${err.message}\n`,
+          `${JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: "ERROR",
+            event: "server_error",
+            message: err.message,
+          })}\n`,
         );
       });
 
-      const timestamp = new Date().toISOString();
       const addr = server.address();
       process.stdout.write(
-        `[${timestamp}] [INFO] Frigga listening on ${addr.address}:${addr.port}\n`,
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "INFO",
+          event: "startup",
+          host: addr.address,
+          port: addr.port,
+        })}\n`,
       );
       resolve(server);
     });
