@@ -3,7 +3,7 @@
 **Version:** 1.0
 **Author:** Chason Tang
 **Date:** 2026-03-16
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -204,26 +204,26 @@ Unit test phase is omitted per template guidance — this proposal involves no u
 
 ### Phase 1: Prettier Setup — 10 min
 
-- [ ] Install Prettier: `npm install --save-dev prettier`
-- [ ] Create `.prettierrc.json` with configuration from Section 4.2.2
-- [ ] Run `npx prettier --write src/ tests/` to format existing codebase
-- [ ] Verify `npm test` passes after formatting
+- [x] Install Prettier: `npm install --save-dev prettier`
+- [x] Create `.prettierrc.json` with configuration from Section 4.2.2
+- [x] Run `npx prettier --write src/ tests/` to format existing codebase
+- [x] Verify `npm test` passes after formatting
 
 **Done when:** All files match Prettier formatting (`npx prettier --check src/ tests/` exits 0) and existing tests pass.
 
 ### Phase 2: ESLint Setup — 15 min
 
-- [ ] Install ESLint and dependencies: `npm install --save-dev eslint @eslint/js globals eslint-config-prettier`
-- [ ] Create `eslint.config.js` with configuration from Section 4.2.3
-- [ ] Run `npx eslint src/ tests/` and fix any violations in existing code
-- [ ] Verify `npm test` passes after fixes
+- [x] Install ESLint and dependencies: `npm install --save-dev eslint @eslint/js globals eslint-config-prettier`
+- [x] Create `eslint.config.js` with configuration from Section 4.2.3
+- [x] Run `npx eslint src/ tests/` and fix any violations in existing code
+- [x] Verify `npm test` passes after fixes
 
 **Done when:** `npx eslint src/ tests/` reports zero errors and zero warnings, and existing tests pass.
 
 ### Phase 3: Script Integration — 5 min
 
-- [ ] Add `check` and `fix` scripts to `package.json`
-- [ ] Verify all two scripts execute correctly
+- [x] Add `check` and `fix` scripts to `package.json`
+- [x] Verify all two scripts execute correctly
 
 **Done when:** All scripts in Section 4.2.4 run successfully.
 

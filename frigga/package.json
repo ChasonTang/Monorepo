@@ -9,11 +9,18 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test tests/**/*.test.js"
+    "test": "node --test tests/**/*.test.js",
+    "check": "prettier --check src/ tests/ && eslint src/ tests/",
+    "fix": "prettier --write src/ tests/ && eslint --fix src/ tests/"
   },
   "engines": {
     "node": ">=24"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.3",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1"
+  }
 }

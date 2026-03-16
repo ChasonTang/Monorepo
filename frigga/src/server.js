@@ -1,8 +1,8 @@
-import http from 'node:http';
-import crypto from 'node:crypto';
-import { SHUTDOWN_TIMEOUT_MS } from './constants.js';
+import http from "node:http";
+import crypto from "node:crypto";
+import { SHUTDOWN_TIMEOUT_MS } from "./constants.js";
 
-const VALID_ROUTES = new Set(['/v1/messages', '/v1/messages/count_tokens']);
+const VALID_ROUTES = new Set(["/v1/messages", "/v1/messages/count_tokens"]);
 
 /**
  * Pure request handler function.
@@ -11,12 +11,16 @@ const VALID_ROUTES = new Set(['/v1/messages', '/v1/messages/count_tokens']);
  * @param {boolean} isShuttingDown
  * @returns {{ statusCode: number, headers: Record<string, string>, body: string }}
  */
-export function handleRequest({ method, url, headers }, apiKeyHash, isShuttingDown) {
-  const pathname = new URL(url, 'http://localhost').pathname;
+export function handleRequest(
+  { method, url, headers },
+  apiKeyHash,
+  isShuttingDown,
+) {
+  const pathname = new URL(url, "http://localhost").pathname;
 
-  const responseHeaders = { 'Content-Type': 'application/json' };
+  const responseHeaders = { "Content-Type": "application/json" };
   if (isShuttingDown) {
-    responseHeaders['Connection'] = 'close';
+    responseHeaders["Connection"] = "close";
   }
 
   // Route matching
@@ -25,45 +29,54 @@ export function handleRequest({ method, url, headers }, apiKeyHash, isShuttingDo
       statusCode: 404,
       headers: responseHeaders,
       body: JSON.stringify({
-        type: 'error',
-        error: { type: 'not_found_error', message: 'The requested URL was not found' }
+        type: "error",
+        error: {
+          type: "not_found_error",
+          message: "The requested URL was not found",
+        },
       }),
     };
   }
 
   // Method validation
-  if (method !== 'POST') {
-    responseHeaders['Allow'] = 'POST';
+  if (method !== "POST") {
+    responseHeaders["Allow"] = "POST";
     return {
       statusCode: 405,
       headers: responseHeaders,
       body: JSON.stringify({
-        type: 'error',
-        error: { type: 'invalid_request_error', message: 'Method not allowed' }
+        type: "error",
+        error: { type: "invalid_request_error", message: "Method not allowed" },
       }),
     };
   }
 
   // Authorization validation
-  const authHeader = headers['authorization'];
+  const authHeader = headers["authorization"];
   if (!authHeader) {
     return {
       statusCode: 401,
       headers: responseHeaders,
       body: JSON.stringify({
-        type: 'error',
-        error: { type: 'authentication_error', message: 'Missing Authorization header' }
+        type: "error",
+        error: {
+          type: "authentication_error",
+          message: "Missing Authorization header",
+        },
       }),
     };
   }
 
-  if (!authHeader.startsWith('Bearer ')) {
+  if (!authHeader.startsWith("Bearer ")) {
     return {
       statusCode: 401,
       headers: responseHeaders,
       body: JSON.stringify({
-        type: 'error',
-        error: { type: 'authentication_error', message: 'Malformed Authorization header' }
+        type: "error",
+        error: {
+          type: "authentication_error",
+          message: "Malformed Authorization header",
+        },
       }),
     };
   }
@@ -74,20 +87,20 @@ export function handleRequest({ method, url, headers }, apiKeyHash, isShuttingDo
       statusCode: 401,
       headers: responseHeaders,
       body: JSON.stringify({
-        type: 'error',
-        error: { type: 'authentication_error', message: 'Empty Bearer token' }
+        type: "error",
+        error: { type: "authentication_error", message: "Empty Bearer token" },
       }),
     };
   }
 
-  const tokenHash = crypto.createHash('sha256').update(token).digest();
+  const tokenHash = crypto.createHash("sha256").update(token).digest();
   if (!crypto.timingSafeEqual(tokenHash, apiKeyHash)) {
     return {
       statusCode: 401,
       headers: responseHeaders,
       body: JSON.stringify({
-        type: 'error',
-        error: { type: 'authentication_error', message: 'Invalid API key' }
+        type: "error",
+        error: { type: "authentication_error", message: "Invalid API key" },
       }),
     };
   }
@@ -97,8 +110,11 @@ export function handleRequest({ method, url, headers }, apiKeyHash, isShuttingDo
     statusCode: 501,
     headers: responseHeaders,
     body: JSON.stringify({
-      type: 'error',
-      error: { type: 'not_implemented', message: 'Upstream forwarding is not yet implemented' }
+      type: "error",
+      error: {
+        type: "not_implemented",
+        message: "Upstream forwarding is not yet implemented",
+      },
     }),
   };
 }
@@ -109,7 +125,7 @@ export function handleRequest({ method, url, headers }, apiKeyHash, isShuttingDo
  * @returns {Promise<http.Server>}
  */
 export function startServer({ port, host, apiKey }) {
-  const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest();
+  const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest();
   let isShuttingDown = false;
   let forceTimer;
 
@@ -119,7 +135,7 @@ export function startServer({ port, host, apiKey }) {
     const result = handleRequest(
       { method: req.method, url: req.url, headers: req.headers },
       apiKeyHash,
-      isShuttingDown
+      isShuttingDown,
     );
 
     res.writeHead(result.statusCode, result.headers);
@@ -127,7 +143,7 @@ export function startServer({ port, host, apiKey }) {
       const duration = Date.now() - startTime;
       const timestamp = new Date().toISOString();
       process.stdout.write(
-        `[${timestamp}] [INFO] ${req.method} ${req.url} ${result.statusCode} ${duration}ms\n`
+        `[${timestamp}] [INFO] ${req.method} ${req.url} ${result.statusCode} ${duration}ms\n`,
       );
     });
   });
@@ -138,7 +154,7 @@ export function startServer({ port, host, apiKey }) {
 
     const timestamp = new Date().toISOString();
     process.stdout.write(
-      `[${timestamp}] [INFO] Shutting down: stop accepting new connections\n`
+      `[${timestamp}] [INFO] Shutting down: stop accepting new connections\n`,
     );
 
     server.close();
@@ -146,20 +162,22 @@ export function startServer({ port, host, apiKey }) {
 
     forceTimer = setTimeout(() => {
       const ts = new Date().toISOString();
-      process.stderr.write(`[${ts}] [WARN] Shutdown timed out, forcing close\n`);
+      process.stderr.write(
+        `[${ts}] [WARN] Shutdown timed out, forcing close\n`,
+      );
       server.closeAllConnections();
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS);
     forceTimer.unref();
   }
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 
-  server.on('close', () => {
+  server.on("close", () => {
     clearTimeout(forceTimer);
-    process.removeListener('SIGINT', shutdown);
-    process.removeListener('SIGTERM', shutdown);
+    process.removeListener("SIGINT", shutdown);
+    process.removeListener("SIGTERM", shutdown);
     if (isShuttingDown) {
       const ts = new Date().toISOString();
       process.stdout.write(`[${ts}] [INFO] Shutdown complete\n`);
@@ -168,27 +186,27 @@ export function startServer({ port, host, apiKey }) {
 
   return new Promise((resolve, reject) => {
     function onStartupError(err) {
-      process.removeListener('SIGINT', shutdown);
-      process.removeListener('SIGTERM', shutdown);
+      process.removeListener("SIGINT", shutdown);
+      process.removeListener("SIGTERM", shutdown);
       reject(err);
     }
 
-    server.once('error', onStartupError);
+    server.once("error", onStartupError);
 
     server.listen(port, host, () => {
-      server.removeListener('error', onStartupError);
+      server.removeListener("error", onStartupError);
 
-      server.on('error', (err) => {
+      server.on("error", (err) => {
         const timestamp = new Date().toISOString();
         process.stderr.write(
-          `[${timestamp}] [ERROR] Server error: ${err.message}\n`
+          `[${timestamp}] [ERROR] Server error: ${err.message}\n`,
         );
       });
 
       const timestamp = new Date().toISOString();
       const addr = server.address();
       process.stdout.write(
-        `[${timestamp}] [INFO] Frigga listening on ${addr.address}:${addr.port}\n`
+        `[${timestamp}] [INFO] Frigga listening on ${addr.address}:${addr.port}\n`,
       );
       resolve(server);
     });

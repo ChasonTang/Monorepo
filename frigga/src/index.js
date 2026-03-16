@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { parseArgs, resolveArgs } from './cli.js';
-import { startServer } from './server.js';
+import { parseArgs, resolveArgs } from "./cli.js";
+import { startServer } from "./server.js";
 
 const args = parseArgs(process.argv);
 const config = resolveArgs(args);

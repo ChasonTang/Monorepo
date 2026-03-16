@@ -1,4 +1,4 @@
-import { DEFAULT_PORT, DEFAULT_HOST } from './constants.js';
+import { DEFAULT_PORT, DEFAULT_HOST } from "./constants.js";
 
 /**
  * Parse CLI arguments from argv.
@@ -10,8 +10,8 @@ export function parseArgs(argv) {
   const args = {};
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
-    if (!arg.startsWith('--')) continue;
-    const eqIndex = arg.indexOf('=');
+    if (!arg.startsWith("--")) continue;
+    const eqIndex = arg.indexOf("=");
     if (eqIndex === -1) {
       args[arg.slice(2)] = true;
     } else {
@@ -26,12 +26,12 @@ export function parseArgs(argv) {
  */
 export function printUsage() {
   process.stderr.write(
-    'Usage: node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]\n' +
-    '\n' +
-    'Options:\n' +
-    '  --api-key   Required. Expected Bearer token for incoming requests.\n' +
-    '  --port      HTTP listen port (default: 3000)\n' +
-    '  --host      HTTP listen address (default: 127.0.0.1)\n'
+    "Usage: node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]\n" +
+      "\n" +
+      "Options:\n" +
+      "  --api-key   Required. Expected Bearer token for incoming requests.\n" +
+      "  --port      HTTP listen port (default: 3000)\n" +
+      "  --host      HTTP listen address (default: 127.0.0.1)\n",
   );
 }
 
@@ -41,25 +41,28 @@ export function printUsage() {
  * @returns {{ port: number, host: string, apiKey: string }}
  */
 export function resolveArgs(args) {
-  const apiKey = args['api-key'];
+  const apiKey = args["api-key"];
   if (!apiKey || apiKey === true) {
     printUsage();
-    process.stderr.write('Error: --api-key is required\n');
+    process.stderr.write("Error: --api-key is required\n");
     process.exit(1);
   }
 
-  const portStr = args['port'];
+  const portStr = args["port"];
   let port = DEFAULT_PORT;
   if (portStr !== undefined && portStr !== true) {
     port = Number(portStr);
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       printUsage();
-      process.stderr.write(`Error: --port must be an integer between 0 and 65535\n`);
+      process.stderr.write(
+        `Error: --port must be an integer between 0 and 65535\n`,
+      );
       process.exit(1);
     }
   }
 
-  const host = (args['host'] && args['host'] !== true) ? args['host'] : DEFAULT_HOST;
+  const host =
+    args["host"] && args["host"] !== true ? args["host"] : DEFAULT_HOST;
 
   return { port, host, apiKey };
 }
