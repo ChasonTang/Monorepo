@@ -1,0 +1,193 @@
+import { describe, it, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { startServer } from '../src/server.js';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const API_KEY = 'integration-test-key';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const INDEX_PATH = join(__dirname, '..', 'src', 'index.js');
+
+let server;
+
+afterEach(async () => {
+  if (server) {
+    await new Promise((resolve) => {
+      server.closeAllConnections();
+      server.close(resolve);
+    });
+    server = null;
+  }
+});
+
+function request(port, { method = 'POST', path = '/v1/messages', headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port, method, path, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString()
+        });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+describe('Integration — valid auth', () => {
+  it('returns 501 for POST /v1/messages with correct key', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, {
+      headers: { authorization: `Bearer ${API_KEY}` }
+    });
+    assert.equal(res.statusCode, 501);
+    const body = JSON.parse(res.body);
+    assert.equal(body.error.type, 'not_implemented');
+  });
+
+  it('returns 501 for POST /v1/messages/count_tokens with correct key', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, {
+      path: '/v1/messages/count_tokens',
+      headers: { authorization: `Bearer ${API_KEY}` }
+    });
+    assert.equal(res.statusCode, 501);
+    const body = JSON.parse(res.body);
+    assert.equal(body.error.type, 'not_implemented');
+  });
+});
+
+describe('Integration — auth failures', () => {
+  it('returns 401 for missing Authorization', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port);
+    assert.equal(res.statusCode, 401);
+    const body = JSON.parse(res.body);
+    assert.equal(body.error.type, 'authentication_error');
+  });
+
+  it('returns 401 for wrong key', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, {
+      headers: { authorization: 'Bearer wrong-key' }
+    });
+    assert.equal(res.statusCode, 401);
+  });
+
+  it('returns 401 for malformed Authorization (no Bearer prefix)', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, {
+      headers: { authorization: API_KEY }
+    });
+    assert.equal(res.statusCode, 401);
+  });
+
+  it('returns 401 for empty Bearer token', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, {
+      headers: { authorization: 'Bearer ' }
+    });
+    assert.equal(res.statusCode, 401);
+  });
+});
+
+describe('Integration — method and route errors', () => {
+  it('returns 405 with Allow header for GET on valid route', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, { method: 'GET' });
+    assert.equal(res.statusCode, 405);
+    assert.equal(res.headers['allow'], 'POST');
+    const body = JSON.parse(res.body);
+    assert.equal(body.error.type, 'invalid_request_error');
+  });
+
+  it('returns 404 for unknown path', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const res = await request(port, { path: '/v1/unknown' });
+    assert.equal(res.statusCode, 404);
+    const body = JSON.parse(res.body);
+    assert.equal(body.error.type, 'not_found_error');
+  });
+});
+
+describe('Integration — concurrent requests', () => {
+  it('handles 10 simultaneous requests', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    const promises = Array.from({ length: 10 }, () =>
+      request(port, { headers: { authorization: `Bearer ${API_KEY}` } })
+    );
+    const results = await Promise.all(promises);
+    for (const res of results) {
+      assert.equal(res.statusCode, 501);
+    }
+  });
+});
+
+describe('Integration — startup failure', () => {
+  it('rejects when port is already in use', async () => {
+    server = await startServer({ port: 0, host: '127.0.0.1', apiKey: API_KEY });
+    const port = server.address().port;
+    await assert.rejects(
+      () => startServer({ port, host: '127.0.0.1', apiKey: API_KEY }),
+      (err) => {
+        assert.equal(err.code, 'EADDRINUSE');
+        return true;
+      }
+    );
+  });
+});
+
+describe('Integration — graceful shutdown', () => {
+  it('exits with code 0 on SIGTERM', async () => {
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn('node', [INDEX_PATH, `--api-key=${API_KEY}`, '--port=0'], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString();
+        if (stdout.includes('Frigga listening on')) {
+          setTimeout(() => child.kill('SIGTERM'), 50);
+        }
+      });
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('close', (code) => {
+        clearTimeout(killTimer);
+        resolve({ code, stdout, stderr });
+      });
+
+      child.on('error', reject);
+
+      const killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error('Timeout waiting for graceful shutdown'));
+      }, 10_000);
+    });
+
+    assert.equal(result.code, 0);
+    assert.ok(result.stdout.includes('Shutting down'));
+    assert.ok(result.stdout.includes('Shutdown complete'));
+  });
+});

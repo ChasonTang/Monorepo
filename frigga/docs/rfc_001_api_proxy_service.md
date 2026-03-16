@@ -3,7 +3,7 @@
 **Version:** 3.2
 **Author:** Chason Tang
 **Date:** 2026-03-15
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -292,11 +292,11 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 
 ### Phase 1: Project Scaffolding & CLI — 0.5 day
 
-- [ ] Create `frigga/package.json` — zero runtime dependencies, `"type": "module"`
-- [ ] Implement `src/cli.js` — `parseArgs()`, `printUsage()`, `resolveArgs()`
-- [ ] Implement `src/constants.js` — all shared constants (`DEFAULT_PORT`, `DEFAULT_HOST`, `SHUTDOWN_TIMEOUT_MS`)
-- [ ] Implement `src/index.js` — shebang, parse args, validate required arguments, start server, register signal handlers
-- [ ] Create stub `src/server.js` (`startServer()` prints config and listens)
+- [x] Create `frigga/package.json` — zero runtime dependencies, `"type": "module"`
+- [x] Implement `src/cli.js` — `parseArgs()`, `printUsage()`, `resolveArgs()`
+- [x] Implement `src/constants.js` — all shared constants (`DEFAULT_PORT`, `DEFAULT_HOST`, `SHUTDOWN_TIMEOUT_MS`)
+- [x] Implement `src/index.js` — shebang, parse args, validate required arguments, start server, register signal handlers
+- [x] Create stub `src/server.js` (`startServer()` prints config and listens)
 
 **Done when:**
 - `node src/index.js --api-key=test --port=3000` prints startup log to stdout and starts listening
@@ -305,20 +305,20 @@ Unit tests are placed in Phase 2 (after project scaffolding) because Phase 1 est
 
 ### Phase 2: Tests — 0.5 day
 
-- [ ] Define test cases based on key scenarios from Section 5
-- [ ] Implement unit tests for request handler pure function (routing, authorization, error formatting) in `tests/handler.test.js`
-- [ ] Implement integration tests for end-to-end HTTP behavior in `tests/server.test.js`
+- [x] Define test cases based on key scenarios from Section 5
+- [x] Implement unit tests for request handler pure function (routing, authorization, error formatting) in `tests/handler.test.js`
+- [x] Implement integration tests for end-to-end HTTP behavior in `tests/server.test.js`
 
 **Done when:** All key scenario tests written and runnable (expected to fail — red phase of TDD)
 
 ### Phase 3: Server Endpoints & Auth — 1 day
 
-- [ ] Extract request handler as pure function: accept `{ method, url, headers }`, return `{ statusCode, headers, body }`
-- [ ] Implement shared authorization validation (extract Bearer token, SHA-256 hash + `crypto.timingSafeEqual` comparison with `--api-key`)
-- [ ] Implement shared request pipeline for both endpoints — validate auth, return `501 Not Implemented`
-- [ ] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error` with `Allow: POST` header)
-- [ ] Graceful shutdown on SIGINT/SIGTERM — stop accepting, drain with `SHUTDOWN_TIMEOUT_MS` (30s), exit 0 on success or exit 1 on timeout
-- [ ] Request logging: INFO-level logs to stdout (startup, request, shutdown); error output to stderr (`printUsage`)
+- [x] Extract request handler as pure function: accept `{ method, url, headers }`, return `{ statusCode, headers, body }`
+- [x] Implement shared authorization validation (extract Bearer token, SHA-256 hash + `crypto.timingSafeEqual` comparison with `--api-key`)
+- [x] Implement shared request pipeline for both endpoints — validate auth, return `501 Not Implemented`
+- [x] Implement error responses in Anthropic-compatible JSON format: `401` (`authentication_error`), `404` (`not_found_error`), `405` (`invalid_request_error` with `Allow: POST` header)
+- [x] Graceful shutdown on SIGINT/SIGTERM — stop accepting, drain with `SHUTDOWN_TIMEOUT_MS` (30s), exit 0 on success or exit 1 on timeout
+- [x] Request logging: INFO-level logs to stdout (startup, request, shutdown); error output to stderr (`printUsage`)
 
 **Done when:** All unit and integration tests passing (green). Server validates `Authorization: Bearer <api-key>` on both endpoints via shared handler, returns 401 for incorrect keys, 501 for valid keys, 404 for unknown paths, and 405 (with `Allow: POST` header) for non-POST methods. All error responses follow the Anthropic API error shape. INFO logs appear on stdout.
 
