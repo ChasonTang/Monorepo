@@ -7,7 +7,6 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const API_KEY = "integration-test-key";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX_PATH = join(__dirname, "..", "src", "index.js");
 
@@ -94,72 +93,9 @@ function parseJsonLines(lines) {
   return results;
 }
 
-describe("Integration — valid auth", () => {
-  it("returns 501 for POST /v1/messages with correct key", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const res = await request(port, {
-      headers: { authorization: `Bearer ${API_KEY}` },
-    });
-    assert.equal(res.statusCode, 501);
-    const body = JSON.parse(res.body);
-    assert.equal(body.error.type, "not_implemented");
-  });
-
-  it("returns 501 for POST /v1/messages/count_tokens with correct key", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const res = await request(port, {
-      path: "/v1/messages/count_tokens",
-      headers: { authorization: `Bearer ${API_KEY}` },
-    });
-    assert.equal(res.statusCode, 501);
-    const body = JSON.parse(res.body);
-    assert.equal(body.error.type, "not_implemented");
-  });
-});
-
-describe("Integration — auth failures", () => {
-  it("returns 401 for missing Authorization", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const res = await request(port);
-    assert.equal(res.statusCode, 401);
-    const body = JSON.parse(res.body);
-    assert.equal(body.error.type, "authentication_error");
-  });
-
-  it("returns 401 for wrong key", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const res = await request(port, {
-      headers: { authorization: "Bearer wrong-key" },
-    });
-    assert.equal(res.statusCode, 401);
-  });
-
-  it("returns 401 for malformed Authorization (no Bearer prefix)", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const res = await request(port, {
-      headers: { authorization: API_KEY },
-    });
-    assert.equal(res.statusCode, 401);
-  });
-
-  it("returns 401 for empty Bearer token", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const res = await request(port, {
-      headers: { authorization: "Bearer " },
-    });
-    assert.equal(res.statusCode, 401);
-  });
-});
-
 describe("Integration — method and route errors", () => {
   it("returns 405 with Allow header for GET on valid route", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
     const res = await request(port, { method: "GET" });
     assert.equal(res.statusCode, 405);
@@ -169,7 +105,7 @@ describe("Integration — method and route errors", () => {
   });
 
   it("returns 404 for unknown path", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
     const res = await request(port, { path: "/v1/unknown" });
     assert.equal(res.statusCode, 404);
@@ -178,26 +114,12 @@ describe("Integration — method and route errors", () => {
   });
 });
 
-describe("Integration — concurrent requests", () => {
-  it("handles 10 simultaneous requests", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-    const promises = Array.from({ length: 10 }, () =>
-      request(port, { headers: { authorization: `Bearer ${API_KEY}` } }),
-    );
-    const results = await Promise.all(promises);
-    for (const res of results) {
-      assert.equal(res.statusCode, 501);
-    }
-  });
-});
-
 describe("Integration — startup failure", () => {
   it("rejects when port is already in use", async () => {
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
     await assert.rejects(
-      () => startServer({ port, host: "127.0.0.1", apiKey: API_KEY }),
+      () => startServer({ port, host: "127.0.0.1" }),
       (err) => {
         assert.equal(err.code, "EADDRINUSE");
         return true;
@@ -209,7 +131,7 @@ describe("Integration — startup failure", () => {
 describe("Integration — NDJSON startup log", () => {
   it("startup log is valid NDJSON with host and port", async () => {
     output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const addr = server.address();
 
     const logs = parseJsonLines(output.lines.stdout);
@@ -223,19 +145,16 @@ describe("Integration — NDJSON startup log", () => {
   });
 });
 
-describe("Integration — NDJSON request logs", () => {
-  it("request log contains all required fields", async () => {
+describe("Integration — NDJSON request logs (local errors)", () => {
+  it("404 log contains request_body and no response_headers/response_body", async () => {
     output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
 
-    const reqBody =
-      '{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"Hello"}]}';
+    const reqBody = '{"model":"claude-sonnet-4-20250514"}';
     await request(port, {
-      headers: {
-        authorization: `Bearer ${API_KEY}`,
-        "content-type": "application/json",
-      },
+      path: "/v1/unknown",
+      headers: { "content-type": "application/json" },
       body: reqBody,
     });
     await new Promise((resolve) => {
@@ -249,25 +168,45 @@ describe("Integration — NDJSON request logs", () => {
     assert.equal(reqLog.level, "INFO");
     assert.ok(reqLog.timestamp);
     assert.equal(reqLog.method, "POST");
-    assert.equal(reqLog.url, "/v1/messages");
-    assert.equal(reqLog.status, 501);
+    assert.equal(reqLog.url, "/v1/unknown");
+    assert.equal(reqLog.status, 404);
     assert.equal(typeof reqLog.duration_ms, "number");
-    assert.ok(reqLog.duration_ms >= 0);
     assert.equal(typeof reqLog.request_headers, "object");
-    assert.equal(typeof reqLog.request_body, "string");
-    assert.equal(typeof reqLog.response_headers, "object");
-    assert.equal(typeof reqLog.response_body, "string");
+    assert.equal(reqLog.request_body, reqBody);
+    assert.equal(reqLog.response_headers, undefined);
+    assert.equal(reqLog.response_body, undefined);
   });
 
-  it("request headers are logged correctly", async () => {
+  it("405 log contains request_body and no response_headers/response_body", async () => {
     output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
+    const port = server.address().port;
+
+    await request(port, { method: "GET" });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    const logs = parseJsonLines(output.lines.stdout);
+    const reqLog = logs.find((l) => l.event === "request");
+
+    assert.ok(reqLog, "Expected request log");
+    assert.equal(reqLog.status, 405);
+    assert.equal(reqLog.request_body, "");
+    assert.equal(reqLog.response_headers, undefined);
+    assert.equal(reqLog.response_body, undefined);
+  });
+
+  it("request headers are logged correctly on local error", async () => {
+    output = captureOutput();
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
 
     await request(port, {
+      path: "/v1/unknown",
       headers: {
-        authorization: `Bearer ${API_KEY}`,
         "content-type": "application/json",
+        authorization: "Bearer test-key",
       },
     });
     await new Promise((resolve) => {
@@ -278,78 +217,14 @@ describe("Integration — NDJSON request logs", () => {
     const reqLog = logs.find((l) => l.event === "request");
 
     assert.equal(reqLog.request_headers["content-type"], "application/json");
-    assert.equal(reqLog.request_headers["authorization"], `Bearer ${API_KEY}`);
-  });
-
-  it("request body is logged correctly", async () => {
-    output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-
-    const body = '{"model":"claude-sonnet-4-20250514"}';
-    await request(port, {
-      headers: {
-        authorization: `Bearer ${API_KEY}`,
-        "content-type": "application/json",
-      },
-      body,
-    });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
-
-    const logs = parseJsonLines(output.lines.stdout);
-    const reqLog = logs.find((l) => l.event === "request");
-
-    assert.equal(reqLog.request_body, body);
-  });
-
-  it("empty request body is logged as empty string", async () => {
-    output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-
-    await request(port, {
-      headers: { authorization: `Bearer ${API_KEY}` },
-    });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
-
-    const logs = parseJsonLines(output.lines.stdout);
-    const reqLog = logs.find((l) => l.event === "request");
-
-    assert.equal(reqLog.request_body, "");
-  });
-
-  it("response fields match actual HTTP response", async () => {
-    output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
-    const port = server.address().port;
-
-    const res = await request(port, {
-      headers: { authorization: `Bearer ${API_KEY}` },
-    });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
-
-    const logs = parseJsonLines(output.lines.stdout);
-    const reqLog = logs.find((l) => l.event === "request");
-
-    assert.equal(reqLog.status, res.statusCode);
-    assert.equal(reqLog.response_body, res.body);
-    assert.equal(
-      reqLog.response_headers["content-type"],
-      res.headers["content-type"],
-    );
+    assert.equal(reqLog.request_headers["authorization"], "Bearer test-key");
   });
 });
 
-describe("Integration — NDJSON request error", () => {
-  it("request stream error emits request_error log", async () => {
+describe("Integration — client error on forwarding path", () => {
+  it("client stream error emits client_error on stderr and request log on stdout", async () => {
     output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1", apiKey: API_KEY });
+    server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
 
     await new Promise((resolve) => {
@@ -371,32 +246,28 @@ describe("Integration — NDJSON request error", () => {
     });
 
     const stderrLogs = parseJsonLines(output.lines.stderr);
-    const errorLog = stderrLogs.find((l) => l.event === "request_error");
-
-    assert.ok(errorLog, "Expected request_error log on stderr");
-    assert.equal(errorLog.level, "ERROR");
-    assert.equal(errorLog.method, "POST");
-    assert.equal(errorLog.url, "/v1/messages");
-    assert.ok(errorLog.request_headers);
-    assert.equal(errorLog.request_headers["content-type"], "application/json");
-    assert.ok(errorLog.message);
+    const hasClientError = stderrLogs.some(
+      (l) => l.event === "client_error" || l.event === "client_disconnect",
+    );
+    assert.ok(
+      hasClientError,
+      "Expected client_error or client_disconnect on stderr",
+    );
 
     const stdoutLogs = parseJsonLines(output.lines.stdout);
     const requestLog = stdoutLogs.find((l) => l.event === "request");
-    assert.equal(requestLog, undefined, "Expected no request log");
+    assert.ok(requestLog, "Expected request log on stdout");
+    assert.equal(requestLog.status, 499);
+    assert.equal(typeof requestLog.request_body, "string");
   });
 });
 
 describe("Integration — graceful shutdown", () => {
   it("exits with code 0 on SIGTERM", async () => {
     const result = await new Promise((resolve, reject) => {
-      const child = spawn(
-        "node",
-        [INDEX_PATH, `--api-key=${API_KEY}`, "--port=0"],
-        {
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
+      const child = spawn("node", [INDEX_PATH, "--port=0"], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
 
       let stdout = "";
       let stderr = "";

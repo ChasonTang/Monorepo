@@ -26,10 +26,9 @@ export function parseArgs(argv) {
  */
 export function printUsage() {
   process.stderr.write(
-    "Usage: node src/index.js --api-key=<key> [--port=<port>] [--host=<host>]\n" +
+    "Usage: node src/index.js [--port=<port>] [--host=<host>]\n" +
       "\n" +
       "Options:\n" +
-      "  --api-key   Required. Expected Bearer token for incoming requests.\n" +
       "  --port      HTTP listen port (default: 3000)\n" +
       "  --host      HTTP listen address (default: 127.0.0.1)\n",
   );
@@ -38,16 +37,9 @@ export function printUsage() {
 /**
  * Validate and extract arguments with defaults.
  * @param {Record<string, string | true>} args
- * @returns {{ port: number, host: string, apiKey: string }}
+ * @returns {{ port: number, host: string }}
  */
 export function resolveArgs(args) {
-  const apiKey = args["api-key"];
-  if (!apiKey || apiKey === true) {
-    printUsage();
-    process.stderr.write("Error: --api-key is required\n");
-    process.exit(1);
-  }
-
   const portStr = args["port"];
   let port = DEFAULT_PORT;
   if (portStr !== undefined && portStr !== true) {
@@ -64,5 +56,5 @@ export function resolveArgs(args) {
   const host =
     args["host"] && args["host"] !== true ? args["host"] : DEFAULT_HOST;
 
-  return { port, host, apiKey };
+  return { port, host };
 }

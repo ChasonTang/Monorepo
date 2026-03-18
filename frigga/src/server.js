@@ -1,21 +1,130 @@
 import http from "node:http";
-import crypto from "node:crypto";
-import { SHUTDOWN_TIMEOUT_MS } from "./constants.js";
+import https from "node:https";
+import { pipeline } from "node:stream";
+import { SHUTDOWN_TIMEOUT_MS, UPSTREAM_BASE_URL } from "./constants.js";
 
 const VALID_ROUTES = new Set(["/v1/messages", "/v1/messages/count_tokens"]);
 
+const REQUEST_HEADER_FORWARD = new Set([
+  "content-type",
+  "accept",
+  "accept-encoding",
+  "user-agent",
+  "anthropic-beta",
+  "anthropic-version",
+  "authorization",
+  "content-length",
+]);
+
+const RESPONSE_HEADER_FORWARD = new Set([
+  "content-type",
+  "content-length",
+  "content-encoding",
+  "x-request-id",
+  "request-id",
+  "retry-after",
+]);
+
+const RESPONSE_HEADER_PREFIXES = ["anthropic-ratelimit-"];
+
+/**
+ * Build upstream request headers from the client request headers.
+ * @param {Record<string, string>} incomingHeaders - req.headers (lower-cased by Node.js)
+ * @returns {Record<string, string>}
+ */
+export function buildUpstreamHeaders(incomingHeaders) {
+  const headers = {};
+  for (const name of REQUEST_HEADER_FORWARD) {
+    if (incomingHeaders[name] !== undefined) {
+      headers[name] = incomingHeaders[name];
+    }
+  }
+  return headers;
+}
+
+/**
+ * Filter upstream response headers for the client.
+ * @param {Record<string, string>} headers - upstreamRes.headers (lower-cased by Node.js)
+ * @returns {Record<string, string>}
+ */
+export function filterResponseHeaders(headers) {
+  const filtered = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (
+      RESPONSE_HEADER_FORWARD.has(name) ||
+      RESPONSE_HEADER_PREFIXES.some((prefix) => name.startsWith(prefix))
+    ) {
+      filtered[name] = value;
+    }
+  }
+  return filtered;
+}
+
+/**
+ * Abort the upstream request by disconnecting the pipe first.
+ * @param {import("node:http").IncomingMessage} req
+ * @param {import("node:http").ClientRequest} upstreamReq
+ */
+export function abortUpstream(req, upstreamReq) {
+  if (upstreamReq && !upstreamReq.destroyed) {
+    req.unpipe(upstreamReq);
+    upstreamReq.destroy();
+  }
+}
+
+/**
+ * Create a request log emitter with exactly-once guard.
+ * @param {object} ctx
+ * @param {import("node:http").IncomingMessage} ctx.req
+ * @param {Buffer[]} ctx.requestChunks - sidecar-captured body chunks
+ * @param {number} ctx.startTime - Date.now() at request start
+ * @returns {(status: number, responseHeaders?: Record<string, string>) => void}
+ */
+export function createRequestLogEmitter({ req, requestChunks, startTime }) {
+  let emitted = false;
+
+  return function emitRequestLog(status, responseHeaders) {
+    if (emitted) return;
+    emitted = true;
+
+    let finalized = false;
+    const finalize = () => {
+      if (finalized) return;
+      finalized = true;
+      const requestBody = Buffer.concat(requestChunks).toString("utf-8");
+      requestChunks.length = 0;
+      const entry = {
+        timestamp: new Date().toISOString(),
+        level: "INFO",
+        event: "request",
+        method: req.method,
+        url: req.url,
+        status,
+        duration_ms: Date.now() - startTime,
+        request_headers: req.headers,
+        request_body: requestBody,
+      };
+      if (responseHeaders) entry.response_headers = responseHeaders;
+      process.stdout.write(`${JSON.stringify(entry)}\n`);
+    };
+
+    if (req.readableEnded || req.destroyed) {
+      finalize();
+    } else {
+      req.on("end", finalize);
+      req.on("error", () => finalize());
+      req.resume();
+    }
+  };
+}
+
 /**
  * Pure request handler function.
- * @param {{ method: string, url: string, headers: Record<string, string> }} req
- * @param {Buffer} apiKeyHash - Pre-computed SHA-256 digest of the configured API key
+ * @param {{ method: string, url: string }} req
  * @param {boolean} isShuttingDown
- * @returns {{ statusCode: number, headers: Record<string, string>, body: string }}
+ * @returns {{ statusCode: number, headers: Record<string, string>, body: string } | null}
  */
-export function handleRequest(
-  { method, url, headers },
-  apiKeyHash,
-  isShuttingDown,
-) {
+export function handleRequest({ method, url }, isShuttingDown) {
   const pathname = new URL(url, "http://localhost").pathname;
 
   const responseHeaders = { "Content-Type": "application/json" };
@@ -51,124 +160,41 @@ export function handleRequest(
     };
   }
 
-  // Authorization validation
-  const authHeader = headers["authorization"];
-  if (!authHeader) {
-    return {
-      statusCode: 401,
-      headers: responseHeaders,
-      body: JSON.stringify({
-        type: "error",
-        error: {
-          type: "authentication_error",
-          message: "Missing Authorization header",
-        },
-      }),
-    };
-  }
-
-  if (!authHeader.startsWith("Bearer ")) {
-    return {
-      statusCode: 401,
-      headers: responseHeaders,
-      body: JSON.stringify({
-        type: "error",
-        error: {
-          type: "authentication_error",
-          message: "Malformed Authorization header",
-        },
-      }),
-    };
-  }
-
-  const token = authHeader.slice(7);
-  if (token.length === 0) {
-    return {
-      statusCode: 401,
-      headers: responseHeaders,
-      body: JSON.stringify({
-        type: "error",
-        error: { type: "authentication_error", message: "Empty Bearer token" },
-      }),
-    };
-  }
-
-  const tokenHash = crypto.createHash("sha256").update(token).digest();
-  if (!crypto.timingSafeEqual(tokenHash, apiKeyHash)) {
-    return {
-      statusCode: 401,
-      headers: responseHeaders,
-      body: JSON.stringify({
-        type: "error",
-        error: { type: "authentication_error", message: "Invalid API key" },
-      }),
-    };
-  }
-
-  // Current phase: 501 Not Implemented
-  return {
-    statusCode: 501,
-    headers: responseHeaders,
-    body: JSON.stringify({
-      type: "error",
-      error: {
-        type: "not_implemented",
-        message: "Upstream forwarding is not yet implemented",
-      },
-    }),
-  };
+  // Validation passed — forward to upstream
+  return null;
 }
 
 /**
  * Start the HTTP proxy server.
- * @param {{ port: number, host: string, apiKey: string }} config
+ * @param {{ port: number, host: string }} config
  * @returns {Promise<http.Server>}
  */
-export function startServer({ port, host, apiKey }) {
-  const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest();
+export function startServer({ port, host }) {
   let isShuttingDown = false;
   let forceTimer;
 
   const server = http.createServer((req, res) => {
     const startTime = Date.now();
-    const chunks = [];
-    let errored = false;
 
-    req.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
+    const result = handleRequest(
+      { method: req.method, url: req.url },
+      isShuttingDown,
+    );
 
-    req.on("error", (err) => {
-      errored = true;
-      res.destroy();
-      process.stderr.write(
-        `${JSON.stringify({
-          timestamp: new Date().toISOString(),
-          level: "ERROR",
-          event: "request_error",
-          method: req.method,
-          url: req.url,
-          request_headers: req.headers,
-          message: err.message,
-        })}\n`,
-      );
-    });
+    // ── Local error path ──────────────────────────────────
+    if (result !== null) {
+      const { statusCode, headers, body } = result;
+      res.writeHead(statusCode, headers);
+      res.end(body);
 
-    req.on("end", () => {
-      if (errored) return;
-      const requestBody = Buffer.concat(chunks).toString("utf-8");
+      const requestChunks = [];
+      let localLogEmitted = false;
 
-      const result = handleRequest(
-        { method: req.method, url: req.url, headers: req.headers },
-        apiKeyHash,
-        isShuttingDown,
-      );
-
-      for (const [name, value] of Object.entries(result.headers)) {
-        res.setHeader(name, value);
-      }
-      res.writeHead(result.statusCode);
-      res.end(result.body, () => {
+      const emitLocalLog = () => {
+        if (localLogEmitted) return;
+        localLogEmitted = true;
+        const requestBody = Buffer.concat(requestChunks).toString("utf-8");
+        requestChunks.length = 0;
         process.stdout.write(
           `${JSON.stringify({
             timestamp: new Date().toISOString(),
@@ -176,16 +202,146 @@ export function startServer({ port, host, apiKey }) {
             event: "request",
             method: req.method,
             url: req.url,
-            status: result.statusCode,
+            status: statusCode,
             duration_ms: Date.now() - startTime,
             request_headers: req.headers,
             request_body: requestBody,
-            response_headers: res.getHeaders(),
-            response_body: result.body,
           })}\n`,
         );
-      });
+      };
+
+      req.on("data", (chunk) => requestChunks.push(chunk));
+      req.on("error", emitLocalLog);
+      req.on("end", emitLocalLog);
+      return;
+    }
+
+    // ── Forwarding path ───────────────────────────────────
+    // eslint-disable-next-line prefer-const -- assigned after event handlers to eliminate race conditions (RFC-004 §4.2.7)
+    let upstreamReq;
+    let upstreamResponseReceived = false;
+    const requestChunks = [];
+
+    // Sidecar: capture request body for audit logging
+    req.on("data", (chunk) => requestChunks.push(chunk));
+
+    // Create request log emitter
+    const emitRequestLog = createRequestLogEmitter({
+      req,
+      requestChunks,
+      startTime,
     });
+
+    // Client request stream error
+    req.on("error", (err) => {
+      abortUpstream(req, upstreamReq);
+      process.stderr.write(
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "ERROR",
+          event: "client_error",
+          method: req.method,
+          url: req.url,
+          message: err.code || err.message,
+          duration_ms: Date.now() - startTime,
+        })}\n`,
+      );
+      emitRequestLog(499);
+    });
+
+    // Client disconnect detection
+    res.on("close", () => {
+      if (!res.writableFinished) {
+        abortUpstream(req, upstreamReq);
+        if (!upstreamResponseReceived) {
+          // Phase A: no upstream response received yet
+          process.stderr.write(
+            `${JSON.stringify({
+              timestamp: new Date().toISOString(),
+              level: "WARN",
+              event: "client_disconnect",
+              method: req.method,
+              url: req.url,
+              duration_ms: Date.now() - startTime,
+            })}\n`,
+          );
+          emitRequestLog(499);
+        }
+        // Phase B: pipeline callback handles logging
+      }
+    });
+
+    // Upstream request
+    const upstreamUrl = new URL(req.url, UPSTREAM_BASE_URL);
+    const upstreamHeaders = buildUpstreamHeaders(req.headers);
+
+    upstreamReq = https.request(
+      upstreamUrl,
+      { method: "POST", headers: upstreamHeaders },
+      (upstreamRes) => {
+        upstreamResponseReceived = true;
+
+        const responseHeaders = filterResponseHeaders(upstreamRes.headers);
+        if (isShuttingDown) {
+          responseHeaders["connection"] = "close";
+        }
+
+        res.writeHead(upstreamRes.statusCode, responseHeaders);
+
+        pipeline(upstreamRes, res, (err) => {
+          if (err) {
+            process.stderr.write(
+              `${JSON.stringify({
+                timestamp: new Date().toISOString(),
+                level: "ERROR",
+                event: "upstream_error",
+                method: req.method,
+                url: req.url,
+                message: err.code || err.message,
+                duration_ms: Date.now() - startTime,
+              })}\n`,
+            );
+          }
+          emitRequestLog(upstreamRes.statusCode, upstreamRes.headers);
+        });
+      },
+    );
+
+    // Upstream connection error
+    upstreamReq.on("error", (err) => {
+      process.stderr.write(
+        `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: "ERROR",
+          event: "upstream_error",
+          method: req.method,
+          url: req.url,
+          message: err.code || err.message,
+          duration_ms: Date.now() - startTime,
+        })}\n`,
+      );
+
+      if (!res.headersSent && !res.destroyed) {
+        const errorHeaders = { "content-type": "application/json" };
+        if (isShuttingDown) {
+          errorHeaders["connection"] = "close";
+        }
+        res.writeHead(502, errorHeaders);
+        res.end(
+          JSON.stringify({
+            type: "error",
+            error: {
+              type: "api_error",
+              message: `upstream connection failed: ${err.code || err.message}`,
+            },
+          }),
+        );
+      }
+
+      emitRequestLog(502);
+    });
+
+    req.pipe(upstreamReq);
   });
 
   function shutdown() {
