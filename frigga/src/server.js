@@ -23,9 +23,13 @@ const RESPONSE_HEADER_FORWARD = new Set([
   "x-request-id",
   "request-id",
   "retry-after",
+  "anthropic-organization-id",
 ]);
 
-const RESPONSE_HEADER_PREFIXES = ["anthropic-ratelimit-"];
+const RESPONSE_HEADER_PREFIXES = [
+  "anthropic-ratelimit-",
+  "anthropic-priority-",
+];
 
 /**
  * Build upstream request headers from the client request headers.
