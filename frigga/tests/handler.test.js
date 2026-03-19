@@ -421,6 +421,74 @@ describe("createRequestLogEmitter", () => {
     assert.equal(requestChunks.length, 0);
   });
 
+  it("emits log with no request_body when requestChunks omitted, stream ended", () => {
+    const req = {
+      method: "POST",
+      url: "/v1/unknown",
+      headers: { "content-type": "application/json" },
+      readableEnded: true,
+      destroyed: false,
+    };
+    const emitRequestLog = createRequestLogEmitter({
+      req,
+      startTime: Date.now(),
+    });
+
+    emitRequestLog(404);
+
+    const logs = parseLog();
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].status, 404);
+    assert.equal(logs[0].request_headers["content-type"], "application/json");
+    assert.equal(logs[0].request_body, undefined);
+  });
+
+  it("calls req.resume() when requestChunks omitted and stream active", () => {
+    let resumed = false;
+    const req = new EventEmitter();
+    req.method = "POST";
+    req.url = "/v1/unknown";
+    req.headers = {};
+    req.readableEnded = false;
+    req.destroyed = false;
+    req.resume = () => {
+      resumed = true;
+    };
+
+    const emitRequestLog = createRequestLogEmitter({
+      req,
+      startTime: Date.now(),
+    });
+
+    emitRequestLog(404);
+
+    assert.ok(resumed, "Expected req.resume() to be called");
+    const logs = parseLog();
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].request_body, undefined);
+  });
+
+  it("exactly-once guard works when requestChunks omitted", () => {
+    const req = {
+      method: "POST",
+      url: "/v1/unknown",
+      headers: {},
+      readableEnded: true,
+      destroyed: false,
+    };
+    const emitRequestLog = createRequestLogEmitter({
+      req,
+      startTime: Date.now(),
+    });
+
+    emitRequestLog(404);
+    emitRequestLog(405);
+
+    const logs = parseLog();
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].status, 404);
+  });
+
   it("omits response_headers when not provided", () => {
     const req = {
       method: "POST",

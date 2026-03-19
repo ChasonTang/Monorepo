@@ -146,16 +146,15 @@ describe("Integration — NDJSON startup log", () => {
 });
 
 describe("Integration — NDJSON request logs (local errors)", () => {
-  it("404 log contains request_body and no response_headers/response_body", async () => {
+  it("404 log omits request_body and has no response_headers", async () => {
     output = captureOutput();
     server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
 
-    const reqBody = '{"model":"claude-sonnet-4-20250514"}';
     await request(port, {
       path: "/v1/unknown",
       headers: { "content-type": "application/json" },
-      body: reqBody,
+      body: '{"model":"claude-sonnet-4-20250514"}',
     });
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
@@ -172,12 +171,11 @@ describe("Integration — NDJSON request logs (local errors)", () => {
     assert.equal(reqLog.status, 404);
     assert.equal(typeof reqLog.duration_ms, "number");
     assert.equal(typeof reqLog.request_headers, "object");
-    assert.equal(reqLog.request_body, reqBody);
+    assert.equal(reqLog.request_body, undefined);
     assert.equal(reqLog.response_headers, undefined);
-    assert.equal(reqLog.response_body, undefined);
   });
 
-  it("405 log contains request_body and no response_headers/response_body", async () => {
+  it("405 log omits request_body and has no response_headers", async () => {
     output = captureOutput();
     server = await startServer({ port: 0, host: "127.0.0.1" });
     const port = server.address().port;
@@ -192,9 +190,8 @@ describe("Integration — NDJSON request logs (local errors)", () => {
 
     assert.ok(reqLog, "Expected request log");
     assert.equal(reqLog.status, 405);
-    assert.equal(reqLog.request_body, "");
+    assert.equal(reqLog.request_body, undefined);
     assert.equal(reqLog.response_headers, undefined);
-    assert.equal(reqLog.response_body, undefined);
   });
 
   it("request headers are logged correctly on local error", async () => {

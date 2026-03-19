@@ -76,7 +76,7 @@ export function abortUpstream(req, upstreamReq) {
  * Create a request log emitter with exactly-once guard.
  * @param {object} ctx
  * @param {import("node:http").IncomingMessage} ctx.req
- * @param {Buffer[]} ctx.requestChunks - sidecar-captured body chunks
+ * @param {Buffer[]} [ctx.requestChunks] - sidecar-captured body chunks (omit to skip request_body)
  * @param {number} ctx.startTime - Date.now() at request start
  * @returns {(status: number, responseHeaders?: Record<string, string>) => void}
  */
@@ -91,8 +91,6 @@ export function createRequestLogEmitter({ req, requestChunks, startTime }) {
     const finalize = () => {
       if (finalized) return;
       finalized = true;
-      const requestBody = Buffer.concat(requestChunks).toString("utf-8");
-      requestChunks.length = 0;
       const entry = {
         timestamp: new Date().toISOString(),
         level: "INFO",
@@ -102,17 +100,26 @@ export function createRequestLogEmitter({ req, requestChunks, startTime }) {
         status,
         duration_ms: Date.now() - startTime,
         request_headers: req.headers,
-        request_body: requestBody,
       };
+      if (requestChunks) {
+        entry.request_body = Buffer.concat(requestChunks).toString("utf-8");
+        requestChunks.length = 0;
+      }
       if (responseHeaders) entry.response_headers = responseHeaders;
       process.stdout.write(`${JSON.stringify(entry)}\n`);
     };
 
-    if (req.readableEnded || req.destroyed) {
-      finalize();
-    } else {
+    if (requestChunks && !req.readableEnded && !req.destroyed) {
       req.on("end", finalize);
       req.on("error", () => finalize());
+    } else {
+      finalize();
+    }
+
+    if (!req.readableEnded && !req.destroyed) {
+      if (!requestChunks) {
+        req.on("error", () => {});
+      }
       req.resume();
     }
   };
@@ -187,32 +194,8 @@ export function startServer({ port, host }) {
       res.writeHead(statusCode, headers);
       res.end(body);
 
-      const requestChunks = [];
-      let localLogEmitted = false;
-
-      const emitLocalLog = () => {
-        if (localLogEmitted) return;
-        localLogEmitted = true;
-        const requestBody = Buffer.concat(requestChunks).toString("utf-8");
-        requestChunks.length = 0;
-        process.stdout.write(
-          `${JSON.stringify({
-            timestamp: new Date().toISOString(),
-            level: "INFO",
-            event: "request",
-            method: req.method,
-            url: req.url,
-            status: statusCode,
-            duration_ms: Date.now() - startTime,
-            request_headers: req.headers,
-            request_body: requestBody,
-          })}\n`,
-        );
-      };
-
-      req.on("data", (chunk) => requestChunks.push(chunk));
-      req.on("error", emitLocalLog);
-      req.on("end", emitLocalLog);
+      const emitRequestLog = createRequestLogEmitter({ req, startTime });
+      emitRequestLog(statusCode);
       return;
     }
 
