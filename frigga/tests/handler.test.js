@@ -77,14 +77,14 @@ describe("handleRequest — error response format", () => {
 });
 
 describe("handleRequest — shutdown flag", () => {
-  it("sets Connection: close when shutting down", () => {
+  it("sets connection: close when shutting down", () => {
     const res = handleRequest({ method: "GET", url: "/v1/messages" }, true);
-    assert.equal(res.headers["Connection"], "close");
+    assert.equal(res.headers["connection"], "close");
   });
 
-  it("does not set Connection: close when not shutting down", () => {
+  it("does not set connection: close when not shutting down", () => {
     const res = handleRequest({ method: "GET", url: "/v1/messages" }, false);
-    assert.equal(res.headers["Connection"], undefined);
+    assert.equal(res.headers["connection"], undefined);
   });
 });
 

@@ -177,10 +177,10 @@ export function handleRequest({ method, url }, isShuttingDown) {
 
 /**
  * Start the HTTP proxy server.
- * @param {{ port: number, host: string }} config
+ * @param {{ port: number, host: string, logBody: boolean }} config
  * @returns {Promise<http.Server>}
  */
-export function startServer({ port, host }) {
+export function startServer({ port, host, logBody }) {
   let isShuttingDown = false;
   let forceTimer;
 
@@ -207,10 +207,12 @@ export function startServer({ port, host }) {
     // eslint-disable-next-line prefer-const -- assigned after event handlers to eliminate race conditions (RFC-004 §4.2.7)
     let upstreamReq;
     let upstreamResponseReceived = false;
-    const requestChunks = [];
+    const requestChunks = logBody ? [] : undefined;
 
     // Sidecar: capture request body for audit logging
-    req.on("data", (chunk) => requestChunks.push(chunk));
+    if (requestChunks) {
+      req.on("data", (chunk) => requestChunks.push(chunk));
+    }
 
     // Create request log emitter
     const emitRequestLog = createRequestLogEmitter({

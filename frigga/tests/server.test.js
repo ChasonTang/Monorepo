@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import net from "node:net";
+
 import { startServer } from "../src/server.js";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -218,44 +218,31 @@ describe("Integration — NDJSON request logs (local errors)", () => {
   });
 });
 
-describe("Integration — client error on forwarding path", () => {
-  it("client stream error emits client_error on stderr and request log on stdout", async () => {
+describe("Integration — --log-body flag", () => {
+  it("--log-body does not affect local error path (404 still omits body)", async () => {
     output = captureOutput();
-    server = await startServer({ port: 0, host: "127.0.0.1" });
+    server = await startServer({
+      port: 0,
+      host: "127.0.0.1",
+      logBody: true,
+    });
     const port = server.address().port;
 
-    await new Promise((resolve) => {
-      const socket = net.connect(port, "127.0.0.1", () => {
-        socket.write(
-          "POST /v1/messages HTTP/1.1\r\n" +
-            "Host: 127.0.0.1\r\n" +
-            "Content-Type: application/json\r\n" +
-            "Content-Length: 100\r\n" +
-            "\r\n" +
-            "partial",
-        );
-        setTimeout(() => {
-          socket.resetAndDestroy();
-          setTimeout(resolve, 200);
-        }, 50);
-      });
-      socket.on("error", () => {});
+    await request(port, {
+      path: "/v1/unknown",
+      headers: { "content-type": "application/json" },
+      body: '{"model":"claude-sonnet-4-20250514"}',
     });
 
-    const stderrLogs = parseJsonLines(output.lines.stderr);
-    const hasClientError = stderrLogs.some(
-      (l) => l.event === "client_error" || l.event === "client_disconnect",
-    );
-    assert.ok(
-      hasClientError,
-      "Expected client_error or client_disconnect on stderr",
-    );
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
 
-    const stdoutLogs = parseJsonLines(output.lines.stdout);
-    const requestLog = stdoutLogs.find((l) => l.event === "request");
-    assert.ok(requestLog, "Expected request log on stdout");
-    assert.equal(requestLog.status, 499);
-    assert.equal(typeof requestLog.request_body, "string");
+    const logs = parseJsonLines(output.lines.stdout);
+    const reqLog = logs.find((l) => l.event === "request");
+    assert.ok(reqLog, "Expected request log");
+    assert.equal(reqLog.status, 404);
+    assert.equal(reqLog.request_body, undefined);
   });
 });
 

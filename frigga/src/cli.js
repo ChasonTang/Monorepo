@@ -26,18 +26,19 @@ export function parseArgs(argv) {
  */
 export function printUsage() {
   process.stderr.write(
-    "Usage: node src/index.js [--port=<port>] [--host=<host>]\n" +
+    "Usage: node src/index.js [--port=<port>] [--host=<host>] [--log-body]\n" +
       "\n" +
       "Options:\n" +
       "  --port      HTTP listen port (default: 3000)\n" +
-      "  --host      HTTP listen address (default: 127.0.0.1)\n",
+      "  --host      HTTP listen address (default: 127.0.0.1)\n" +
+      "  --log-body  Include request body in NDJSON logs (default: off)\n",
   );
 }
 
 /**
  * Validate and extract arguments with defaults.
  * @param {Record<string, string | true>} args
- * @returns {{ port: number, host: string }}
+ * @returns {{ port: number, host: string, logBody: boolean }}
  */
 export function resolveArgs(args) {
   const portStr = args["port"];
@@ -56,5 +57,7 @@ export function resolveArgs(args) {
   const host =
     args["host"] && args["host"] !== true ? args["host"] : DEFAULT_HOST;
 
-  return { port, host };
+  const logBody = args["log-body"] === true;
+
+  return { port, host, logBody };
 }
