@@ -136,7 +136,7 @@ export function handleRequest({ method, url }, isShuttingDown) {
 
   const responseHeaders = { "Content-Type": "application/json" };
   if (isShuttingDown) {
-    responseHeaders["Connection"] = "close";
+    responseHeaders["connection"] = "close";
   }
 
   // Route matching
