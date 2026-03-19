@@ -36,23 +36,24 @@ The change touches two components: the `createRequestLogEmitter` factory functio
 
 ```
 Before:
-┌─────────────────┐       ┌────────────────────────────────┐
-│ Local error path │──────→│ Inline logging (27 lines)      │
-│ (404 / 405)     │       │ • collects body → often partial │
-└─────────────────┘       └────────────────────────────────┘
-┌─────────────────┐       ┌────────────────────────────────┐
+┌──────────────────┐       ┌─────────────────────────────────┐
+│ Local error path │──────→│ Inline logging (27 lines)       │
+│ (404 / 405)      │       │ • collects body → often partial │
+└──────────────────┘       └─────────────────────────────────┘
+┌──────────────────┐       ┌────────────────────────────────┐
 │ Forwarding path  │──────→│ createRequestLogEmitter()      │
-│ (upstream)       │       │ • collects body → complete      │
-└─────────────────┘       └────────────────────────────────┘
+│ (upstream)       │       │ • collects body → complete     │
+└──────────────────┘       └────────────────────────────────┘
 
 After:
-┌─────────────────┐       ┌────────────────────────────────┐
-│ Local error path │──┐   │ createRequestLogEmitter()      │
-│ (404 / 405)     │  ├──→│ • requestChunks omitted → no   │
-└─────────────────┘  │   │   body, immediate finalization  │
-┌─────────────────┐  │   │ • requestChunks provided →     │
-│ Forwarding path  │──┘   │   body collected, deferred     │
+┌──────────────────┐       ┌────────────────────────────────┐
+│ Local error path │──┐    │ createRequestLogEmitter()      │
+│ (404 / 405)      │  ├───→│ • requestChunks omitted → no   │
+└──────────────────┘  │    │   body, immediate finalization │
+┌──────────────────┐  │    │ • requestChunks provided →     │
+│ Forwarding path  │──┘    │   body collected, deferred     │
 │ (upstream)       │       └────────────────────────────────┘
+└──────────────────┘
 ```
 
 ### 4.2 Detailed Design
