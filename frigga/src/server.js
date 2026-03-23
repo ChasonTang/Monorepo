@@ -23,6 +23,7 @@ const RESPONSE_HEADER_FORWARD = new Set([
   "x-request-id",
   "request-id",
   "retry-after",
+  "x-should-retry",
   "anthropic-organization-id",
 ]);
 
