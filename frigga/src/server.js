@@ -20,7 +20,6 @@ const RESPONSE_HEADER_FORWARD = new Set([
   "content-type",
   "content-length",
   "content-encoding",
-  "x-request-id",
   "request-id",
   "retry-after",
   "x-should-retry",
