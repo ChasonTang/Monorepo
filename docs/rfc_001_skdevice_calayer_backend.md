@@ -1,6 +1,6 @@
 # RFC-001: SkDevice CALayer Rendering Backend for iOS
 
-**Version:** 1.2
+**Version:** 1.4
 **Author:** Chason Tang
 **Date:** 2026-03-20
 **Status:** Proposed
@@ -92,7 +92,7 @@ SkDevice
 
 We extend `SkClipStackDevice` (the same base used by `SkSVGDevice`, `SkPDFDevice`, and `SkXPSDevice`) because:
 
-1. **Clip stack management.** `SkClipStackDevice` provides a fully implemented `SkClipStack` with `pushClipStack()`, `popClipStack()`, `clipRect()`, `clipRRect()`, `clipPath()`, `clipRegion()`, `replaceClip()`, and all `isClip*()` queries. We inherit all of this without writing a single line of clip code.
+1. **Clip state tracking.** `SkClipStackDevice` provides a fully implemented `SkClipStack` with `pushClipStack()`, `popClipStack()`, `clipRect()`, `clipRRect()`, `clipPath()`, `clipRegion()`, `replaceClip()`, and all `isClip*()` queries. We inherit clip state tracking without writing a single line of clip code. Note: in Phase 2 the device only *tracks* clip state — it does **not** apply clips to drawing output. The `SkClipStack` is maintained for state queries (e.g., `devClipBounds()`, `isClipEmpty()`) and for `SkCanvas`-level quick-reject optimization, but sublayers are emitted unclipped. Clip-to-mask translation (converting clip state into `CAShapeLayer` masks) is deferred to a future phase (see Section 9).
 2. **Precedent.** All document-oriented (non-pixel) backends in Skia use this base class. The CALayer backend is conceptually similar — it produces a structured output (layer tree) rather than pixels.
 3. **Forward compatibility.** When we later implement clip-aware rendering (e.g., applying a `CAShapeLayer` mask for clip paths), the clip stack is already available via `this->cs()`.
 
@@ -108,23 +108,16 @@ We extend `SkClipStackDevice` (the same base used by `SkSVGDevice`, `SkPDFDevice
 
 #include "src/core/SkClipStackDevice.h"
 
-#ifdef __OBJC__
-#import <QuartzCore/QuartzCore.h>
-#endif
-
-// Forward-declare CALayer for C++ translation units
-#ifdef __OBJC__
-@class CALayer;
-@class CAShapeLayer;
-#else
-using CALayer = void;
-using CAShapeLayer = void;
-#endif
+// Pure C++ header — no Objective-C types or conditional compilation.
+// CALayer interaction goes through the pure C bridge (SkCALayerBridge.h),
+// which is implemented in SkCALayerBridge.m (pure Objective-C).
+// This header is included only from .cpp files.
 
 class SkCALayerDevice final : public SkClipStackDevice {
 public:
     // Factory method — returns nullptr if the platform is unsupported.
-    // rootLayer: caller-owned CALayer to which sublayers are added during drawing.
+    // rootLayer: caller-owned CALayer* passed as void*.
+    //   Objective-C callers: pass (__bridge void*)caLayer.
     // The device retains rootLayer for safety (CFRetain); the caller remains the
     // primary owner and can use the layer after the device is destroyed.
     //
@@ -132,7 +125,7 @@ public:
     // (kUnknown_SkColorType, kUnknown_SkAlphaType — matching the SkSVGDevice pattern
     // for non-pixel backends) and default SkSurfaceProps to initialize the
     // SkClipStackDevice base class.
-    static sk_sp<SkDevice> Make(const SkISize& size, CALayer* rootLayer);
+    static sk_sp<SkDevice> Make(const SkISize& size, void* rootLayer);
 
     // ---- SkDevice drawing overrides ----
     void drawPaint(const SkPaint& paint) override;
@@ -148,21 +141,21 @@ public:
     void drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) override;
 
 private:
-    SkCALayerDevice(const SkImageInfo& info, const SkSurfaceProps& props, CALayer* rootLayer);
+    SkCALayerDevice(const SkImageInfo& info, const SkSurfaceProps& props, void* rootLayer);
     ~SkCALayerDevice() override;
 
     void onDrawGlyphRunList(SkCanvas*, const sktext::GlyphRunList&,
                             const SkPaint& paint) override;
 
-    // Helpers
-    void applyPaintToShapeLayer(CAShapeLayer* layer, const SkPaint& paint);
+    // applyPaintToShapeLayer() is a file-static helper in SkCALayerDevice.cpp.
+    // It takes void* (opaque layer handle) and calls C bridge functions.
+    // Not exposed in this header.
 
     // The root layer to which sublayers are added during drawing.
-    // Stored as CFTypeRef for C++ header compatibility; the constructor
-    // retains via CFRetain, the destructor releases via CFRelease.
-    // Caller owns the layer and passes it to Make(); the device holds
-    // a retained reference for its lifetime.
-    void* fRootLayer;   // CALayer* (bridged)
+    // Stored as void* (opaque pointer). The constructor calls SkCALayer_Retain(),
+    // the destructor calls SkCALayer_Release(). The C bridge implementation
+    // (SkCALayerBridge.m) casts to CALayer* internally.
+    void* fRootLayer;
 };
 
 #endif // SkCALayerDevice_DEFINED
@@ -172,16 +165,189 @@ private:
 
 | Category | Functions | Handling |
 |---|---|---|
-| Clip management | `pushClipStack`, `popClipStack`, `clipRect`, `clipRRect`, `clipPath`, `clipRegion`, `replaceClip`, `isClip*`, `devClipBounds`, `onClipShader` | Fully implemented by `SkClipStackDevice` base class |
+| Clip management | `pushClipStack`, `popClipStack`, `clipRect`, `clipRRect`, `clipPath`, `clipRegion`, `replaceClip`, `isClip*`, `devClipBounds`, `onClipShader` | **State tracking only** — implemented by `SkClipStackDevice` base class. Clip state is maintained for queries and `SkCanvas`-level quick-reject, but **not applied to drawing output**: sublayers are emitted unclipped. Clip-to-mask translation is deferred (see Section 9) |
 | Surface creation | `makeSurface(const SkImageInfo&, const SkSurfaceProps&)` | Default returns `nullptr` — acceptable; the backend produces a layer tree, not pixel surfaces |
-| Save-layer device | `createDevice(const CreateInfo&, const SkPaint*)` | Default returns `nullptr` — `SkCanvas` falls back to `SkNoPixelsDevice`, silently discarding all draw calls within the `saveLayer()` scope. `saveLayer()` compositing is not supported in Phase 2 (see Future Work) |
-| Image-filter support | `snapSpecial`, `makeSpecial`, `drawSpecial`, `drawCoverageMask` | Defaults (`nullptr` / no-op) — image filters on the CALayer device are deferred |
+| Save-layer device | `createDevice(const CreateInfo&, const SkPaint*)` | Default returns `nullptr` — **content loss**: `SkCanvas` falls back to `SkNoPixelsDevice`, silently discarding all draw calls within the `saveLayer()` scope. This also affects draw calls whose paint carries image filters or mask filters, since `SkCanvas` internally uses `saveLayer()` to process them (see Image-filter support below). `saveLayer()` compositing is not supported in Phase 2 (see Future Work) |
+| Image-filter support | `snapSpecial`, `makeSpecial`, `drawSpecial`, `drawCoverageMask` | Defaults (`nullptr` / no-op) — **content loss**: when `SkCanvas` encounters a paint with an image filter, it creates a save layer via `createDevice()`, which returns `nullptr` and falls back to `SkNoPixelsDevice`. The draw call is routed to `SkNoPixelsDevice` (a no-op) and never reaches `SkCALayerDevice` — the content is silently lost. Callers must not use image filters on paints in Phase 2 |
 | Layer compositing | `drawDevice(SkDevice*, ...)` | Default — not needed until `createDevice` is implemented |
 | Pixel read-back | `onReadPixels`, `onWritePixels`, `onPeekPixels`, `onAccessPixels` | Default `false` — the backend produces layers, not pixels |
 
 These defaults are acceptable because the CALayer backend is a non-pixel, document-oriented backend (like SVG/PDF). Functions that require pixel access or save-layer compositing will be overridden in future phases as needed.
 
-#### 4.2.3 drawRect Implementation Strategy
+#### 4.2.3 Pure C Bridge API (`SkCALayerBridge.h` / `SkCALayerBridge.m`)
+
+The C++ device implementation and the Objective-C Core Animation code never coexist in the same translation unit. Instead, they communicate through a **pure C header** (`SkCALayerBridge.h`) with opaque `void*` handles and `extern "C"` linkage. The bridge header is included from both `.cpp` (C++) and `.m` (Objective-C) files — it contains no C++ classes, no `@class` declarations, and no ARC annotations.
+
+**File:** `src/calayer/SkCALayerBridge.h`
+
+```c
+/* SkCALayerBridge.h — Pure C interface to Core Animation.
+ * Included from both .cpp (C++) and .m (Objective-C).
+ * No C++ classes. No @class. No ARC annotations. */
+
+#ifndef SkCALayerBridge_DEFINED
+#define SkCALayerBridge_DEFINED
+
+#include <CoreGraphics/CoreGraphics.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* --- Layer lifecycle --- */
+void* SkCALayer_CreateShapeLayer(void);          /* +1 retained CAShapeLayer */
+void  SkCALayer_AddSublayer(void* parent, void* child);
+void  SkCALayer_Retain(void* layer);             /* CFRetain */
+void  SkCALayer_Release(void* layer);            /* CFRelease */
+
+/* --- CAShapeLayer properties --- */
+void SkCAShapeLayer_SetPath(void* layer, CGPathRef path);
+void SkCAShapeLayer_SetAnchorPoint(void* layer, CGFloat x, CGFloat y);
+void SkCAShapeLayer_SetPosition(void* layer, CGFloat x, CGFloat y);
+void SkCAShapeLayer_SetAffineTransform(void* layer, CGAffineTransform t);
+void SkCAShapeLayer_SetFillColor(void* layer, CGColorRef color);    /* NULL to clear */
+void SkCAShapeLayer_SetStrokeColor(void* layer, CGColorRef color);  /* NULL to clear */
+void SkCAShapeLayer_SetLineWidth(void* layer, CGFloat width);
+void SkCAShapeLayer_SetLineCap(void* layer, int cap);               /* 0=Butt 1=Round 2=Square */
+void SkCAShapeLayer_SetLineJoin(void* layer, int join);             /* 0=Miter 1=Round 2=Bevel */
+void SkCAShapeLayer_SetMiterLimit(void* layer, CGFloat limit);
+
+/* --- Queries (for tests) --- */
+int       SkCALayer_GetSublayerCount(void* layer);
+void*     SkCALayer_GetSublayerAtIndex(void* layer, int index);
+CGPathRef SkCAShapeLayer_CopyPath(void* layer);                     /* +1 retained */
+CGColorRef SkCAShapeLayer_GetFillColor(void* layer);                /* not retained */
+CGColorRef SkCAShapeLayer_GetStrokeColor(void* layer);              /* not retained */
+CGFloat   SkCAShapeLayer_GetLineWidth(void* layer);
+CGFloat   SkCAShapeLayer_GetMiterLimit(void* layer);
+CGAffineTransform SkCAShapeLayer_GetAffineTransform(void* layer);
+CGFloat   SkCALayer_GetOpacity(void* layer);
+
+/* --- Debug --- */
+bool SkCALayer_IsMainThread(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SkCALayerBridge_DEFINED */
+```
+
+**Memory ownership convention.** Functions named `Create` or `Copy` return a +1 retained reference — the caller must call `SkCALayer_Release()` when done. `SkCALayer_AddSublayer()` causes the parent layer to retain the child (per Core Animation semantics), so the caller should release its own reference after adding. Query functions (e.g., `SkCAShapeLayer_GetFillColor`) return unretained references.
+
+**File:** `src/calayer/SkCALayerBridge.m` (compiled as **pure Objective-C** with `-fobjc-arc`)
+
+```objc
+/* SkCALayerBridge.m — pure Objective-C, no C++ */
+#import <QuartzCore/QuartzCore.h>
+#import "SkCALayerBridge.h"
+
+/* --- Lifecycle --- */
+void* SkCALayer_CreateShapeLayer(void) {
+    CAShapeLayer* layer = [CAShapeLayer layer];
+    return (__bridge_retained void*)layer;       /* +1 to caller */
+}
+
+void SkCALayer_AddSublayer(void* parent, void* child) {
+    [(__bridge CALayer*)parent addSublayer:(__bridge CALayer*)child];
+}
+
+void SkCALayer_Retain(void* layer)  { CFRetain(layer); }
+void SkCALayer_Release(void* layer) { CFRelease(layer); }
+
+/* --- Property setters --- */
+void SkCAShapeLayer_SetPath(void* layer, CGPathRef path) {
+    ((__bridge CAShapeLayer*)layer).path = path;
+}
+
+void SkCAShapeLayer_SetAnchorPoint(void* layer, CGFloat x, CGFloat y) {
+    ((__bridge CALayer*)layer).anchorPoint = CGPointMake(x, y);
+}
+
+void SkCAShapeLayer_SetPosition(void* layer, CGFloat x, CGFloat y) {
+    ((__bridge CALayer*)layer).position = CGPointMake(x, y);
+}
+
+void SkCAShapeLayer_SetAffineTransform(void* layer, CGAffineTransform t) {
+    ((__bridge CALayer*)layer).affineTransform = t;
+}
+
+void SkCAShapeLayer_SetFillColor(void* layer, CGColorRef color) {
+    ((__bridge CAShapeLayer*)layer).fillColor = color;
+}
+
+void SkCAShapeLayer_SetStrokeColor(void* layer, CGColorRef color) {
+    ((__bridge CAShapeLayer*)layer).strokeColor = color;
+}
+
+void SkCAShapeLayer_SetLineWidth(void* layer, CGFloat width) {
+    ((__bridge CAShapeLayer*)layer).lineWidth = width;
+}
+
+static NSString* const kCapMap[] = {
+    kCALineCapButt, kCALineCapRound, kCALineCapSquare
+};
+void SkCAShapeLayer_SetLineCap(void* layer, int cap) {
+    ((__bridge CAShapeLayer*)layer).lineCap = kCapMap[cap];
+}
+
+static NSString* const kJoinMap[] = {
+    kCALineJoinMiter, kCALineJoinRound, kCALineJoinBevel
+};
+void SkCAShapeLayer_SetLineJoin(void* layer, int join) {
+    ((__bridge CAShapeLayer*)layer).lineJoin = kJoinMap[join];
+}
+
+void SkCAShapeLayer_SetMiterLimit(void* layer, CGFloat limit) {
+    ((__bridge CAShapeLayer*)layer).miterLimit = limit;
+}
+
+/* --- Queries --- */
+int SkCALayer_GetSublayerCount(void* layer) {
+    return (int)((__bridge CALayer*)layer).sublayers.count;
+}
+
+void* SkCALayer_GetSublayerAtIndex(void* layer, int index) {
+    return (__bridge void*)((__bridge CALayer*)layer).sublayers[index];
+}
+
+CGPathRef SkCAShapeLayer_CopyPath(void* layer) {
+    return CGPathRetain(((__bridge CAShapeLayer*)layer).path);
+}
+
+CGColorRef SkCAShapeLayer_GetFillColor(void* layer) {
+    return ((__bridge CAShapeLayer*)layer).fillColor;
+}
+
+CGColorRef SkCAShapeLayer_GetStrokeColor(void* layer) {
+    return ((__bridge CAShapeLayer*)layer).strokeColor;
+}
+
+CGFloat SkCAShapeLayer_GetLineWidth(void* layer) {
+    return ((__bridge CAShapeLayer*)layer).lineWidth;
+}
+
+CGFloat SkCAShapeLayer_GetMiterLimit(void* layer) {
+    return ((__bridge CAShapeLayer*)layer).miterLimit;
+}
+
+CGAffineTransform SkCAShapeLayer_GetAffineTransform(void* layer) {
+    return ((__bridge CALayer*)layer).affineTransform;
+}
+
+CGFloat SkCALayer_GetOpacity(void* layer) {
+    return ((__bridge CALayer*)layer).opacity;
+}
+
+bool SkCALayer_IsMainThread(void) {
+    return [NSThread isMainThread];
+}
+```
+
+Note: `__bridge_retained` in `CreateShapeLayer` transfers ownership from ARC to the caller — ARC will not release the object, and the caller must call `SkCALayer_Release()` (which calls `CFRelease`). The `__bridge` casts in all other functions are zero-cost casts that do not transfer ownership — ARC continues to manage the object's lifetime within the function scope, and the root layer's `sublayers` array retains child layers as needed.
+
+#### 4.2.4 drawRect Implementation Strategy
 
 `drawRect` is the simplest draw hook to implement because it maps directly to a `CAShapeLayer` with a rectangular `CGPath`.
 
@@ -192,18 +358,24 @@ SkCanvas::drawRect(r, paint)
   → r.makeSorted()                         // normalize
   → internalQuickReject(r, paint)          // early-out if clipped away
   → aboutToDraw(paint, &r) or
-    attemptBlurredRRectDraw(...)           // handle image/mask filters
-  → topDevice()->drawRect(r, layer.paint()) // ← we receive this call
+    attemptBlurredRRectDraw(...)           // image/mask filter handling (see warning below)
+  → topDevice()->drawRect(r, layer.paint()) // ← we receive this call (if no saveLayer was created)
 ```
 
-By the time `SkCALayerDevice::drawRect()` is called:
+**Warning — image filters and mask filters cause content loss in Phase 2.** If the original paint carries an image filter, `SkCanvas::aboutToDraw()` (via `AutoLayerForImageFilter`) calls `internalSaveLayer()`, which calls `createDevice()` on our device. Since our `createDevice()` returns `nullptr`, Skia creates an `SkNoPixelsDevice` as the save-layer target. The draw call is then dispatched to `SkNoPixelsDevice::drawRect()` (a no-op), **not** to `SkCALayerDevice::drawRect()`. The content is **silently lost** — our device never sees the draw call. The same applies to mask filters that trigger a save layer internally. Callers must ensure that paints passed to the canvas do not carry image filters or mask filters in Phase 2.
+
+By the time `SkCALayerDevice::drawRect()` is called (for filter-free paints):
 - The rect is sorted (non-inverted).
-- The paint has had image filters stripped (they were applied as a layer).
 - The current transform is available via two accessors: `this->localToDevice()` returns `const SkMatrix&` (the 3×3 affine matrix, sufficient for 2D transforms), while `this->localToDevice44()` returns `const SkM44&` (the full 4×4 matrix, needed only if 3D/perspective information is required). Since this backend only needs the 2D affine portion, `localToDevice()` is used directly. If the matrix contains a perspective component (`hasPerspective()` returns true), it cannot be represented as a `CGAffineTransform`; the draw call is skipped with a debug warning. Rather than pre-transforming geometry with `mapRect()` — which collapses rotation/skew into an axis-aligned bounding box — the implementation keeps the path in local coordinates and applies the affine portion as the layer's `affineTransform`.
 
-**Implementation (`src/calayer/SkCALayerDevice.mm`):**
+**Implementation (`src/calayer/SkCALayerDevice.cpp`) — pure C++ calling the C bridge:**
 
-```objc
+```cpp
+// SkCALayerDevice.cpp — pure C++, no Objective-C syntax
+#include "src/calayer/SkCALayerDevice.h"
+#include "src/calayer/SkCALayerBridge.h"
+#include "src/calayer/SkCALayerConvert.h"
+
 void SkCALayerDevice::drawRect(const SkRect& r, const SkPaint& paint) {
     // 1. Get the current 3×3 transform matrix.
     //    localToDevice() returns const SkMatrix& (3×3 affine).
@@ -215,30 +387,33 @@ void SkCALayerDevice::drawRect(const SkRect& r, const SkPaint& paint) {
         return;
     }
 
-    // 2. Create CAShapeLayer with path in LOCAL coordinates
-    CAShapeLayer* shapeLayer = [CAShapeLayer layer];
+    // 2. Create CAShapeLayer via C bridge (+1 retained)
+    void* shapeLayer = SkCALayer_CreateShapeLayer();
+
+    // 3. Set path in LOCAL coordinates
     CGRect cgRect = CGRectMake(r.fLeft, r.fTop, r.width(), r.height());
     CGPathRef path = CGPathCreateWithRect(cgRect, NULL);
-    shapeLayer.path = path;
-    CGPathRelease(path);  // shapeLayer.path is @property(copy); release our ref
+    SkCAShapeLayer_SetPath(shapeLayer, path);
+    CGPathRelease(path);
 
-    // 3. Configure anchorPoint/position so the layer's coordinate origin aligns
+    // 4. Configure anchorPoint/position so the layer's coordinate origin aligns
     //    with the root layer's origin (see "CALayer coordinate setup" below).
-    shapeLayer.anchorPoint = CGPointZero;   // default (0.5, 0.5) would offset the shape
-    shapeLayer.position = CGPointZero;
+    SkCAShapeLayer_SetAnchorPoint(shapeLayer, 0, 0);  // default (0.5, 0.5) would offset
+    SkCAShapeLayer_SetPosition(shapeLayer, 0, 0);
 
-    // 4. Apply the current local-to-device transform as a CALayer affine transform.
+    // 5. Apply the current local-to-device transform as a CALayer affine transform.
     //    Using affineTransform (not mapRect) preserves rotation and skew correctly.
-    shapeLayer.affineTransform = CGAffineTransformMake(
+    SkCAShapeLayer_SetAffineTransform(shapeLayer, CGAffineTransformMake(
         ctm.getScaleX(), ctm.getSkewY(),   // a, b
         ctm.getSkewX(),  ctm.getScaleY(),  // c, d
-        ctm.getTranslateX(), ctm.getTranslateY());  // tx, ty
+        ctm.getTranslateX(), ctm.getTranslateY()));  // tx, ty
 
-    // 5. Apply paint properties (see applyPaintToShapeLayer below)
-    this->applyPaintToShapeLayer(shapeLayer, paint);
+    // 6. Apply paint properties (see applyPaintToShapeLayer below)
+    applyPaintToShapeLayer(shapeLayer, paint);
 
-    // 6. Add to root layer
-    [(__bridge CALayer*)fRootLayer addSublayer:shapeLayer];
+    // 7. Add to root layer, then release our ref (+1 from Create is balanced)
+    SkCALayer_AddSublayer(fRootLayer, shapeLayer);
+    SkCALayer_Release(shapeLayer);
 }
 ```
 
@@ -264,63 +439,53 @@ Note on alpha: `SkPaint::getColor()` already encodes the alpha channel. The `CGC
 
 Properties not mapped in this phase (shader, blend mode, mask filter, path effect) are silently ignored.
 
-**`applyPaintToShapeLayer` implementation (`SkCALayerDevice.mm`):**
+**`applyPaintToShapeLayer` — file-static helper in `SkCALayerDevice.cpp` (pure C++):**
 
-```objc
-void SkCALayerDevice::applyPaintToShapeLayer(CAShapeLayer* layer,
-                                              const SkPaint& paint) {
+```cpp
+// In SkCALayerDevice.cpp — pure C++, calls C bridge functions
+static void applyPaintToShapeLayer(void* shapeLayer, const SkPaint& paint) {
     // Convert SkColor4f to CGColor in the sRGB color space.
-    // CGColorCreate requires an explicit CGColorSpaceRef — omitting it is a
-    // compile error, not a default-to-sRGB convenience.
+    // SkCALayerCreateCGColor is a pure C++ helper from SkCALayerConvert.h.
     SkColor4f c = paint.getColor4f();
-    CGFloat components[] = {c.fR, c.fG, c.fB, c.fA};
-    CGColorSpaceRef srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-    CGColorRef cgColor = CGColorCreate(srgb, components);
-    CGColorSpaceRelease(srgb);
+    CGColorRef cgColor = SkCALayerCreateCGColor(c);
 
-    // Map SkPaint::Style to fillColor / strokeColor.
+    // Map SkPaint::Style to fillColor / strokeColor via C bridge.
     // The three modes are mutually exclusive with respect to which color
     // properties are set vs. cleared.
     switch (paint.getStyle()) {
         case SkPaint::kFill_Style:
-            layer.fillColor   = cgColor;
-            layer.strokeColor = nil;      // explicitly clear stroke
+            SkCAShapeLayer_SetFillColor(shapeLayer, cgColor);
+            SkCAShapeLayer_SetStrokeColor(shapeLayer, NULL);   // clear stroke
             break;
         case SkPaint::kStroke_Style:
-            layer.fillColor   = nil;      // explicitly clear fill
-            layer.strokeColor = cgColor;
+            SkCAShapeLayer_SetFillColor(shapeLayer, NULL);     // clear fill
+            SkCAShapeLayer_SetStrokeColor(shapeLayer, cgColor);
             break;
         case SkPaint::kStrokeAndFill_Style:
-            layer.fillColor   = cgColor;
-            layer.strokeColor = cgColor;  // same color for both
+            SkCAShapeLayer_SetFillColor(shapeLayer, cgColor);
+            SkCAShapeLayer_SetStrokeColor(shapeLayer, cgColor);
             break;
     }
     CGColorRelease(cgColor);
 
-    // Stroke geometry properties
-    layer.lineWidth  = paint.getStrokeWidth();
-    layer.miterLimit = paint.getStrokeMiter();
+    // Stroke geometry properties via C bridge
+    SkCAShapeLayer_SetLineWidth(shapeLayer, paint.getStrokeWidth());
+    SkCAShapeLayer_SetMiterLimit(shapeLayer, paint.getStrokeMiter());
 
-    switch (paint.getStrokeCap()) {
-        case SkPaint::kButt_Cap:   layer.lineCap  = kCALineCapButt;   break;
-        case SkPaint::kRound_Cap:  layer.lineCap  = kCALineCapRound;  break;
-        case SkPaint::kSquare_Cap: layer.lineCap  = kCALineCapSquare; break;
-    }
-    switch (paint.getStrokeJoin()) {
-        case SkPaint::kMiter_Join: layer.lineJoin = kCALineJoinMiter; break;
-        case SkPaint::kRound_Join: layer.lineJoin = kCALineJoinRound; break;
-        case SkPaint::kBevel_Join: layer.lineJoin = kCALineJoinBevel; break;
-    }
+    // Cap: kButt=0, kRound=1, kSquare=2 — matches SkPaint enum order
+    SkCAShapeLayer_SetLineCap(shapeLayer, static_cast<int>(paint.getStrokeCap()));
+    // Join: kMiter=0, kRound=1, kBevel=2 — matches SkPaint enum order
+    SkCAShapeLayer_SetLineJoin(shapeLayer, static_cast<int>(paint.getStrokeJoin()));
 }
 ```
 
-Note: `CGColorRef` is a Core Foundation type and is **not** managed by ARC. The explicit `CGColorCreate`/`CGColorRelease` pair is required even when compiling with `-fobjc-arc`.
+Note: `CGColorRef` is a Core Foundation type — it is managed through `CGColorCreate`/`CGColorRelease` (C functions), not by ARC. The `SkCALayerCreateCGColor()` helper in `SkCALayerConvert.h/.cpp` is pure C++ code that calls the CoreGraphics C API directly.
 
-Note on `CGColorSpaceCreateWithName(kCGColorSpaceSRGB)`: this call appears on every `applyPaintToShapeLayer` invocation. On modern iOS/macOS, the system internally caches named color spaces, so repeated calls return a cached instance rather than allocating new objects. The per-call overhead is negligible for Phase 2's target workload (tens to hundreds of layers). Caching the `CGColorSpaceRef` as a class member or static is a possible micro-optimization but is deferred as unnecessary in this phase.
+Note on `CGColorSpaceCreateWithName(kCGColorSpaceSRGB)` (called inside `SkCALayerCreateCGColor`): on modern iOS/macOS, the system internally caches named color spaces, so repeated calls return a cached instance rather than allocating new objects. The per-call overhead is negligible for Phase 2's target workload (tens to hundreds of layers). Caching the `CGColorSpaceRef` is a possible micro-optimization but is deferred as unnecessary in this phase.
 
-#### 4.2.4 No-Op Stubs for Unimplemented Methods
+#### 4.2.5 No-Op Stubs for Unimplemented Methods
 
-All other draw-method overrides are implemented as empty bodies:
+All other draw-method overrides are implemented as empty bodies in `SkCALayerDevice.cpp`:
 
 ```cpp
 void SkCALayerDevice::drawPaint(const SkPaint&) {}
@@ -343,28 +508,35 @@ Non-draw virtual functions (`makeSurface`, `createDevice`, `snapSpecial`, `onRea
 
 This ensures the device compiles and links with `SkCanvas` immediately, with no undefined-symbol errors.
 
-#### 4.2.5 File Layout
+#### 4.2.6 File Layout
 
 ```
 skia/
   include/
     calayer/
-      SkCALayerCanvas.h          ← public factory API (pure C++ / ObjC compatible)
+      SkCALayerCanvas.h          ← public factory API (pure C++)
   src/
     calayer/
       SkCALayerDevice.h          ← internal header (pure C++, uses void* for CALayer)
-      SkCALayerDevice.mm         ← ObjC++ device implementation (compiled with -fobjc-arc):
-                                    CALayer/CAShapeLayer creation and property setting
+      SkCALayerDevice.cpp        ← device implementation (pure C++, calls C bridge)
+      SkCALayerBridge.h          ← pure C header: extern "C" opaque API for CALayer operations
+      SkCALayerBridge.m          ← pure Objective-C implementation (compiled with -fobjc-arc)
       SkCALayerConvert.h         ← pure C++ header: CGColor creation, matrix validation
-      SkCALayerConvert.cpp       ← pure C++ implementation (links CoreGraphics, no -fobjc-arc)
+      SkCALayerConvert.cpp       ← pure C++ implementation (links CoreGraphics)
       BUILD.gn                   ← build target (GN)
   tests/
-    CALayerDeviceTest.mm         ← unit tests (Objective-C++)
+    CALayerDeviceTest.cpp        ← unit tests (pure C++, inspects layers via C bridge)
   gm/
-    calayer_rect.mm              ← GM visual tests (Objective-C++)
+    calayer_rect.cpp             ← GM visual tests (pure C++, renders via C bridge)
 ```
 
-`SkCALayerConvert.h/.cpp` contains pure C/C++ helpers that depend only on CoreGraphics C APIs (not Objective-C). This includes `CGColorCreate`-based color conversion, `SkMatrix` perspective validation, and stroke property extraction. These files are compiled as standard C++ without `-fobjc-arc`, keeping Objective-C++ compilation surface to a minimum. The `.mm` file imports these helpers and applies the converted values to `CAShapeLayer` using Objective-C message syntax (which requires ObjC++ and ARC).
+There are **no `.mm` (Objective-C++) files** in this design. The language boundary is enforced by file extension:
+
+- `.cpp` files are compiled as **pure C++**. They include `SkCALayerBridge.h` (a C header with `extern "C"` linkage) and `SkCALayerConvert.h` (a C++ header using CoreGraphics C APIs). They never see `@class`, `@selector`, or any Objective-C syntax.
+- `.m` files are compiled as **pure Objective-C** (with `-fobjc-arc`). They include `SkCALayerBridge.h` and `<QuartzCore/QuartzCore.h>`. They never see C++ classes, templates, or namespaces.
+- `.h` files are either pure C (`SkCALayerBridge.h` — uses `extern "C"`, `void*`, and C types only) or pure C++ (`SkCALayerDevice.h`, `SkCALayerConvert.h`).
+
+`SkCALayerConvert.h/.cpp` contains pure C++ helpers that depend only on CoreGraphics C APIs (not Objective-C). This includes `CGColorCreate`-based color conversion and `SkMatrix` perspective validation. `SkCALayerBridge.m` is the **only** file that uses Objective-C message syntax (`[CAShapeLayer layer]`, `layer.path = ...`) and ARC memory management.
 
 ### 4.3 Design Rationale
 
@@ -379,15 +551,15 @@ skia/
 
 Reimplementing any of this at the canvas level would be error-prone and duplicate existing code. The SkDevice approach gets all of this for free.
 
-**Objective-C++ (.mm) source files.** Core Animation APIs require Objective-C message syntax. Using `.mm` files is standard practice in Skia's Apple-platform code (see `src/ports/`, `tools/skottie_ios_app/`). The header is designed to be includable from both pure C++ (via `void*` bridging) and Objective-C++ contexts.
+**Pure C bridge (no Objective-C++).** The design strictly separates C++ and Objective-C into different translation units. There are no `.mm` (Objective-C++) files — C++ code lives in `.cpp`, Objective-C code lives in `.m`, and they communicate exclusively through a pure C header (`SkCALayerBridge.h`) with `extern "C"` linkage and `void*` opaque handles. This eliminates mixed-language translation units entirely, giving each compiler (clang C++ vs. clang ObjC) its own clean scope. The `extern "C"` + `void*` pattern follows the precedent set by Skia's `GrMTLHandle` (`typedef const void*`) in `gpu/mtl/GrMtlTypes.h` for Metal interop, and by Apple's own CoreFoundation framework (e.g., `CFStringRef`, `CFArrayRef` — all opaque `const void*` pointers behind C functions).
 
 **`CAShapeLayer` for drawRect (not `CALayer.bounds`).** A plain `CALayer` with `bounds`/`backgroundColor` could render a filled rect, but cannot handle stroked rects. `CAShapeLayer` with a `CGPath` handles both fill and stroke uniformly, and extends naturally to `drawRRect`, `drawOval`, and `drawPath` in the future.
 
-**ARC compilation (`-fobjc-arc`).** All `.mm` implementation files are compiled with Automatic Reference Counting. The header stores the root layer reference as `void*` (a `CFTypeRef`-style opaque pointer) to avoid requiring Objective-C++ compilation for every includer; the `.mm` implementation uses `__bridge` casts to interact with the ARC-managed world. Since ARC does not manage `void*` or `CFTypeRef`, the constructor explicitly calls `CFRetain` and the destructor calls `CFRelease`. Note: the existing Skia Apple-platform code in `src/ports/` and `tools/` uses a mix of MRC and ARC; the `(__bridge void*)` cast pattern is already established in Metal bridge code (e.g., `tools/skottie_ios_app/SkMetalViewBridge.mm`).
+**ARC isolation.** ARC (`-fobjc-arc`) is applied only to the `.m` bridge implementation file (`SkCALayerBridge.m`). The `.m` file uses `__bridge_retained` (for `Create` functions, transferring +1 ownership to the C caller) and `__bridge` (for property access, zero-cost cast within ARC scope). The C++ side never touches ARC — it uses `SkCALayer_Retain()`/`SkCALayer_Release()` (which call `CFRetain`/`CFRelease`) for explicit reference counting. This is simpler and safer than the ObjC++ approach, where ARC and manual `CFRetain`/`CFRelease` coexist in the same translation unit and the developer must track which variables ARC manages and which it does not.
 
-**Main-thread requirement.** All `SkCALayerDevice` drawing operations manipulate `CALayer` objects. Core Animation requires layer-tree mutations to occur on the main thread (the thread that runs the `CATransaction` implicit commit at the end of each run-loop cycle). Callers must ensure that canvas creation, drawing, and the final layer-tree handoff all happen on the main thread. This constraint is documented on the public factory (`SkCALayerCanvas::Make`) and enforced by a `NSCAssert([NSThread isMainThread], ...)` in debug builds.
+**Memory ownership convention.** Bridge functions named `Create` or `Copy` return +1 retained references — the caller must balance with `SkCALayer_Release()`. `SkCALayer_AddSublayer()` causes the parent to retain the child (per Core Animation semantics), so the caller should release its own reference after adding. This follows the Core Foundation "Create Rule" and is identical to how `CGPathCreate*`/`CGPathRelease` and `CGColorCreate`/`CGColorRelease` work.
 
-**Objective-C / C++ source separation.** The implementation splits Objective-C++ code (`.mm`, compiled with `-fobjc-arc`) from pure C++ code (`.cpp`). Core Animation layer manipulation (creating `CAShapeLayer`, setting `fillColor`, `lineCap`, etc.) requires Objective-C message syntax and lives in `.mm`. Conversion helpers that only use CoreGraphics C APIs (`CGColorCreate`, `CGPathCreateWithRect`, `CGAffineTransformMake`) live in `.cpp` and compile as standard C++. This separation avoids applying ARC semantics to C++ code, prevents accidental ObjC runtime overhead in pure-C++ paths, and improves build times by limiting the ObjC++ compilation boundary.
+**Main-thread requirement.** All `SkCALayerDevice` drawing operations ultimately call bridge functions that manipulate `CALayer` objects. Core Animation requires layer-tree mutations to occur on the main thread. Callers must ensure that canvas creation, drawing, and the final layer-tree handoff all happen on the main thread. This constraint is documented on the public factory (`SkCALayerCanvas::Make`) and enforced by an `assert(SkCALayer_IsMainThread())` in debug builds (the bridge function calls `[NSThread isMainThread]` in the `.m` implementation).
 
 **Frame lifecycle and sublayer accumulation.** The current design adds sublayers to the caller-provided `rootLayer` during drawing but does not remove them. If a caller reuses the same `rootLayer` across multiple frames (create canvas → draw → destroy canvas → repeat), sublayers from previous frames will accumulate. This is by design for Phase 2: the device is a write-only recorder, like `SkSVGDevice` writing to a stream. The caller is responsible for clearing old sublayers before re-drawing, e.g., `[rootLayer.sublayers makeObjectsPerformSelector:@selector(removeFromSuperlayer)]`, or by creating a fresh `CALayer` per frame. A convenience `reset` API may be added in a future phase if usage patterns warrant it.
 
@@ -405,22 +577,20 @@ Reimplementing any of this at the canvas level would be error-prone and duplicat
 
 #include "include/core/SkCanvas.h"
 
-#ifdef __OBJC__
-@class CALayer;
-#else
-using CALayer = void;
-#endif
+// Pure C++ header — void* is used for the CALayer parameter.
+// No Objective-C types or conditional compilation.
 
 class SK_API SkCALayerCanvas {
 public:
     // Creates an SkCanvas that records drawing operations as sublayers of rootLayer.
     //
-    // rootLayer — caller-owned CALayer; drawing operations add sublayers to it.
+    // rootLayer — caller-owned CALayer* passed as void*.
+    //             Objective-C callers: pass (__bridge void*)caLayer.
     //             Must not be nullptr. The canvas retains rootLayer for its lifetime.
     // Returns nullptr on non-Apple platforms.
     //
     // Threading: must be called on the main thread.
-    static std::unique_ptr<SkCanvas> Make(const SkISize& size, CALayer* rootLayer);
+    static std::unique_ptr<SkCanvas> Make(const SkISize& size, void* rootLayer);
 };
 
 #endif // SkCALayerCanvas_DEFINED
@@ -428,7 +598,7 @@ public:
 
 Note: `SkCanvas(sk_sp<SkDevice>)` is annotated "Private. For internal use only." The `SkCALayerCanvas::Make` factory encapsulates device creation internally, following the pattern established by `SkSVGCanvas::Make` for non-pixel backends.
 
-**Usage example (Objective-C++):**
+**Usage example (Objective-C caller):**
 
 ```objc
 #import "include/calayer/SkCALayerCanvas.h"
@@ -442,9 +612,10 @@ rootLayer.bounds = CGRectMake(0, 0, 320, 480);
 // port would need rootLayer.geometryFlipped = YES (see Section 4.2.3).
 
 // Create canvas — sublayers will be added to rootLayer
-auto canvas = SkCALayerCanvas::Make(SkISize::Make(320, 480), rootLayer);
+// Pass CALayer* as void* via __bridge cast (ABI-safe, no conditional compilation)
+auto canvas = SkCALayerCanvas::Make(SkISize::Make(320, 480), (__bridge void*)rootLayer);
 
-// Draw
+// Draw (paint must NOT carry image filters or mask filters — see Section 4.2.3)
 SkPaint paint;
 paint.setColor(SK_ColorRED);
 paint.setStyle(SkPaint::kFill_Style);
@@ -461,22 +632,22 @@ canvas.reset();
 
 Testing is structured in three tiers, each leveraging a different part of Skia's test infrastructure.
 
-### 6.1 Tier 1: Unit Tests (`tests/CALayerDeviceTest.mm`)
+### 6.1 Tier 1: Unit Tests (`tests/CALayerDeviceTest.cpp`)
 
-Unit tests verify the structural output of the device — that drawing operations produce the expected CALayer tree with the correct properties. These tests do **not** compare pixels; they inspect the layer hierarchy directly.
+Unit tests verify the structural output of the device — that drawing operations produce the expected CALayer tree with the correct properties. These tests do **not** compare pixels; they inspect the layer hierarchy through the C bridge query functions.
 
 **Framework:** Skia's `DEF_TEST` / `REPORTER_ASSERT` macros from `tests/Test.h`.
 
-**Approach:** Create a caller-owned `CALayer*`, pass it to `SkCALayerCanvas::Make()`, issue draw commands via the returned `SkCanvas`, then inspect the caller's root `CALayer` sublayer tree directly. This is analogous to `SVGDeviceTest.cpp`, which creates an `SkSVGDevice`, draws into it, then parses the resulting SVG XML to verify structure.
+**Approach:** Create a root layer via `SkCALayer_CreateShapeLayer()` (C bridge), pass it to `SkCALayerCanvas::Make()`, issue draw commands via the returned `SkCanvas`, then inspect the layer tree through C bridge query functions (`SkCALayer_GetSublayerCount`, `SkCAShapeLayer_GetFillColor`, etc.). This is analogous to `SVGDeviceTest.cpp`, which creates an `SkSVGDevice`, draws into it, then parses the resulting SVG XML to verify structure. The test file is **pure C++** — no Objective-C syntax — because all layer inspection goes through the C bridge.
 
-**Platform requirement:** Tests must run on macOS/iOS because they instantiate real `CALayer` objects. On other platforms, the tests should be conditionally compiled out (guarded by `#ifdef SK_BUILD_FOR_MAC` or `#ifdef SK_BUILD_FOR_IOS`).
+**Platform requirement:** Tests must run on macOS/iOS because the C bridge functions internally instantiate real `CALayer` objects. On other platforms, the tests should be conditionally compiled out (guarded by `#ifdef SK_BUILD_FOR_MAC` or `#ifdef SK_BUILD_FOR_IOS`).
 
-### 6.2 Tier 2: GM Tests (`gm/calayer_rect.mm`)
+### 6.2 Tier 2: GM Tests (`gm/calayer_rect.cpp`)
 
 GM (Golden Master) tests produce visual output that can be compared against reference images. For the CALayer backend, the GM test will:
 
 1. Draw a known pattern using `SkCanvas` on the CALayer device.
-2. Render the resulting `CALayer` tree into a `CGContext` bitmap (via `CALayer.renderInContext:`).
+2. Render the resulting `CALayer` tree into a `CGContext` bitmap (via a C bridge function that internally calls `[CALayer renderInContext:]`).
 3. Copy that bitmap into an `SkBitmap` for comparison.
 
 This allows the DM test runner to compare the CALayer backend's output against the same pattern rendered by the raster backend.
@@ -507,9 +678,9 @@ A full `CALayerSink` in `dm/DMSrcSink.h` would allow every existing GM test to r
 
 ### Phase 1: Unit Tests (Red) — 1 day
 
-Write the test file `tests/CALayerDeviceTest.mm` with all key scenario tests from Section 6.4. The tests will reference `SkCALayerCanvas::Make()`, which does not yet exist — they will fail to compile (or link), establishing the "red" state.
+Write the test file `tests/CALayerDeviceTest.cpp` with all key scenario tests from Section 6.4. The tests will reference `SkCALayerCanvas::Make()` and the C bridge query functions, which do not yet exist — they will fail to compile (or link), establishing the "red" state.
 
-- [ ] Create `tests/CALayerDeviceTest.mm` with platform guard (`#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)`)
+- [ ] Create `tests/CALayerDeviceTest.cpp` with platform guard (`#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)`)
 - [ ] Implement test `CALayerDevice_Create` — verify `SkCALayerCanvas::Make()` returns non-null, caller's root `CALayer` has 0 sublayers
 - [ ] Implement test `CALayerDevice_DrawRect_Fill` — scenario #1
 - [ ] Implement test `CALayerDevice_DrawRect_Stroke` — scenario #2
@@ -530,17 +701,19 @@ Implement the `SkCALayerDevice` class with `drawRect` and all no-op stubs.
 
 - [ ] Create `include/calayer/SkCALayerCanvas.h` — public factory API
 - [ ] Create `src/calayer/SkCALayerDevice.h` — internal header (pure C++, `void*` for CALayer)
-- [ ] Create `src/calayer/SkCALayerConvert.h/.cpp` — pure C++ helpers (compiled as standard C++, no `-fobjc-arc`):
+- [ ] Create `src/calayer/SkCALayerBridge.h` — pure C header: `extern "C"` opaque API for CALayer lifecycle, property setters, query functions
+- [ ] Create `src/calayer/SkCALayerBridge.m` — pure Objective-C implementation (compiled with `-fobjc-arc`): thin wrappers around `CALayer`/`CAShapeLayer` property access
+- [ ] Create `src/calayer/SkCALayerConvert.h/.cpp` — pure C++ helpers:
   - `SkCALayerCreateCGColor()`: `SkColor4f` → `CGColorRef` in sRGB color space
   - `SkCALayerMatrixHasPerspective()`: validate `SkMatrix` for perspective components
-- [ ] Create `src/calayer/SkCALayerDevice.mm` — ObjC++ implementation (compiled with `-fobjc-arc`):
-  - `Make(size, rootLayer)` factory: constructs `SkImageInfo::MakeUnknown(w, h)` + default `SkSurfaceProps`, returns `nullptr` on non-Apple platforms, debug-asserts main thread
-  - Constructor(`SkImageInfo`, `SkSurfaceProps`, `CALayer*`): passes info/props to `SkClipStackDevice`, `CFRetain` the root layer
-  - Destructor: `CFRelease` the root layer reference
-  - `drawRect()`: perspective check, `CAShapeLayer` creation with `anchorPoint=(0,0)`, affine transform, paint application
-  - `applyPaintToShapeLayer()`: Fill/Stroke/StrokeAndFill dispatch, sRGB `CGColor` conversion, stroke properties
+- [ ] Create `src/calayer/SkCALayerDevice.cpp` — pure C++ implementation (calls C bridge, no ObjC syntax):
+  - `Make(size, rootLayer)` factory: constructs `SkImageInfo::MakeUnknown(w, h)` + default `SkSurfaceProps`, returns `nullptr` on non-Apple platforms, debug-asserts main thread via `SkCALayer_IsMainThread()`
+  - Constructor(`SkImageInfo`, `SkSurfaceProps`, `void* rootLayer`): passes info/props to `SkClipStackDevice`, calls `SkCALayer_Retain()`
+  - Destructor: calls `SkCALayer_Release()`
+  - `drawRect()`: perspective check, shape layer creation via C bridge, affine transform, paint application, add to root and release
+  - `applyPaintToShapeLayer()`: file-static helper, Fill/Stroke/StrokeAndFill dispatch via C bridge setters
   - All other draw methods: empty no-op bodies
-- [ ] Create `src/calayer/BUILD.gn` — GN library target with Apple-only compilation, `-fobjc-arc` for `.mm` only
+- [ ] Create `src/calayer/BUILD.gn` — GN library target with Apple-only compilation, `-fobjc-arc` for `.m` only
 - [ ] Verify all Phase 1 unit tests pass (green)
 
 **Done when:** All unit tests from Phase 1 pass on macOS. The device can render filled and stroked rectangles as `CAShapeLayer` sublayers.
@@ -549,8 +722,8 @@ Implement the `SkCALayerDevice` class with `drawRect` and all no-op stubs.
 
 Write a GM test that renders a known rect pattern and verifies visual output.
 
-- [ ] Create `gm/calayer_rect.mm` with `DEF_SIMPLE_GM` or class-based GM
-- [ ] Implement CALayer-to-SkBitmap conversion helper (via `CALayer.renderInContext:` → `CGBitmapContext` → `SkBitmap`)
+- [ ] Create `gm/calayer_rect.cpp` with `DEF_SIMPLE_GM` or class-based GM (pure C++)
+- [ ] Add `SkCALayer_RenderInContext()` to C bridge; implement CALayer-to-SkBitmap conversion helper in pure C++ (bridge function calls `[CALayer renderInContext:]` in `.m`; C++ side reads the `CGBitmapContext` pixels into `SkBitmap`)
 - [ ] Verify the GM runs in the DM test runner on macOS with `--config 8888` (comparing against raster reference)
 
 **Done when:** GM test runs, produces output, and matches (or nearly matches) the raster backend's rendering of the same rect pattern.
@@ -569,8 +742,7 @@ Write a GM test that renders a known rect pattern and verifies visual output.
 | CALayer property model does not cover all SkPaint semantics (e.g., complex blend modes, shader fills) | High | Low (for Phase 2) | Phase 2 only targets solid color fill/stroke. Unsupported paint properties are silently ignored. Future RFCs will address complex paints, potentially by falling back to rasterization for individual layers. |
 | Coordinate system mismatch across platforms | Low (iOS) / Med (macOS) | Med | On iOS, Core Animation uses Y-down coordinates (origin at top-left), matching Skia — no transform is needed for Phase 2. On macOS, Core Animation defaults to Y-up (origin at bottom-left); a future macOS port would require `CALayer.geometryFlipped = YES` on the root layer or a Y-flip transform. Phase 2 targets iOS only, so this risk is low. |
 | Performance regression with deep layer trees (thousands of sublayers) | Med | Low (this RFC) | Out of scope — this RFC targets UI-style content with tens to hundreds of layers. Performance optimization (layer reuse, batching) is deferred to future work. |
-| Objective-C++ compilation complexity in GN | Low | Med | Skia's GN build system already handles `.mm` files for Apple ports. Follow existing patterns in `src/ports/` and `tools/skottie_ios_app/`. |
-| Memory management (ARC vs. manual retain/release) across C++/ObjC boundary | Med | High | Use `CFTypeRef` (`void*`) with explicit `CFRetain`/`CFRelease` in the C++ layer. The `.mm` implementation file uses ARC internally. This pattern is established in `src/utils/mac/`. **Critical detail:** when the `.mm` file is compiled with `-fobjc-arc`, the compiler automatically inserts `objc_retain`/`objc_release` calls for Objective-C pointer variables. If C++ code (in `.h` or `.cpp`) holds an ObjC object pointer via `void*`, ARC cannot track that reference. The current design mitigates this by: (1) storing `CALayer*` as `void*` with manual `CFRetain`/`CFRelease`; (2) ensuring all `CAShapeLayer*` temporaries are created and consumed within a single ARC-managed `.mm` method scope (retained by `addSublayer:` before the method returns). Reviewers should verify that no ObjC pointer escapes an `.mm` scope into C++ storage without an explicit `CFRetain`. |
+| Memory management across C/ObjC bridge boundary | Low | Med | The pure C bridge design simplifies memory management compared to ObjC++: ARC is confined to the `.m` file only, and the C++ side uses explicit `SkCALayer_Retain()`/`SkCALayer_Release()` (which call `CFRetain`/`CFRelease`). `Create` bridge functions use `__bridge_retained` to transfer +1 ownership to the caller; all other bridge functions use `__bridge` (zero-cost, no ownership change). Since C++ code never holds an ObjC object pointer directly — only opaque `void*` — there is no risk of ARC/manual-retain confusion within a single translation unit. Reviewers should verify that every `SkCALayer_CreateShapeLayer()` call is balanced by either `SkCALayer_Release()` or an `SkCALayer_AddSublayer()` + `SkCALayer_Release()` pair. |
 
 ## 9. Future Work
 
@@ -604,6 +776,8 @@ Write a GM test that renders a known rect pattern and verifies visual output.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.4 | 2026-03-24 | Chason Tang | Eliminate all Objective-C++ (`.mm`) files. Introduce pure C bridge API (`SkCALayerBridge.h`/`.m`) as the sole interface between C++ and Objective-C — C++ code in `.cpp` calls `extern "C"` bridge functions, Objective-C code in `.m` implements them. Rewrite `drawRect` and `applyPaintToShapeLayer` as pure C++. Move test files from `.mm` to `.cpp` (using C bridge query functions for layer inspection). Update design rationale, risks, and implementation plan accordingly |
+| 1.3 | 2026-03-24 | Chason Tang | Replace `#ifdef __OBJC__` conditional compilation in headers with opaque `void*` pointers to fix C++/ObjC++ ABI mismatch (different mangled symbols in .cpp vs .mm TUs); correct clip management description from "Fully implemented" to "State tracking only" — clips are tracked but not applied to drawing output; correct image filter / mask filter / saveLayer descriptions to accurately state content loss behavior (draw calls routed to SkNoPixelsDevice, never reaching SkCALayerDevice) |
 | 1.2 | 2026-03-24 | Chason Tang | Fix localToDevice() return type description (const SkMatrix&, not const SkM44&) and code example; fix createDevice() nullptr behavior (Skia creates SkNoPixelsDevice, draws are silently dropped, not rendered to current device); fix root layer ownership inconsistencies (remove nonexistent rootLayer() getter from diagram, align test section with caller-owned push model) |
 | 1.1 | 2026-03-23 | Chason Tang | Address review feedback: fix constructor signature (SkImageInfo+SkSurfaceProps); add perspective matrix validation; specify sRGB color space for CGColor; document anchorPoint/position/bounds setup; clarify iOS Y-down vs macOS Y-up; add applyPaintToShapeLayer pseudocode; separate ObjC/C++ source files; replace test scenario 7 with device-level partial-clip test; add perspective rejection test; document frame lifecycle and sublayer accumulation |
 | 1.0 | 2026-03-20 | Chason Tang | Initial version |
