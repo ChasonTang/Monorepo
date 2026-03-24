@@ -1,6 +1,6 @@
 # RFC-001: SkDevice CALayer Rendering Backend for iOS
 
-**Version:** 1.0
+**Version:** 1.2
 **Author:** Chason Tang
 **Date:** 2026-03-20
 **Status:** Proposed
@@ -34,7 +34,7 @@ By implementing a CALayer-backed SkDevice, applications can choose this backend 
 - Full SkCanvas API coverage in this proposal — complex operations (text, images, shaders, blend modes, clip paths) are deferred to subsequent RFCs.
 - Performance parity with the raster or GPU backends — the CALayer backend targets UI-style content, not complex 2D rendering workloads.
 - Android or other non-Apple platform support — this backend is iOS-only (and macOS via Catalyst/AppKit in the future, but not in scope here).
-- **`saveLayer()` compositing** — `createDevice()` returns `nullptr`, so `SkCanvas::saveLayer()` will not create an isolation layer. The save/restore stack still functions (save count increments, clip and transform state is preserved), but subsequent draw calls render directly to the current device without the compositing semantics that `saveLayer()` normally provides (e.g., group opacity, blend modes applied to a flattened sublayer). Callers must avoid relying on `saveLayer()` for correct rendering in Phase 2. This limitation is documented in the virtual function table (Section 4.2.2) and will be addressed in a future RFC (see Section 9, "Save-layer compositing").
+- **`saveLayer()` compositing** — `createDevice()` returns `nullptr`. When this happens, `SkCanvas::internalSaveLayer()` creates an `SkNoPixelsDevice` as a fallback — all subsequent draw calls within that `saveLayer()` scope are silently discarded (the `SkNoPixelsDevice` draw methods are empty no-ops), and during `restore()`, Skia skips compositing the layer back (via the `isNoPixelsDevice()` check). The save/restore stack still functions (save count increments, clip and transform state is preserved), but no drawing output is produced for the affected scope. Callers must avoid relying on `saveLayer()` for correct rendering in Phase 2. This limitation is documented in the virtual function table (Section 4.2.2) and will be addressed in a future RFC (see Section 9, "Save-layer compositing").
 
 ## 4. Design
 
@@ -64,8 +64,8 @@ The backend sits at the **SkDevice** layer, not the SkCanvas layer. This follows
                           │    - add to fRootLayer               │
                           │  }                                   │
                           │                                      │
-                          │  CALayer* rootLayer()                 │
-                          │    → returns the accumulated tree    │
+                          │  fRootLayer (caller-owned CALayer*)   │
+                          │    → sublayers accumulate here       │
                           └──────────────────────────────────────┘
                                                │
                                                │ produces
@@ -174,7 +174,7 @@ private:
 |---|---|---|
 | Clip management | `pushClipStack`, `popClipStack`, `clipRect`, `clipRRect`, `clipPath`, `clipRegion`, `replaceClip`, `isClip*`, `devClipBounds`, `onClipShader` | Fully implemented by `SkClipStackDevice` base class |
 | Surface creation | `makeSurface(const SkImageInfo&, const SkSurfaceProps&)` | Default returns `nullptr` — acceptable; the backend produces a layer tree, not pixel surfaces |
-| Save-layer device | `createDevice(const CreateInfo&, const SkPaint*)` | Default returns `nullptr` — `saveLayer()` compositing is not supported in Phase 2 (see Future Work) |
+| Save-layer device | `createDevice(const CreateInfo&, const SkPaint*)` | Default returns `nullptr` — `SkCanvas` falls back to `SkNoPixelsDevice`, silently discarding all draw calls within the `saveLayer()` scope. `saveLayer()` compositing is not supported in Phase 2 (see Future Work) |
 | Image-filter support | `snapSpecial`, `makeSpecial`, `drawSpecial`, `drawCoverageMask` | Defaults (`nullptr` / no-op) — image filters on the CALayer device are deferred |
 | Layer compositing | `drawDevice(SkDevice*, ...)` | Default — not needed until `createDevice` is implemented |
 | Pixel read-back | `onReadPixels`, `onWritePixels`, `onPeekPixels`, `onAccessPixels` | Default `false` — the backend produces layers, not pixels |
@@ -199,15 +199,16 @@ SkCanvas::drawRect(r, paint)
 By the time `SkCALayerDevice::drawRect()` is called:
 - The rect is sorted (non-inverted).
 - The paint has had image filters stripped (they were applied as a layer).
-- The current transform is available via `this->localToDevice()` (returns `const SkM44&`, a 4×4 matrix). The 3×3 submatrix is extracted via `asM33()`. If the matrix contains a perspective component (third row ≠ `[0, 0, 1]`), it cannot be represented as a `CGAffineTransform`; the draw call is skipped with a debug warning. Rather than pre-transforming geometry with `mapRect()` — which collapses rotation/skew into an axis-aligned bounding box — the implementation keeps the path in local coordinates and applies the affine portion as the layer's `affineTransform`.
+- The current transform is available via two accessors: `this->localToDevice()` returns `const SkMatrix&` (the 3×3 affine matrix, sufficient for 2D transforms), while `this->localToDevice44()` returns `const SkM44&` (the full 4×4 matrix, needed only if 3D/perspective information is required). Since this backend only needs the 2D affine portion, `localToDevice()` is used directly. If the matrix contains a perspective component (`hasPerspective()` returns true), it cannot be represented as a `CGAffineTransform`; the draw call is skipped with a debug warning. Rather than pre-transforming geometry with `mapRect()` — which collapses rotation/skew into an axis-aligned bounding box — the implementation keeps the path in local coordinates and applies the affine portion as the layer's `affineTransform`.
 
 **Implementation (`src/calayer/SkCALayerDevice.mm`):**
 
 ```objc
 void SkCALayerDevice::drawRect(const SkRect& r, const SkPaint& paint) {
-    // 1. Extract the 3×3 submatrix from the 4×4 SkM44 returned by localToDevice().
+    // 1. Get the current 3×3 transform matrix.
+    //    localToDevice() returns const SkMatrix& (3×3 affine).
     //    CGAffineTransform cannot represent perspective — skip the draw if present.
-    SkMatrix ctm = this->localToDevice().asM33();
+    const SkMatrix& ctm = this->localToDevice();
     if (ctm.hasPerspective()) {
         SkDEBUGF("SkCALayerDevice::drawRect: perspective transform not supported, "
                  "skipping draw\n");
@@ -466,7 +467,7 @@ Unit tests verify the structural output of the device — that drawing operation
 
 **Framework:** Skia's `DEF_TEST` / `REPORTER_ASSERT` macros from `tests/Test.h`.
 
-**Approach:** Create an `SkCALayerDevice`, wrap it in an `SkCanvas`, issue draw commands, then inspect the `rootLayer()` sublayer tree. This is analogous to `SVGDeviceTest.cpp`, which creates an `SkSVGDevice`, draws into it, then parses the resulting SVG XML to verify structure.
+**Approach:** Create a caller-owned `CALayer*`, pass it to `SkCALayerCanvas::Make()`, issue draw commands via the returned `SkCanvas`, then inspect the caller's root `CALayer` sublayer tree directly. This is analogous to `SVGDeviceTest.cpp`, which creates an `SkSVGDevice`, draws into it, then parses the resulting SVG XML to verify structure.
 
 **Platform requirement:** Tests must run on macOS/iOS because they instantiate real `CALayer` objects. On other platforms, the tests should be conditionally compiled out (guarded by `#ifdef SK_BUILD_FOR_MAC` or `#ifdef SK_BUILD_FOR_IOS`).
 
@@ -603,5 +604,6 @@ Write a GM test that renders a known rect pattern and verifies visual output.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.2 | 2026-03-24 | Chason Tang | Fix localToDevice() return type description (const SkMatrix&, not const SkM44&) and code example; fix createDevice() nullptr behavior (Skia creates SkNoPixelsDevice, draws are silently dropped, not rendered to current device); fix root layer ownership inconsistencies (remove nonexistent rootLayer() getter from diagram, align test section with caller-owned push model) |
 | 1.1 | 2026-03-23 | Chason Tang | Address review feedback: fix constructor signature (SkImageInfo+SkSurfaceProps); add perspective matrix validation; specify sRGB color space for CGColor; document anchorPoint/position/bounds setup; clarify iOS Y-down vs macOS Y-up; add applyPaintToShapeLayer pseudocode; separate ObjC/C++ source files; replace test scenario 7 with device-level partial-clip test; add perspective rejection test; document frame lifecycle and sublayer accumulation |
 | 1.0 | 2026-03-20 | Chason Tang | Initial version |
