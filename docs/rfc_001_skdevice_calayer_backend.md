@@ -1,6 +1,6 @@
 # RFC-001: SkDevice CALayer Rendering Backend for iOS
 
-**Version:** 1.4
+**Version:** 1.5
 **Author:** Chason Tang
 **Date:** 2026-03-20
 **Status:** Proposed
@@ -224,6 +224,10 @@ CGFloat   SkCAShapeLayer_GetMiterLimit(void* layer);
 CGAffineTransform SkCAShapeLayer_GetAffineTransform(void* layer);
 CGFloat   SkCALayer_GetOpacity(void* layer);
 
+/* --- Transaction (implicit-animation control) --- */
+void SkCATransaction_BeginDisablingActions(void);  /* begin + setDisableActions:YES */
+void SkCATransaction_Commit(void);
+
 /* --- Debug --- */
 bool SkCALayer_IsMainThread(void);
 
@@ -343,6 +347,16 @@ CGFloat SkCALayer_GetOpacity(void* layer) {
 bool SkCALayer_IsMainThread(void) {
     return [NSThread isMainThread];
 }
+
+/* --- Transaction --- */
+void SkCATransaction_BeginDisablingActions(void) {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+}
+
+void SkCATransaction_Commit(void) {
+    [CATransaction commit];
+}
 ```
 
 Note: `__bridge_retained` in `CreateShapeLayer` transfers ownership from ARC to the caller — ARC will not release the object, and the caller must call `SkCALayer_Release()` (which calls `CFRelease`). The `__bridge` casts in all other functions are zero-cost casts that do not transfer ownership — ARC continues to manage the object's lifetime within the function scope, and the root layer's `sublayers` array retains child layers as needed.
@@ -387,33 +401,41 @@ void SkCALayerDevice::drawRect(const SkRect& r, const SkPaint& paint) {
         return;
     }
 
-    // 2. Create CAShapeLayer via C bridge (+1 retained)
+    // 2. Disable implicit animations — Core Animation applies a default 0.25 s
+    //    animation to every property change. The rendering backend requires
+    //    immediate, non-animated updates.
+    SkCATransaction_BeginDisablingActions();
+
+    // 3. Create CAShapeLayer via C bridge (+1 retained)
     void* shapeLayer = SkCALayer_CreateShapeLayer();
 
-    // 3. Set path in LOCAL coordinates
+    // 4. Set path in LOCAL coordinates
     CGRect cgRect = CGRectMake(r.fLeft, r.fTop, r.width(), r.height());
     CGPathRef path = CGPathCreateWithRect(cgRect, NULL);
     SkCAShapeLayer_SetPath(shapeLayer, path);
     CGPathRelease(path);
 
-    // 4. Configure anchorPoint/position so the layer's coordinate origin aligns
+    // 5. Configure anchorPoint/position so the layer's coordinate origin aligns
     //    with the root layer's origin (see "CALayer coordinate setup" below).
     SkCAShapeLayer_SetAnchorPoint(shapeLayer, 0, 0);  // default (0.5, 0.5) would offset
     SkCAShapeLayer_SetPosition(shapeLayer, 0, 0);
 
-    // 5. Apply the current local-to-device transform as a CALayer affine transform.
+    // 6. Apply the current local-to-device transform as a CALayer affine transform.
     //    Using affineTransform (not mapRect) preserves rotation and skew correctly.
     SkCAShapeLayer_SetAffineTransform(shapeLayer, CGAffineTransformMake(
         ctm.getScaleX(), ctm.getSkewY(),   // a, b
         ctm.getSkewX(),  ctm.getScaleY(),  // c, d
         ctm.getTranslateX(), ctm.getTranslateY()));  // tx, ty
 
-    // 6. Apply paint properties (see applyPaintToShapeLayer below)
+    // 7. Apply paint properties (see applyPaintToShapeLayer below)
     applyPaintToShapeLayer(shapeLayer, paint);
 
-    // 7. Add to root layer, then release our ref (+1 from Create is balanced)
+    // 8. Add to root layer, then release our ref (+1 from Create is balanced)
     SkCALayer_AddSublayer(fRootLayer, shapeLayer);
     SkCALayer_Release(shapeLayer);
+
+    // 9. Commit transaction — property changes take effect immediately, no animations.
+    SkCATransaction_Commit();
 }
 ```
 
@@ -552,6 +574,8 @@ There are **no `.mm` (Objective-C++) files** in this design. The language bounda
 Reimplementing any of this at the canvas level would be error-prone and duplicate existing code. The SkDevice approach gets all of this for free.
 
 **Pure C bridge (no Objective-C++).** The design strictly separates C++ and Objective-C into different translation units. There are no `.mm` (Objective-C++) files — C++ code lives in `.cpp`, Objective-C code lives in `.m`, and they communicate exclusively through a pure C header (`SkCALayerBridge.h`) with `extern "C"` linkage and `void*` opaque handles. This eliminates mixed-language translation units entirely, giving each compiler (clang C++ vs. clang ObjC) its own clean scope. The `extern "C"` + `void*` pattern follows the precedent set by Skia's `GrMTLHandle` (`typedef const void*`) in `gpu/mtl/GrMtlTypes.h` for Metal interop, and by Apple's own CoreFoundation framework (e.g., `CFStringRef`, `CFArrayRef` — all opaque `const void*` pointers behind C functions).
+
+**Disabling implicit animations.** Core Animation applies a default 0.25-second implicit animation whenever an "animatable" `CALayer` property is modified (e.g., `path`, `fillColor`, `strokeColor`, `position`, `transform`, `opacity`). For a rendering backend that constructs layer trees as immediate-mode drawing output, these animations are undesirable — they would cause newly created sublayers to visually "fade in" or "slide" to their target state instead of appearing instantly. The implementation wraps all layer-property mutations inside a `CATransaction` with `setDisableActions:YES`, ensuring every property change takes effect on the next commit (i.e., the next display refresh) with no animation. The `CATransaction` begin/commit pair is scoped per draw call (e.g., one pair per `drawRect` invocation) via the C bridge functions `SkCATransaction_BeginDisablingActions()` / `SkCATransaction_Commit()`. This approach is lightweight (`CATransaction` is a per-thread stack), well-documented by Apple, and does not affect the caller's ability to subsequently animate layer properties after the canvas is destroyed.
 
 **`CAShapeLayer` for drawRect (not `CALayer.bounds`).** A plain `CALayer` with `bounds`/`backgroundColor` could render a filled rect, but cannot handle stroked rects. `CAShapeLayer` with a `CGPath` handles both fill and stroke uniformly, and extends naturally to `drawRRect`, `drawOval`, and `drawPath` in the future.
 
@@ -776,6 +800,7 @@ Write a GM test that renders a known rect pattern and verifies visual output.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.5 | 2026-03-24 | Chason Tang | Explicitly disable Core Animation implicit animations: add `SkCATransaction_BeginDisablingActions()` / `SkCATransaction_Commit()` to the C bridge API, wrap `drawRect` layer-property mutations in a transaction with `setDisableActions:YES`, add design rationale paragraph explaining the necessity and approach |
 | 1.4 | 2026-03-24 | Chason Tang | Eliminate all Objective-C++ (`.mm`) files. Introduce pure C bridge API (`SkCALayerBridge.h`/`.m`) as the sole interface between C++ and Objective-C — C++ code in `.cpp` calls `extern "C"` bridge functions, Objective-C code in `.m` implements them. Rewrite `drawRect` and `applyPaintToShapeLayer` as pure C++. Move test files from `.mm` to `.cpp` (using C bridge query functions for layer inspection). Update design rationale, risks, and implementation plan accordingly |
 | 1.3 | 2026-03-24 | Chason Tang | Replace `#ifdef __OBJC__` conditional compilation in headers with opaque `void*` pointers to fix C++/ObjC++ ABI mismatch (different mangled symbols in .cpp vs .mm TUs); correct clip management description from "Fully implemented" to "State tracking only" — clips are tracked but not applied to drawing output; correct image filter / mask filter / saveLayer descriptions to accurately state content loss behavior (draw calls routed to SkNoPixelsDevice, never reaching SkCALayerDevice) |
 | 1.2 | 2026-03-24 | Chason Tang | Fix localToDevice() return type description (const SkMatrix&, not const SkM44&) and code example; fix createDevice() nullptr behavior (Skia creates SkNoPixelsDevice, draws are silently dropped, not rendered to current device); fix root layer ownership inconsistencies (remove nonexistent rootLayer() getter from diagram, align test section with caller-owned push model) |
