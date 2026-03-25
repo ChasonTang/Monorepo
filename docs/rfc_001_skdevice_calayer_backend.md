@@ -1,6 +1,6 @@
 # RFC-001: SkDevice CALayer Rendering Backend for iOS
 
-**Version:** 1.5
+**Version:** 1.6
 **Author:** Chason Tang
 **Date:** 2026-03-20
 **Status:** Proposed
@@ -152,9 +152,13 @@ private:
     // Not exposed in this header.
 
     // The root layer to which sublayers are added during drawing.
-    // Stored as void* (opaque pointer). The constructor calls SkCALayer_Retain(),
-    // the destructor calls SkCALayer_Release(). The C bridge implementation
-    // (SkCALayerBridge.m) casts to CALayer* internally.
+    // Stored as void* (opaque pointer). The constructor calls SkCALayer_Retain()
+    // and SkCATransaction_BeginDisablingActions(); the destructor calls
+    // SkCATransaction_Commit() and SkCALayer_Release(). This scopes the
+    // implicit-animation-disabling transaction to the device's lifetime,
+    // covering all draw calls with a single begin/commit pair.
+    // The C bridge implementation (SkCALayerBridge.m) casts to CALayer*
+    // internally.
     void* fRootLayer;
 };
 
@@ -254,38 +258,46 @@ void* SkCALayer_CreateShapeLayer(void) {
 }
 
 void SkCALayer_AddSublayer(void* parent, void* child) {
+    if (!parent || !child) return;
     [(__bridge CALayer*)parent addSublayer:(__bridge CALayer*)child];
 }
 
-void SkCALayer_Retain(void* layer)  { CFRetain(layer); }
-void SkCALayer_Release(void* layer) { CFRelease(layer); }
+void SkCALayer_Retain(void* layer)  { if (layer) CFRetain(layer); }
+void SkCALayer_Release(void* layer) { if (layer) CFRelease(layer); }
 
 /* --- Property setters --- */
 void SkCAShapeLayer_SetPath(void* layer, CGPathRef path) {
+    if (!layer) return;
     ((__bridge CAShapeLayer*)layer).path = path;
 }
 
 void SkCAShapeLayer_SetAnchorPoint(void* layer, CGFloat x, CGFloat y) {
+    if (!layer) return;
     ((__bridge CALayer*)layer).anchorPoint = CGPointMake(x, y);
 }
 
 void SkCAShapeLayer_SetPosition(void* layer, CGFloat x, CGFloat y) {
+    if (!layer) return;
     ((__bridge CALayer*)layer).position = CGPointMake(x, y);
 }
 
 void SkCAShapeLayer_SetAffineTransform(void* layer, CGAffineTransform t) {
+    if (!layer) return;
     ((__bridge CALayer*)layer).affineTransform = t;
 }
 
 void SkCAShapeLayer_SetFillColor(void* layer, CGColorRef color) {
+    if (!layer) return;
     ((__bridge CAShapeLayer*)layer).fillColor = color;
 }
 
 void SkCAShapeLayer_SetStrokeColor(void* layer, CGColorRef color) {
+    if (!layer) return;
     ((__bridge CAShapeLayer*)layer).strokeColor = color;
 }
 
 void SkCAShapeLayer_SetLineWidth(void* layer, CGFloat width) {
+    if (!layer) return;
     ((__bridge CAShapeLayer*)layer).lineWidth = width;
 }
 
@@ -293,6 +305,7 @@ static NSString* const kCapMap[] = {
     kCALineCapButt, kCALineCapRound, kCALineCapSquare
 };
 void SkCAShapeLayer_SetLineCap(void* layer, int cap) {
+    if (!layer || cap < 0 || (size_t)cap >= sizeof(kCapMap) / sizeof(kCapMap[0])) return;
     ((__bridge CAShapeLayer*)layer).lineCap = kCapMap[cap];
 }
 
@@ -300,47 +313,60 @@ static NSString* const kJoinMap[] = {
     kCALineJoinMiter, kCALineJoinRound, kCALineJoinBevel
 };
 void SkCAShapeLayer_SetLineJoin(void* layer, int join) {
+    if (!layer || join < 0 || (size_t)join >= sizeof(kJoinMap) / sizeof(kJoinMap[0])) return;
     ((__bridge CAShapeLayer*)layer).lineJoin = kJoinMap[join];
 }
 
 void SkCAShapeLayer_SetMiterLimit(void* layer, CGFloat limit) {
+    if (!layer) return;
     ((__bridge CAShapeLayer*)layer).miterLimit = limit;
 }
 
 /* --- Queries --- */
 int SkCALayer_GetSublayerCount(void* layer) {
+    if (!layer) return 0;
     return (int)((__bridge CALayer*)layer).sublayers.count;
 }
 
 void* SkCALayer_GetSublayerAtIndex(void* layer, int index) {
-    return (__bridge void*)((__bridge CALayer*)layer).sublayers[index];
+    if (!layer) return NULL;
+    NSArray* sublayers = ((__bridge CALayer*)layer).sublayers;
+    if (index < 0 || (NSUInteger)index >= sublayers.count) return NULL;
+    return (__bridge void*)sublayers[index];
 }
 
 CGPathRef SkCAShapeLayer_CopyPath(void* layer) {
+    if (!layer) return NULL;
     return CGPathRetain(((__bridge CAShapeLayer*)layer).path);
 }
 
 CGColorRef SkCAShapeLayer_GetFillColor(void* layer) {
+    if (!layer) return NULL;
     return ((__bridge CAShapeLayer*)layer).fillColor;
 }
 
 CGColorRef SkCAShapeLayer_GetStrokeColor(void* layer) {
+    if (!layer) return NULL;
     return ((__bridge CAShapeLayer*)layer).strokeColor;
 }
 
 CGFloat SkCAShapeLayer_GetLineWidth(void* layer) {
+    if (!layer) return 0;
     return ((__bridge CAShapeLayer*)layer).lineWidth;
 }
 
 CGFloat SkCAShapeLayer_GetMiterLimit(void* layer) {
+    if (!layer) return 0;
     return ((__bridge CAShapeLayer*)layer).miterLimit;
 }
 
 CGAffineTransform SkCAShapeLayer_GetAffineTransform(void* layer) {
+    if (!layer) return CGAffineTransformIdentity;
     return ((__bridge CALayer*)layer).affineTransform;
 }
 
 CGFloat SkCALayer_GetOpacity(void* layer) {
+    if (!layer) return 0;
     return ((__bridge CALayer*)layer).opacity;
 }
 
@@ -401,41 +427,33 @@ void SkCALayerDevice::drawRect(const SkRect& r, const SkPaint& paint) {
         return;
     }
 
-    // 2. Disable implicit animations — Core Animation applies a default 0.25 s
-    //    animation to every property change. The rendering backend requires
-    //    immediate, non-animated updates.
-    SkCATransaction_BeginDisablingActions();
-
-    // 3. Create CAShapeLayer via C bridge (+1 retained)
+    // 2. Create CAShapeLayer via C bridge (+1 retained)
     void* shapeLayer = SkCALayer_CreateShapeLayer();
 
-    // 4. Set path in LOCAL coordinates
+    // 3. Set path in LOCAL coordinates
     CGRect cgRect = CGRectMake(r.fLeft, r.fTop, r.width(), r.height());
     CGPathRef path = CGPathCreateWithRect(cgRect, NULL);
     SkCAShapeLayer_SetPath(shapeLayer, path);
     CGPathRelease(path);
 
-    // 5. Configure anchorPoint/position so the layer's coordinate origin aligns
+    // 4. Configure anchorPoint/position so the layer's coordinate origin aligns
     //    with the root layer's origin (see "CALayer coordinate setup" below).
     SkCAShapeLayer_SetAnchorPoint(shapeLayer, 0, 0);  // default (0.5, 0.5) would offset
     SkCAShapeLayer_SetPosition(shapeLayer, 0, 0);
 
-    // 6. Apply the current local-to-device transform as a CALayer affine transform.
+    // 5. Apply the current local-to-device transform as a CALayer affine transform.
     //    Using affineTransform (not mapRect) preserves rotation and skew correctly.
     SkCAShapeLayer_SetAffineTransform(shapeLayer, CGAffineTransformMake(
         ctm.getScaleX(), ctm.getSkewY(),   // a, b
         ctm.getSkewX(),  ctm.getScaleY(),  // c, d
         ctm.getTranslateX(), ctm.getTranslateY()));  // tx, ty
 
-    // 7. Apply paint properties (see applyPaintToShapeLayer below)
+    // 6. Apply paint properties (see applyPaintToShapeLayer below)
     applyPaintToShapeLayer(shapeLayer, paint);
 
-    // 8. Add to root layer, then release our ref (+1 from Create is balanced)
+    // 7. Add to root layer, then release our ref (+1 from Create is balanced)
     SkCALayer_AddSublayer(fRootLayer, shapeLayer);
     SkCALayer_Release(shapeLayer);
-
-    // 9. Commit transaction — property changes take effect immediately, no animations.
-    SkCATransaction_Commit();
 }
 ```
 
@@ -575,7 +593,7 @@ Reimplementing any of this at the canvas level would be error-prone and duplicat
 
 **Pure C bridge (no Objective-C++).** The design strictly separates C++ and Objective-C into different translation units. There are no `.mm` (Objective-C++) files — C++ code lives in `.cpp`, Objective-C code lives in `.m`, and they communicate exclusively through a pure C header (`SkCALayerBridge.h`) with `extern "C"` linkage and `void*` opaque handles. This eliminates mixed-language translation units entirely, giving each compiler (clang C++ vs. clang ObjC) its own clean scope. The `extern "C"` + `void*` pattern follows the precedent set by Skia's `GrMTLHandle` (`typedef const void*`) in `gpu/mtl/GrMtlTypes.h` for Metal interop, and by Apple's own CoreFoundation framework (e.g., `CFStringRef`, `CFArrayRef` — all opaque `const void*` pointers behind C functions).
 
-**Disabling implicit animations.** Core Animation applies a default 0.25-second implicit animation whenever an "animatable" `CALayer` property is modified (e.g., `path`, `fillColor`, `strokeColor`, `position`, `transform`, `opacity`). For a rendering backend that constructs layer trees as immediate-mode drawing output, these animations are undesirable — they would cause newly created sublayers to visually "fade in" or "slide" to their target state instead of appearing instantly. The implementation wraps all layer-property mutations inside a `CATransaction` with `setDisableActions:YES`, ensuring every property change takes effect on the next commit (i.e., the next display refresh) with no animation. The `CATransaction` begin/commit pair is scoped per draw call (e.g., one pair per `drawRect` invocation) via the C bridge functions `SkCATransaction_BeginDisablingActions()` / `SkCATransaction_Commit()`. This approach is lightweight (`CATransaction` is a per-thread stack), well-documented by Apple, and does not affect the caller's ability to subsequently animate layer properties after the canvas is destroyed.
+**Disabling implicit animations.** Core Animation applies a default 0.25-second implicit animation whenever an "animatable" `CALayer` property is modified (e.g., `path`, `fillColor`, `strokeColor`, `position`, `transform`, `opacity`). For a rendering backend that constructs layer trees as immediate-mode drawing output, these animations are undesirable — they would cause newly created sublayers to visually "fade in" or "slide" to their target state instead of appearing instantly. The implementation wraps all layer-property mutations inside a `CATransaction` with `setDisableActions:YES`, ensuring every property change takes effect on the next commit (i.e., the next display refresh) with no animation. Rather than wrapping each individual draw call in its own begin/commit pair, the transaction is scoped to the **device's lifetime**: `SkCATransaction_BeginDisablingActions()` is called in the constructor and `SkCATransaction_Commit()` in the destructor. This avoids redundant per-call transaction overhead when multiple draw calls are issued in sequence. `CATransaction` is a per-thread nestable stack, so a single device-lifetime transaction correctly covers all layer mutations. This approach is lightweight, well-documented by Apple, and does not affect the caller's ability to subsequently animate layer properties after the canvas is destroyed.
 
 **`CAShapeLayer` for drawRect (not `CALayer.bounds`).** A plain `CALayer` with `bounds`/`backgroundColor` could render a filled rect, but cannot handle stroked rects. `CAShapeLayer` with a `CGPath` handles both fill and stroke uniformly, and extends naturally to `drawRRect`, `drawOval`, and `drawPath` in the future.
 
@@ -732,8 +750,8 @@ Implement the `SkCALayerDevice` class with `drawRect` and all no-op stubs.
   - `SkCALayerMatrixHasPerspective()`: validate `SkMatrix` for perspective components
 - [ ] Create `src/calayer/SkCALayerDevice.cpp` — pure C++ implementation (calls C bridge, no ObjC syntax):
   - `Make(size, rootLayer)` factory: constructs `SkImageInfo::MakeUnknown(w, h)` + default `SkSurfaceProps`, returns `nullptr` on non-Apple platforms, debug-asserts main thread via `SkCALayer_IsMainThread()`
-  - Constructor(`SkImageInfo`, `SkSurfaceProps`, `void* rootLayer`): passes info/props to `SkClipStackDevice`, calls `SkCALayer_Retain()`
-  - Destructor: calls `SkCALayer_Release()`
+  - Constructor(`SkImageInfo`, `SkSurfaceProps`, `void* rootLayer`): passes info/props to `SkClipStackDevice`, calls `SkCALayer_Retain()` and `SkCATransaction_BeginDisablingActions()` (scoping the implicit-animation-disabling transaction to the device's lifetime)
+  - Destructor: calls `SkCATransaction_Commit()` and `SkCALayer_Release()`
   - `drawRect()`: perspective check, shape layer creation via C bridge, affine transform, paint application, add to root and release
   - `applyPaintToShapeLayer()`: file-static helper, Fill/Stroke/StrokeAndFill dispatch via C bridge setters
   - All other draw methods: empty no-op bodies
@@ -800,6 +818,7 @@ Write a GM test that renders a known rect pattern and verifies visual output.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.6 | 2026-03-25 | Chason Tang | Optimize CATransaction scoping: move begin/commit from per-draw-call to device-lifetime (constructor/destructor) to eliminate redundant per-call overhead. Add defensive NULL checks to all C bridge functions and bounds checking to `kCapMap[]`/`kJoinMap[]` array indexing and `SkCALayer_GetSublayerAtIndex` |
 | 1.5 | 2026-03-24 | Chason Tang | Explicitly disable Core Animation implicit animations: add `SkCATransaction_BeginDisablingActions()` / `SkCATransaction_Commit()` to the C bridge API, wrap `drawRect` layer-property mutations in a transaction with `setDisableActions:YES`, add design rationale paragraph explaining the necessity and approach |
 | 1.4 | 2026-03-24 | Chason Tang | Eliminate all Objective-C++ (`.mm`) files. Introduce pure C bridge API (`SkCALayerBridge.h`/`.m`) as the sole interface between C++ and Objective-C — C++ code in `.cpp` calls `extern "C"` bridge functions, Objective-C code in `.m` implements them. Rewrite `drawRect` and `applyPaintToShapeLayer` as pure C++. Move test files from `.mm` to `.cpp` (using C bridge query functions for layer inspection). Update design rationale, risks, and implementation plan accordingly |
 | 1.3 | 2026-03-24 | Chason Tang | Replace `#ifdef __OBJC__` conditional compilation in headers with opaque `void*` pointers to fix C++/ObjC++ ABI mismatch (different mangled symbols in .cpp vs .mm TUs); correct clip management description from "Fully implemented" to "State tracking only" — clips are tracked but not applied to drawing output; correct image filter / mask filter / saveLayer descriptions to accurately state content loss behavior (draw calls routed to SkNoPixelsDevice, never reaching SkCALayerDevice) |
