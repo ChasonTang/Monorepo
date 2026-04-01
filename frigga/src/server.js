@@ -271,6 +271,7 @@ export function startServer({ port, host, logBody }) {
         upstreamResponseReceived = true;
 
         const responseHeaders = filterResponseHeaders(upstreamRes.headers);
+        responseHeaders["x-accel-buffering"] = "no";
         if (isShuttingDown) {
           responseHeaders["connection"] = "close";
         }

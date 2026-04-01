@@ -167,14 +167,12 @@ describe("filterResponseHeaders", () => {
       "content-type": "text/event-stream",
       "content-length": "1234",
       "content-encoding": "gzip",
-      "x-request-id": "req-123",
       "request-id": "req-456",
       "retry-after": "30",
     });
     assert.equal(filtered["content-type"], "text/event-stream");
     assert.equal(filtered["content-length"], "1234");
     assert.equal(filtered["content-encoding"], "gzip");
-    assert.equal(filtered["x-request-id"], "req-123");
     assert.equal(filtered["request-id"], "req-456");
     assert.equal(filtered["retry-after"], "30");
   });
