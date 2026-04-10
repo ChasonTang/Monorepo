@@ -25,9 +25,7 @@ const RESPONSE_HEADER_FORWARD = new Set([
   "x-should-retry",
 ]);
 
-const RESPONSE_HEADER_PREFIXES = [
-  "anthropic-ratelimit-",
-];
+const RESPONSE_HEADER_PREFIXES = ["anthropic-ratelimit-"];
 
 /**
  * Build upstream request headers from the client request headers.
@@ -60,6 +58,35 @@ export function filterResponseHeaders(headers) {
     }
   }
   return filtered;
+}
+
+/**
+ * Build the full upstream URL by joining the base URL with the request path.
+ * Handles base URLs with path prefixes (e.g., /api/gateway/anthropic).
+ * @param {string} baseUrl - The upstream base URL (may include a path prefix)
+ * @param {string} reqUrl - The incoming request URL (e.g., /v1/messages?stream=true)
+ * @returns {URL}
+ */
+export function buildUpstreamUrl(baseUrl, reqUrl) {
+  const base = new URL(baseUrl);
+  const incoming = new URL(reqUrl, "http://localhost");
+  const basePath = base.pathname.endsWith("/")
+    ? base.pathname
+    : `${base.pathname}/`;
+  const reqPath = incoming.pathname.replace(/^\//, "");
+  const result = new URL(basePath + reqPath, base.origin);
+  result.search = incoming.search;
+
+  // Defense-in-depth: verify the resolved path stays under basePath.
+  // The double new URL() normalization already prevents traversal, but
+  // this guard catches regressions if the logic above is ever modified.
+  if (!result.pathname.startsWith(basePath)) {
+    throw new Error(
+      `upstream path traversal blocked: ${result.pathname} escapes ${basePath}`,
+    );
+  }
+
+  return result;
 }
 
 /**
@@ -259,7 +286,7 @@ export function startServer({ port, host, logBody }) {
     });
 
     // Upstream request
-    const upstreamUrl = new URL(req.url, UPSTREAM_BASE_URL);
+    const upstreamUrl = buildUpstreamUrl(UPSTREAM_BASE_URL, req.url);
     const upstreamHeaders = buildUpstreamHeaders(req.headers);
 
     upstreamReq = https.request(

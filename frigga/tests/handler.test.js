@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import {
   handleRequest,
   buildUpstreamHeaders,
+  buildUpstreamUrl,
   filterResponseHeaders,
   abortUpstream,
   createRequestLogEmitter,
@@ -92,6 +93,161 @@ describe("handleRequest — evaluation order", () => {
   it("returns 404 before 405 for unknown path with wrong method", () => {
     const res = handleRequest({ method: "GET", url: "/v1/unknown" }, false);
     assert.equal(res.statusCode, 404);
+  });
+});
+
+// ── buildUpstreamUrl ─────────────────────────────────────
+
+describe("buildUpstreamUrl — origin-only base (regression)", () => {
+  it("joins origin base with /v1/messages", () => {
+    const url = buildUpstreamUrl("https://api.anthropic.com", "/v1/messages");
+    assert.equal(url.href, "https://api.anthropic.com/v1/messages");
+  });
+
+  it("joins origin base with /v1/messages/count_tokens", () => {
+    const url = buildUpstreamUrl(
+      "https://api.anthropic.com",
+      "/v1/messages/count_tokens",
+    );
+    assert.equal(
+      url.href,
+      "https://api.anthropic.com/v1/messages/count_tokens",
+    );
+  });
+});
+
+describe("buildUpstreamUrl — base with path prefix", () => {
+  const base = "https://codewiz.alibaba-inc.com/api/gateway/anthropic";
+
+  it("preserves path prefix for /v1/messages", () => {
+    const url = buildUpstreamUrl(base, "/v1/messages");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/v1/messages",
+    );
+  });
+
+  it("preserves path prefix for /v1/messages/count_tokens", () => {
+    const url = buildUpstreamUrl(base, "/v1/messages/count_tokens");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/v1/messages/count_tokens",
+    );
+  });
+
+  it("handles trailing slash on base URL", () => {
+    const url = buildUpstreamUrl(`${base}/`, "/v1/messages");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/v1/messages",
+    );
+  });
+});
+
+describe("buildUpstreamUrl — query string preservation", () => {
+  it("preserves query string from request URL", () => {
+    const url = buildUpstreamUrl(
+      "https://api.anthropic.com",
+      "/v1/messages?stream=true",
+    );
+    assert.equal(url.href, "https://api.anthropic.com/v1/messages?stream=true");
+  });
+
+  it("preserves query string with path-prefix base", () => {
+    const url = buildUpstreamUrl(
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic",
+      "/v1/messages?stream=true",
+    );
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/v1/messages?stream=true",
+    );
+  });
+});
+
+describe("buildUpstreamUrl — reqUrl without leading slash", () => {
+  it("handles reqUrl without leading / (origin-only base)", () => {
+    const url = buildUpstreamUrl("https://api.anthropic.com", "v1/messages");
+    assert.equal(url.href, "https://api.anthropic.com/v1/messages");
+  });
+
+  it("handles reqUrl without leading / (path-prefix base)", () => {
+    const url = buildUpstreamUrl(
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic",
+      "v1/messages",
+    );
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/v1/messages",
+    );
+  });
+});
+
+describe("buildUpstreamUrl — path traversal normalization", () => {
+  const base = "https://codewiz.alibaba-inc.com/api/gateway/anthropic";
+
+  it("normalizes /../secret to stay within basePath", () => {
+    const url = buildUpstreamUrl(base, "/../secret");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/secret",
+    );
+  });
+
+  it("normalizes /v1/../secret to stay within basePath", () => {
+    const url = buildUpstreamUrl(base, "/v1/../secret");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/secret",
+    );
+  });
+
+  it("normalizes percent-encoded /%2e%2e/secret", () => {
+    const url = buildUpstreamUrl(base, "/%2e%2e/secret");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/secret",
+    );
+  });
+
+  it("normalizes /../secret with origin-only base", () => {
+    const url = buildUpstreamUrl("https://api.anthropic.com", "/../secret");
+    assert.equal(url.href, "https://api.anthropic.com/secret");
+  });
+});
+
+describe("buildUpstreamUrl — protocol-relative URL", () => {
+  it("ignores hostname from //evil.com/path and uses base origin", () => {
+    const url = buildUpstreamUrl(
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic",
+      "//evil.com/path",
+    );
+    assert.equal(url.origin, "https://codewiz.alibaba-inc.com");
+    assert.equal(
+      url.href,
+      "https://codewiz.alibaba-inc.com/api/gateway/anthropic/path",
+    );
+  });
+});
+
+describe("buildUpstreamUrl — double slashes in base URL", () => {
+  it("throws when leading double slash in path triggers protocol-relative reparse", () => {
+    // basePath becomes "//api//gateway/" which new URL() reparses as
+    // protocol-relative (host=api), escaping the intended base path.
+    // The prefix check catches this misconfiguration.
+    assert.throws(
+      () =>
+        buildUpstreamUrl("https://example.com//api//gateway", "/v1/messages"),
+      { message: /upstream path traversal blocked/ },
+    );
+  });
+
+  it("handles double slashes mid-path (not at start)", () => {
+    const url = buildUpstreamUrl(
+      "https://example.com/api//gateway",
+      "/v1/messages",
+    );
+    assert.equal(url.href, "https://example.com/api//gateway/v1/messages");
   });
 });
 
