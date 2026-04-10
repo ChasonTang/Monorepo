@@ -23,12 +23,10 @@ const RESPONSE_HEADER_FORWARD = new Set([
   "request-id",
   "retry-after",
   "x-should-retry",
-  "anthropic-organization-id",
 ]);
 
 const RESPONSE_HEADER_PREFIXES = [
   "anthropic-ratelimit-",
-  "anthropic-priority-",
 ];
 
 /**
