@@ -13,7 +13,6 @@ const REQUEST_HEADER_FORWARD = new Set([
   "anthropic-beta",
   "anthropic-version",
   "authorization",
-  "content-length",
 ]);
 
 const RESPONSE_HEADER_FORWARD = new Set([
@@ -90,65 +89,68 @@ export function buildUpstreamUrl(baseUrl, reqUrl) {
 }
 
 /**
- * Abort the upstream request by disconnecting the pipe first.
- * @param {import("node:http").IncomingMessage} req
+ * Abort the upstream request.
  * @param {import("node:http").ClientRequest} upstreamReq
  */
-export function abortUpstream(req, upstreamReq) {
+export function abortUpstream(upstreamReq) {
   if (upstreamReq && !upstreamReq.destroyed) {
-    req.unpipe(upstreamReq);
     upstreamReq.destroy();
   }
+}
+
+/**
+ * Collect the entire request body into a single Buffer.
+ * Resolves with the concatenated body; rejects on stream error.
+ * @param {import("node:http").IncomingMessage} req
+ * @returns {Promise<Buffer>}
+ */
+export function bufferRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", (err) => {
+      chunks.length = 0;
+      reject(err);
+    });
+  });
 }
 
 /**
  * Create a request log emitter with exactly-once guard.
  * @param {object} ctx
  * @param {import("node:http").IncomingMessage} ctx.req
- * @param {Buffer[]} [ctx.requestChunks] - sidecar-captured body chunks (omit to skip request_body)
+ * @param {Buffer} [ctx.requestBody] - buffered request body (omit to skip request_body)
  * @param {number} ctx.startTime - Date.now() at request start
  * @returns {(status: number, responseHeaders?: Record<string, string>) => void}
  */
-export function createRequestLogEmitter({ req, requestChunks, startTime }) {
+export function createRequestLogEmitter({ req, requestBody, startTime }) {
   let emitted = false;
 
   return function emitRequestLog(status, responseHeaders) {
     if (emitted) return;
     emitted = true;
 
-    let finalized = false;
-    const finalize = () => {
-      if (finalized) return;
-      finalized = true;
-      const entry = {
-        timestamp: new Date().toISOString(),
-        level: "INFO",
-        event: "request",
-        method: req.method,
-        url: req.url,
-        status,
-        duration_ms: Date.now() - startTime,
-        request_headers: req.headers,
-      };
-      if (requestChunks) {
-        entry.request_body = Buffer.concat(requestChunks).toString("utf-8");
-        requestChunks.length = 0;
-      }
-      if (responseHeaders) entry.response_headers = responseHeaders;
-      process.stdout.write(`${JSON.stringify(entry)}\n`);
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level: "INFO",
+      event: "request",
+      method: req.method,
+      url: req.url,
+      status,
+      duration_ms: Date.now() - startTime,
+      request_headers: req.headers,
     };
-
-    if (requestChunks && !req.readableEnded && !req.destroyed) {
-      req.on("end", finalize);
-      req.on("error", () => finalize());
-    } else {
-      finalize();
+    if (requestBody !== undefined) {
+      entry.request_body = requestBody.toString("utf-8");
     }
+    if (responseHeaders) entry.response_headers = responseHeaders;
+    process.stdout.write(`${JSON.stringify(entry)}\n`);
 
+    // Drain the request stream if still active (local error path only;
+    // on the forwarding path the stream is already consumed by bufferRequestBody).
     if (!req.readableEnded && !req.destroyed) {
-      if (!requestChunks) {
-        req.on("error", () => {});
-      }
+      req.on("error", () => {});
       req.resume();
     }
   };
@@ -209,7 +211,7 @@ export function startServer({ port, host, logBody }) {
   let isShuttingDown = false;
   let forceTimer;
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const startTime = Date.now();
 
     const result = handleRequest(
@@ -229,26 +231,18 @@ export function startServer({ port, host, logBody }) {
     }
 
     // ── Forwarding path ───────────────────────────────────
-    // eslint-disable-next-line prefer-const -- assigned after event handlers to eliminate race conditions (RFC-004 §4.2.7)
-    let upstreamReq;
-    let upstreamResponseReceived = false;
-    const requestChunks = logBody ? [] : undefined;
 
-    // Sidecar: capture request body for audit logging
-    if (requestChunks) {
-      req.on("data", (chunk) => requestChunks.push(chunk));
-    }
-
-    // Create request log emitter
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      requestChunks,
-      startTime,
-    });
-
-    // Client request stream error
-    req.on("error", (err) => {
-      abortUpstream(req, upstreamReq);
+    // Phase 1: Buffer the request body
+    let requestBody;
+    try {
+      requestBody = await bufferRequestBody(req);
+    } catch (err) {
+      // Client disconnected or stream error during buffering.
+      // req and res share the same TCP socket (HTTP/1.1), so the socket
+      // is almost certainly dead. Destroy res explicitly for cleanup.
+      if (!res.destroyed) {
+        res.destroy();
+      }
       process.stderr.write(
         `${JSON.stringify({
           timestamp: new Date().toISOString(),
@@ -260,15 +254,31 @@ export function startServer({ port, host, logBody }) {
           duration_ms: Date.now() - startTime,
         })}\n`,
       );
+      const emitRequestLog = createRequestLogEmitter({
+        req,
+        requestBody: logBody ? Buffer.alloc(0) : undefined,
+        startTime,
+      });
       emitRequestLog(499);
+      return;
+    }
+
+    // Phase 2: Forward to upstream
+    // eslint-disable-next-line prefer-const -- assigned after event handlers to eliminate race conditions (RFC-004 §4.2.7)
+    let upstreamReq;
+    let upstreamResponseReceived = false;
+
+    const emitRequestLog = createRequestLogEmitter({
+      req,
+      requestBody: logBody ? requestBody : undefined,
+      startTime,
     });
 
-    // Client disconnect detection
+    // Client disconnect detection (post-buffering, pre/during upstream response)
     res.on("close", () => {
       if (!res.writableFinished) {
-        abortUpstream(req, upstreamReq);
+        abortUpstream(upstreamReq);
         if (!upstreamResponseReceived) {
-          // Phase A: no upstream response received yet
           process.stderr.write(
             `${JSON.stringify({
               timestamp: new Date().toISOString(),
@@ -281,11 +291,10 @@ export function startServer({ port, host, logBody }) {
           );
           emitRequestLog(499);
         }
-        // Phase B: pipeline callback handles logging
       }
     });
 
-    // Upstream request
+    // Build upstream request
     const upstreamUrl = buildUpstreamUrl(UPSTREAM_BASE_URL, req.url);
     const upstreamHeaders = buildUpstreamHeaders(req.headers);
 
@@ -356,7 +365,7 @@ export function startServer({ port, host, logBody }) {
       emitRequestLog(502);
     });
 
-    req.pipe(upstreamReq);
+    upstreamReq.end(requestBody);
   });
 
   function shutdown() {

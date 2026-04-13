@@ -1,12 +1,14 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import {
   handleRequest,
   buildUpstreamHeaders,
   buildUpstreamUrl,
   filterResponseHeaders,
   abortUpstream,
+  bufferRequestBody,
   createRequestLogEmitter,
 } from "../src/server.js";
 
@@ -263,7 +265,6 @@ describe("buildUpstreamHeaders", () => {
       "anthropic-beta": "messages-2024-12-19",
       "anthropic-version": "2023-06-01",
       authorization: "Bearer sk-ant-xxx",
-      "content-length": "42",
     });
     assert.equal(headers["content-type"], "application/json");
     assert.equal(headers["accept"], "*/*");
@@ -272,7 +273,15 @@ describe("buildUpstreamHeaders", () => {
     assert.equal(headers["anthropic-beta"], "messages-2024-12-19");
     assert.equal(headers["anthropic-version"], "2023-06-01");
     assert.equal(headers["authorization"], "Bearer sk-ant-xxx");
-    assert.equal(headers["content-length"], "42");
+  });
+
+  it("does not forward content-length", () => {
+    const headers = buildUpstreamHeaders({
+      "content-type": "application/json",
+      "content-length": "42",
+    });
+    assert.equal(headers["content-type"], "application/json");
+    assert.equal(headers["content-length"], undefined);
   });
 
   it("excludes non-whitelisted headers", () => {
@@ -366,31 +375,61 @@ describe("filterResponseHeaders", () => {
 // ── abortUpstream ─────────────────────────────────────────
 
 describe("abortUpstream", () => {
-  it("calls req.unpipe() before upstreamReq.destroy()", () => {
-    const callOrder = [];
-    const req = { unpipe: () => callOrder.push("unpipe") };
+  it("calls upstreamReq.destroy()", () => {
+    let destroyed = false;
     const upstreamReq = {
       destroyed: false,
-      destroy: () => callOrder.push("destroy"),
+      destroy: () => {
+        destroyed = true;
+      },
     };
-    abortUpstream(req, upstreamReq);
-    assert.deepEqual(callOrder, ["unpipe", "destroy"]);
+    abortUpstream(upstreamReq);
+    assert.ok(destroyed);
   });
 
   it("is no-op when upstreamReq.destroyed is true", () => {
-    const callOrder = [];
-    const req = { unpipe: () => callOrder.push("unpipe") };
+    let destroyed = false;
     const upstreamReq = {
       destroyed: true,
-      destroy: () => callOrder.push("destroy"),
+      destroy: () => {
+        destroyed = true;
+      },
     };
-    abortUpstream(req, upstreamReq);
-    assert.deepEqual(callOrder, []);
+    abortUpstream(upstreamReq);
+    assert.ok(!destroyed);
   });
 
   it("is no-op when upstreamReq is undefined", () => {
-    const req = { unpipe: () => {} };
-    abortUpstream(req, undefined);
+    abortUpstream(undefined);
+  });
+});
+
+// ── bufferRequestBody ────────────────────────────────────
+
+describe("bufferRequestBody", () => {
+  it("resolves with concatenated Buffer from multiple chunks", async () => {
+    const stream = new PassThrough();
+    const promise = bufferRequestBody(stream);
+    stream.write("hello ");
+    stream.write("world");
+    stream.end();
+    const result = await promise;
+    assert.deepEqual(result, Buffer.from("hello world"));
+  });
+
+  it("resolves with empty Buffer when no data is written", async () => {
+    const stream = new PassThrough();
+    const promise = bufferRequestBody(stream);
+    stream.end();
+    const result = await promise;
+    assert.deepEqual(result, Buffer.alloc(0));
+  });
+
+  it("rejects on stream error", async () => {
+    const stream = new PassThrough();
+    const promise = bufferRequestBody(stream);
+    stream.destroy(new Error("ECONNRESET"));
+    await assert.rejects(promise, { message: "ECONNRESET" });
   });
 });
 
@@ -429,7 +468,7 @@ describe("createRequestLogEmitter", () => {
     return results;
   }
 
-  it("emits exactly one log — second call is no-op", () => {
+  it("includes request_body when requestBody provided", () => {
     const req = {
       method: "POST",
       url: "/v1/messages",
@@ -437,145 +476,22 @@ describe("createRequestLogEmitter", () => {
       readableEnded: true,
       destroyed: false,
     };
-    const requestChunks = [Buffer.from("hello")];
     const emitRequestLog = createRequestLogEmitter({
       req,
-      requestChunks,
+      requestBody: Buffer.from('{"model":"test"}'),
       startTime: Date.now(),
     });
 
     emitRequestLog(200, { "content-type": "application/json" });
-    emitRequestLog(502);
 
     const logs = parseLog();
     assert.equal(logs.length, 1);
     assert.equal(logs[0].status, 200);
+    assert.equal(logs[0].request_body, '{"model":"test"}');
     assert.equal(logs[0].response_headers["content-type"], "application/json");
   });
 
-  it("finalizes immediately when req.readableEnded is true", () => {
-    const req = {
-      method: "POST",
-      url: "/v1/messages",
-      headers: {},
-      readableEnded: true,
-      destroyed: false,
-    };
-    const requestChunks = [Buffer.from('{"model":"test"}')];
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      requestChunks,
-      startTime: Date.now(),
-    });
-
-    emitRequestLog(200);
-
-    const logs = parseLog();
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].request_body, '{"model":"test"}');
-  });
-
-  it("finalizes immediately when req.destroyed is true", () => {
-    const req = {
-      method: "POST",
-      url: "/v1/messages",
-      headers: {},
-      readableEnded: false,
-      destroyed: true,
-    };
-    const requestChunks = [Buffer.from("partial")];
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      requestChunks,
-      startTime: Date.now(),
-    });
-
-    emitRequestLog(499);
-
-    const logs = parseLog();
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].status, 499);
-    assert.equal(logs[0].request_body, "partial");
-  });
-
-  it("defers finalization to end event when req is still streaming", () => {
-    const req = new EventEmitter();
-    req.method = "POST";
-    req.url = "/v1/messages";
-    req.headers = {};
-    req.readableEnded = false;
-    req.destroyed = false;
-    req.resume = () => {};
-
-    const requestChunks = [Buffer.from("body")];
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      requestChunks,
-      startTime: Date.now(),
-    });
-
-    emitRequestLog(502);
-
-    // Not yet emitted
-    assert.equal(parseLog().length, 0);
-
-    // Emit end
-    req.emit("end");
-
-    const logs = parseLog();
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].status, 502);
-    assert.equal(logs[0].request_body, "body");
-  });
-
-  it("finalized guard prevents double execution when both end and error fire", () => {
-    const req = new EventEmitter();
-    req.method = "POST";
-    req.url = "/v1/messages";
-    req.headers = {};
-    req.readableEnded = false;
-    req.destroyed = false;
-    req.resume = () => {};
-
-    const requestChunks = [Buffer.from("data")];
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      requestChunks,
-      startTime: Date.now(),
-    });
-
-    emitRequestLog(499);
-
-    // Fire both events
-    req.emit("end");
-    req.emit("error", new Error("ECONNRESET"));
-
-    const logs = parseLog();
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].request_body, "data");
-  });
-
-  it("clears requestChunks after consumption", () => {
-    const req = {
-      method: "POST",
-      url: "/v1/messages",
-      headers: {},
-      readableEnded: true,
-      destroyed: false,
-    };
-    const requestChunks = [Buffer.from("a"), Buffer.from("b")];
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      requestChunks,
-      startTime: Date.now(),
-    });
-
-    emitRequestLog(200);
-
-    assert.equal(requestChunks.length, 0);
-  });
-
-  it("emits log with no request_body when requestChunks omitted, stream ended", () => {
+  it("omits request_body when requestBody not provided", () => {
     const req = {
       method: "POST",
       url: "/v1/unknown",
@@ -597,7 +513,29 @@ describe("createRequestLogEmitter", () => {
     assert.equal(logs[0].request_body, undefined);
   });
 
-  it("calls req.resume() when requestChunks omitted and stream active", () => {
+  it("emits exactly one log — second call is no-op", () => {
+    const req = {
+      method: "POST",
+      url: "/v1/messages",
+      headers: {},
+      readableEnded: true,
+      destroyed: false,
+    };
+    const emitRequestLog = createRequestLogEmitter({
+      req,
+      requestBody: Buffer.from("hello"),
+      startTime: Date.now(),
+    });
+
+    emitRequestLog(200);
+    emitRequestLog(502);
+
+    const logs = parseLog();
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].status, 200);
+  });
+
+  it("calls req.resume() when requestBody omitted and stream active", () => {
     let resumed = false;
     const req = new EventEmitter();
     req.method = "POST";
@@ -622,27 +560,6 @@ describe("createRequestLogEmitter", () => {
     assert.equal(logs[0].request_body, undefined);
   });
 
-  it("exactly-once guard works when requestChunks omitted", () => {
-    const req = {
-      method: "POST",
-      url: "/v1/unknown",
-      headers: {},
-      readableEnded: true,
-      destroyed: false,
-    };
-    const emitRequestLog = createRequestLogEmitter({
-      req,
-      startTime: Date.now(),
-    });
-
-    emitRequestLog(404);
-    emitRequestLog(405);
-
-    const logs = parseLog();
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0].status, 404);
-  });
-
   it("omits response_headers when not provided", () => {
     const req = {
       method: "POST",
@@ -653,7 +570,7 @@ describe("createRequestLogEmitter", () => {
     };
     const emitRequestLog = createRequestLogEmitter({
       req,
-      requestChunks: [],
+      requestBody: Buffer.from(""),
       startTime: Date.now(),
     });
 
