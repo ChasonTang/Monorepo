@@ -29,7 +29,7 @@ These rules override the instinct to "fill every section." Ignoring them produce
 
 - **No fabrication.** Do not invent metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or historical events. If you lack real data, write `No quantitative data available at this time` and move on.
 - **No placeholder residue.** Every `{...}` token in this template is a hint to the author, not content. Replace each one with real text or delete the surrounding line. The final document must contain zero `{YYYY-MM-DD}`, `{Name}`, `{Input}`, or similar tokens. Replace the date placeholder with an absolute date (e.g. `2026-04-20`), never a relative one ("today", "this week").
-- **No example-row residue.** Tables in §8 (Testing), §10 (Risks), and the Changelog each contain a sample row marked `(sample — delete this row)`. Delete every sample row before submitting; do not submit `{...}` cells as content.
+- **No example-row residue.** Tables in §8 (Testing) and §10 (Risks) each contain a sample row marked `(sample — delete this row)`. Delete every sample row before submitting; do not submit `{...}` cells as content.
 - **No Example block residue.** Throughout the template, blocks labeled `**Example`...`**` (including every `**Example (bad vs. good)**` block in §1, §2, §3, §4, §5, §6, §7, §9, §10) are author guidance only. Delete every Example block before submitting — they are not part of the final document's structure.
 - **Optional sections stay numbered.** When a section marked *(Optional)* does not apply, keep the heading and write one line in the body: `Not applicable — {one-sentence reason}`. Never renumber subsequent sections.
 - **`None` is a valid answer.** For Non-Goals, Risks, Future Work, and References, writing `None` (or `No significant risks identified.`) is preferred over inventing filler.
@@ -273,14 +273,14 @@ List only real, verifiable items: file paths in this repo, URLs you have checked
 
 ## Pre-submit Checklist
 
-> Meta-instruction for the RFC author/LLM. Do NOT include this section in the final RFC output. Use it as a self-check during generation; the published RFC ends after the Changelog.
+> Meta-instruction for the RFC author/LLM. Do NOT include this section in the final RFC output. Use it as a self-check during generation; the published RFC ends after §12 References.
 
 Verify each item before submitting. Any unchecked item is a blocker.
 
-- [ ] No `{...}` placeholder tokens remain anywhere in the document (run this check AFTER deleting sample rows in §8/§10/Changelog, which intentionally contain `{...}` cells).
+- [ ] No `{...}` placeholder tokens remain anywhere in the document (run this check AFTER deleting sample rows in §8/§10, which intentionally contain `{...}` cells).
 - [ ] The header date is an absolute date (not `{YYYY-MM-DD}` or a relative word like "today").
 - [ ] Every Optional section (§5, §6, §7) is either filled or contains a `Not applicable — {reason}` line. No section has been renumbered.
-- [ ] Sample rows in §8 and §10 have been deleted or replaced. Changelog contains exactly one row (v1.0) with both `Date` and `Author` filled in — no placeholders — unless this is a post-submission revision.
+- [ ] Sample rows in §8 and §10 have been deleted or replaced.
 - [ ] All `**Example`...`**` guidance blocks have been deleted from the body.
 - [ ] No fabricated metrics, user quotes, bug IDs, error messages, or commit SHAs.
 - [ ] Every `G#` in §3 appears in at least one §8 row's `Covers` cell (or is marked `(non-testable: {reason})` in §3) AND in at least one §9 phase's "Done when" clause.
@@ -288,22 +288,3 @@ Verify each item before submitting. Any unchecked item is a blocker.
 - [ ] All hard caps respected: §1 ≤150 words, §2 ≤200 words, §3 ≤5 Goals, §4.2 ≤5 subsections (≤300 words each), §4.3 1–3 decisions, §7 ≤4 concerns, §8 3–8 scenarios, §9 2–5 phases, §10 ≤6 risks, §11 ≤5 items, total ≤4,000 words.
 - [ ] All banned phrases absent: "we will monitor", "we will document", "works correctly", "behaves as expected", "comprehensively improve", "significantly enhance", "robust and scalable", "best practices", "industry standard", "leverage", "seamlessly", "ensure that", "in order to", "going forward".
 - [ ] References in §12 are all real paths or URLs that were actually checked.
-
----
-
-## Changelog
-
-{Entries are listed in reverse chronological order (newest first).  
-Only substantive design changes (scope, approach, interface, etc.) require a new entry and version bump. Implementation progress updates (e.g., checking off tasks) do not.}
-
-**Initial draft:** the table must contain exactly one row — v1.0 — with both `Date` and `Author` cells filled in (real absolute date, real author name). Add v1.1 (or higher) rows only when substantive changes are made after first submission.
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | {YYYY-MM-DD — replace with absolute date} | {Name — replace with real author} | Initial version |
-
-*Example of a row added after first submission (illustrative — do NOT include in the initial draft; do NOT copy the placeholder values verbatim — `{absolute-date}` and `{author-name}` are format hints, not real data):*
-
-```
-| 1.1 | {absolute-date} | {author-name} | {change-summary} |
-```
