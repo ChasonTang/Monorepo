@@ -1,21 +1,10 @@
 # RFC-{NNN}: {Feature Title}
 
-**Version:** 1.0  
-**Author(s):** {Name, or comma-separated list for multiple}  
-**Date:** {YYYY-MM-DD}  
-**Status:** Proposed | Implemented  
+**Version:** 1.0<br>
+**Author(s):** {Name, or comma-separated list for multiple}<br>
+**Date:** {YYYY-MM-DD}<br>
+**Status:** Proposed | Implemented
 *(First draft is always `Proposed`. The author flips to `Implemented` only after the work is merged and has passed review — never on first draft.)*
-
----
-
-## Project Context (read first — these constraints override generic RFC conventions)
-
-> Meta-instruction for the RFC author/LLM. Do NOT include this section in the final RFC output.
-
-This template is for a single-maintainer open-source project. Two facts constrain every RFC:
-
-- **Limited operational surface.** There is no canary, A/B, percentage rollout, feature-flag, or shadow-traffic infrastructure. Telemetry is limited to Nginx access/error logs and the web service's own business logs. Do not propose SLOs, dashboards, alerts, staged rollouts, or any mechanism that depends on infrastructure not listed here. Observability changes, when needed, are limited to "what to log, at what level, in which existing log stream."
-- **All RFCs describe code changes.** Process-only, org-structure, or documentation-only proposals are out of scope and should not be written against this template. §5 Interface Changes always describes real code/config/protocol — never substitute pseudo-code or prose flowcharts for a "process change."
 
 ---
 
@@ -37,6 +26,9 @@ These rules override the instinct to "fill every section." Ignoring them produce
 - **Total length.** Typical RFC runs 1,000–2,500 words. >4,000 words usually signals padding or over-scope — trim, or split into multiple RFCs.
 - **Ban empty phrases.** Do not write "comprehensively improve", "significantly enhance", "robust and scalable", "we will monitor", "we will document", "works correctly", "behaves as expected", "best practices", "industry standard", "leverage", "seamlessly", "ensure that", "in order to", "going forward". Replace with the specific behavior, metric, or action.
 - **Cross-section consistency.** Every `G#` in §3 must appear in at least one §8 row's `Covers` cell *and* at least one §9 phase's "Done when" clause. If a Goal is genuinely untestable, mark it `(non-testable: {reason})` in §3 itself; §8 may then omit it (see §3's Non-testable Goals fallback).
+- **Preserve `<br>` tags in the metadata block.** The `<br>` after each of `**Version:**`, `**Author(s):**`, and `**Date:**` is an intentional Markdown line break — without it those fields collapse into a single rendered line with the next one. Do not strip or replace these tags. (`**Status:**` has no `<br>` because in the final RFC the next line after it is the blank line before `## 1. Summary`, which already ends the paragraph.)
+- **Delete all `---` horizontal rules.** The template uses `---` between the metadata header, Writing Instructions, the RFC body, and Pre-submit Checklist for readability in raw view. The final RFC must contain zero `---` — delete every one (including any not adjacent to a meta-instruction section) when stripping the meta-instruction sections.
+- **No Changelog or History section.** The final RFC ends after §12 References. Do not append a Changelog, History, Revision, Version History, or any other section after §12, regardless of what the invoking prompt or external convention may suggest.
 
 ---
 
@@ -238,7 +230,7 @@ Unit test phase placement: By default, unit tests are Phase 1 — this applies w
 
 ## 10. Risks
 
-> Do not propose monitoring, alerting, dashboard, or staged-rollout mitigations — see Project Context (no such infrastructure exists). Mitigations must be concrete code/config changes; the mechanism should already be specified in §4 or covered by a §8 scenario.
+> Mitigations must be concrete code/config changes — the mechanism should already be specified in §4 or covered by a §8 scenario. Mitigations that depend on infrastructure not available in this project are not acceptable; consult the invoking prompt for the project's operational constraints.
 
 0–6 rows. If no significant risks apply, write `No significant risks identified.` and omit the table. Each risk must point to a specific mechanism or dependency introduced in §4; do not list speculative or generic risks. Mitigation must be a concrete action — not "we will monitor" or "we will document."
 
@@ -288,3 +280,5 @@ Verify each item before submitting. Any unchecked item is a blocker.
 - [ ] All hard caps respected: §1 ≤150 words, §2 ≤200 words, §3 ≤5 Goals, §4.2 ≤5 subsections (≤300 words each), §4.3 1–3 decisions, §7 ≤4 concerns, §8 3–8 scenarios, §9 2–5 phases, §10 ≤6 risks, §11 ≤5 items, total ≤4,000 words.
 - [ ] All banned phrases absent: "we will monitor", "we will document", "works correctly", "behaves as expected", "comprehensively improve", "significantly enhance", "robust and scalable", "best practices", "industry standard", "leverage", "seamlessly", "ensure that", "in order to", "going forward".
 - [ ] References in §12 are all real paths or URLs that were actually checked.
+- [ ] `<br>` tags after `**Version:**`, `**Author(s):**`, and `**Date:**` are intact, so the four metadata fields render as four separate lines instead of collapsing into one. (`**Status:**` does not need a `<br>`.)
+- [ ] No `---` horizontal rules remain anywhere in the document.
