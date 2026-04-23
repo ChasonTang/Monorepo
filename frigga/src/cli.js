@@ -26,19 +26,21 @@ export function parseArgs(argv) {
  */
 export function printUsage() {
   process.stderr.write(
-    "Usage: node src/index.js [--port=<port>] [--host=<host>] [--log-body]\n" +
+    "Usage: node src/index.js [--port=<port>] [--host=<host>] [--log-body] [--device-id=<id>] [--account-uuid=<uuid>]\n" +
       "\n" +
       "Options:\n" +
-      "  --port      HTTP listen port (default: 3000)\n" +
-      "  --host      HTTP listen address (default: 127.0.0.1)\n" +
-      "  --log-body  Include request body in NDJSON logs (default: off)\n",
+      "  --port          HTTP listen port (default: 3000)\n" +
+      "  --host          HTTP listen address (default: 127.0.0.1)\n" +
+      "  --log-body      Include request body in NDJSON logs (default: off)\n" +
+      "  --device-id     Override metadata.user_id.device_id on every forwarded request (default: passthrough)\n" +
+      "  --account-uuid  Override metadata.user_id.account_uuid on every forwarded request (default: passthrough)\n",
   );
 }
 
 /**
  * Validate and extract arguments with defaults.
  * @param {Record<string, string | true>} args
- * @returns {{ port: number, host: string, logBody: boolean }}
+ * @returns {{ port: number, host: string, logBody: boolean, deviceId: string | undefined, accountUuid: string | undefined }}
  */
 export function resolveArgs(args) {
   const portStr = args["port"];
@@ -59,5 +61,10 @@ export function resolveArgs(args) {
 
   const logBody = args["log-body"] === true;
 
-  return { port, host, logBody };
+  const deviceId =
+    typeof args["device-id"] === "string" ? args["device-id"] : undefined;
+  const accountUuid =
+    typeof args["account-uuid"] === "string" ? args["account-uuid"] : undefined;
+
+  return { port, host, logBody, deviceId, accountUuid };
 }

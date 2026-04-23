@@ -117,6 +117,47 @@ export function bufferRequestBody(req) {
 }
 
 /**
+ * Replace metadata.user_id.{device_id, account_uuid} when the corresponding
+ * CLI option is set. Returns the input Buffer unchanged on any short-circuit
+ * (no override requested, parse failure, or shape mismatch).
+ * @param {Buffer} body
+ * @param {{ deviceId?: string, accountUuid?: string }} options
+ * @returns {Buffer}
+ */
+export function overrideMetadataUserId(body, { deviceId, accountUuid }) {
+  if (deviceId === undefined && accountUuid === undefined) return body;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(body.toString("utf-8"));
+  } catch {
+    return body;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return body;
+  }
+
+  const userIdStr = parsed.metadata?.user_id;
+  if (typeof userIdStr !== "string") return body;
+
+  let userId;
+  try {
+    userId = JSON.parse(userIdStr);
+  } catch {
+    return body;
+  }
+  if (userId === null || typeof userId !== "object" || Array.isArray(userId)) {
+    return body;
+  }
+
+  if (deviceId !== undefined) userId.device_id = deviceId;
+  if (accountUuid !== undefined) userId.account_uuid = accountUuid;
+
+  parsed.metadata.user_id = JSON.stringify(userId);
+  return Buffer.from(JSON.stringify(parsed), "utf-8");
+}
+
+/**
  * Create a request log emitter with exactly-once guard.
  * @param {object} ctx
  * @param {import("node:http").IncomingMessage} ctx.req
@@ -204,10 +245,10 @@ export function handleRequest({ method, url }, isShuttingDown) {
 
 /**
  * Start the HTTP proxy server.
- * @param {{ port: number, host: string, logBody: boolean }} config
+ * @param {{ port: number, host: string, logBody: boolean, deviceId?: string, accountUuid?: string }} config
  * @returns {Promise<http.Server>}
  */
-export function startServer({ port, host, logBody }) {
+export function startServer({ port, host, logBody, deviceId, accountUuid }) {
   let isShuttingDown = false;
   let forceTimer;
 
@@ -262,6 +303,11 @@ export function startServer({ port, host, logBody }) {
       emitRequestLog(499);
       return;
     }
+
+    requestBody = overrideMetadataUserId(requestBody, {
+      deviceId,
+      accountUuid,
+    });
 
     // Phase 2: Forward to upstream
     // eslint-disable-next-line prefer-const -- assigned after event handlers to eliminate race conditions (RFC-004 §4.2.7)

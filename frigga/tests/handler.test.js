@@ -10,6 +10,7 @@ import {
   abortUpstream,
   bufferRequestBody,
   createRequestLogEmitter,
+  overrideMetadataUserId,
 } from "../src/server.js";
 
 // ── handleRequest ─────────────────────────────────────────
@@ -579,5 +580,120 @@ describe("createRequestLogEmitter", () => {
     const logs = parseLog();
     assert.equal(logs.length, 1);
     assert.equal(logs[0].response_headers, undefined);
+  });
+});
+
+// ── overrideMetadataUserId ────────────────────────────────
+
+describe("overrideMetadataUserId — override semantics (G1)", () => {
+  function bodyWith(userIdObj) {
+    return Buffer.from(
+      JSON.stringify({ metadata: { user_id: JSON.stringify(userIdObj) } }),
+      "utf-8",
+    );
+  }
+
+  it("S1: --device-id only replaces device_id and preserves account_uuid + session_id", () => {
+    const input = bodyWith({
+      device_id: "old",
+      account_uuid: "u",
+      session_id: "s",
+    });
+    const out = overrideMetadataUserId(input, { deviceId: "new" });
+    const userId = JSON.parse(
+      JSON.parse(out.toString("utf-8")).metadata.user_id,
+    );
+    assert.deepEqual(userId, {
+      device_id: "new",
+      account_uuid: "u",
+      session_id: "s",
+    });
+  });
+
+  it("S2: --account-uuid only replaces account_uuid and preserves device_id + session_id", () => {
+    const input = bodyWith({
+      device_id: "old",
+      account_uuid: "u",
+      session_id: "s",
+    });
+    const out = overrideMetadataUserId(input, { accountUuid: "u2" });
+    const userId = JSON.parse(
+      JSON.parse(out.toString("utf-8")).metadata.user_id,
+    );
+    assert.deepEqual(userId, {
+      device_id: "old",
+      account_uuid: "u2",
+      session_id: "s",
+    });
+  });
+
+  it("S3: both flags replace both fields and preserve session_id", () => {
+    const input = bodyWith({
+      device_id: "old",
+      account_uuid: "u",
+      session_id: "s",
+    });
+    const out = overrideMetadataUserId(input, {
+      deviceId: "new",
+      accountUuid: "u2",
+    });
+    const userId = JSON.parse(
+      JSON.parse(out.toString("utf-8")).metadata.user_id,
+    );
+    assert.deepEqual(userId, {
+      device_id: "new",
+      account_uuid: "u2",
+      session_id: "s",
+    });
+  });
+
+  it("S4: unknown keys (custom_field) and session_id survive override", () => {
+    const input = bodyWith({
+      device_id: "old",
+      account_uuid: "u",
+      session_id: "s",
+      custom_field: "x",
+    });
+    const out = overrideMetadataUserId(input, { deviceId: "new" });
+    const userId = JSON.parse(
+      JSON.parse(out.toString("utf-8")).metadata.user_id,
+    );
+    assert.equal(userId.custom_field, "x");
+    assert.equal(userId.session_id, "s");
+    assert.equal(userId.device_id, "new");
+  });
+});
+
+describe("overrideMetadataUserId — no-op short-circuit (G2)", () => {
+  it("S5: no flags set returns reference-identical input Buffer", () => {
+    const input = Buffer.from(
+      JSON.stringify({ metadata: { user_id: '{"device_id":"d"}' } }),
+      "utf-8",
+    );
+    const out = overrideMetadataUserId(input, {});
+    assert.equal(out, input);
+  });
+});
+
+describe("overrideMetadataUserId — malformed-body passthrough (G3)", () => {
+  it("S6: top-level body not JSON returns reference-identical input Buffer", () => {
+    const input = Buffer.from("not-json");
+    const out = overrideMetadataUserId(input, { deviceId: "x" });
+    assert.equal(out, input);
+  });
+
+  it("S7: metadata.user_id missing returns reference-identical input Buffer", () => {
+    const input = Buffer.from(JSON.stringify({ messages: [] }), "utf-8");
+    const out = overrideMetadataUserId(input, { deviceId: "x" });
+    assert.equal(out, input);
+  });
+
+  it("S8: inner user_id not JSON returns reference-identical input Buffer", () => {
+    const input = Buffer.from(
+      JSON.stringify({ metadata: { user_id: "not-json" } }),
+      "utf-8",
+    );
+    const out = overrideMetadataUserId(input, { deviceId: "x" });
+    assert.equal(out, input);
   });
 });
