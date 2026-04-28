@@ -1,12 +1,24 @@
-# Declare build arguments for optional features
+# GN build for xquic on macOS with the BoringSSL backend.
+#
+# Source list mirrors xquic/CMakeLists.txt as of v1.9.0. HTTP/3 and QPACK
+# sources are intentionally excluded — only the QUIC transport library is
+# built. BabaSSL and Windows code paths are not supported.
+#
+# Defines deliberately NOT set (matching upstream defaults):
+#   * NOCRYPT — BoringSSL auto-defines OPENSSL_IS_BORINGSSL via openssl/base.h.
+#   * NDEBUG_PRINT / NPRINT_MALLOC — xquic checks DEBUG_PRINT / PRINT_MALLOC
+#     (the un-prefixed forms), which we leave undefined so they stay silent.
+
+assert(target_os == "mac", "xquic GN build only supports macOS")
+
 declare_args() {
-  # Congestion control algorithms
+  # Congestion control algorithms (cubic + bbr are always built)
   xqc_enable_bbr2 = false
   xqc_enable_copa = false
   xqc_enable_reno = false
   xqc_enable_unlimited = false
 
-  # Multipath QUIC support
+  # Multipath QUIC interop scheduler
   xqc_enable_mp_interop = false
 
   # Forward Error Correction (FEC)
@@ -15,48 +27,144 @@ declare_args() {
   xqc_enable_rsc = false  # Reed-Solomon (requires xqc_enable_fec)
   xqc_enable_pkm = false  # Packet Mask (requires xqc_enable_fec)
 
-  # Protocol features
-  xqc_no_pid_packet_process = false  # Hide path_id in API
+  # Hide path_id in xqc_engine_packet_process API
+  xqc_no_pid_packet_process = false
 
-  # Security and protection
-  xqc_protect_pool_mem = false  # Memory pool write protection (DEBUG ONLY -
-                                # severe performance impact!)
-  xqc_ping_attack_protect = !is_debug  # Enable in release, optional in debug
+  # Memory pool write protection (DEBUG ONLY - severe performance impact!)
+  xqc_protect_pool_mem = false
 
-  # Debug options
-  xqc_enable_debug =
-      is_debug  # Enable debug assertions (e.g., list integrity checks)
+  # Ping attack protection - enabled in release, optional in debug
+  xqc_ping_attack_protect = !is_debug
 
-  # Logging options (auto-configured based on is_debug)
-  xqc_print_secret =
-      is_debug  # Print TLS secrets for Wireshark (DEBUG ONLY - security risk!)
-  xqc_disable_log = false  # Completely disable all logging (EXTREME - overrides
-                           # all log options!)
-  xqc_only_error_log = !is_debug  # Only error logs in release
-  xqc_enable_event_log = is_debug  # Enable qlog event logging in debug
+  # Debug assertions (e.g., list integrity checks)
+  xqc_enable_debug = is_debug
+
+  # Print TLS secrets for Wireshark (DEBUG ONLY - security risk!)
+  xqc_print_secret = is_debug
+
+  # Completely disable all logging - overrides every other log option
+  xqc_disable_log = false
+
+  # Only error logs in release
+  xqc_only_error_log = !is_debug
+
+  # qlog event logging
+  xqc_enable_event_log = is_debug
 }
 
-# HTTP3/QPACK sources
-# http3_sources = [
-# "src/http3/xqc_h3_conn.c",
-# "src/http3/xqc_h3_stream.c",
-# "src/http3/xqc_h3_request.c",
-# "src/http3/frame/xqc_h3_frame.c",
-# "src/http3/xqc_h3_header.c",
-# "src/http3/xqc_h3_ctx.c",
-# "src/http3/xqc_h3_defs.c",
-# "src/http3/qpack/xqc_qpack.c",
-# "src/http3/qpack/xqc_prefixed_int.c",
-# "src/http3/qpack/xqc_prefixed_str.c",
-# "src/http3/qpack/xqc_decoder.c",
-# "src/http3/qpack/xqc_encoder.c",
-# "src/http3/qpack/xqc_rep.c",
-# "src/http3/qpack/xqc_ins.c",
-# "src/http3/qpack/stable/xqc_stable.c",
-# "src/http3/qpack/dtable/xqc_dtable.c",
-# "src/http3/xqc_h3_ext_dgram.c",
-# "src/http3/xqc_h3_ext_bytestream.c",
-# ]
+# FEC sub-schemes are useless without the FEC core.
+assert(!xqc_enable_xor || xqc_enable_fec,
+       "xqc_enable_xor requires xqc_enable_fec")
+assert(!xqc_enable_rsc || xqc_enable_fec,
+       "xqc_enable_rsc requires xqc_enable_fec")
+assert(!xqc_enable_pkm || xqc_enable_fec,
+       "xqc_enable_pkm requires xqc_enable_fec")
+
+# Debug-only flags must not leak into release builds.
+assert(!xqc_protect_pool_mem || is_debug,
+       "xqc_protect_pool_mem is debug-only (severe perf impact)")
+assert(!xqc_print_secret || is_debug,
+       "xqc_print_secret is debug-only (leaks TLS secrets)")
+
+# Public-facing config: anything depending on //xquic gets the include dir so
+# it can resolve <xquic/xquic.h> and the bundled <xquic/xqc_configure.h>.
+#
+# Defines referenced by public headers (xquic.h #ifdefs alter struct layouts
+# and exported function signatures) MUST live here so consumers see the same
+# ABI the library was built with.
+config("xquic_public_config") {
+  include_dirs = [ "include" ]
+
+  defines = []
+
+  # Congestion control - alters callback struct layouts in xquic.h
+  if (xqc_enable_bbr2) {
+    defines += [ "XQC_ENABLE_BBR2" ]
+  }
+  if (xqc_enable_reno) {
+    defines += [ "XQC_ENABLE_RENO" ]
+  }
+  if (xqc_enable_copa) {
+    defines += [ "XQC_ENABLE_COPA" ]
+  }
+  if (xqc_enable_unlimited) {
+    defines += [ "XQC_ENABLE_UNLIMITED" ]
+  }
+
+  # Multipath - alters API surface in xquic.h
+  if (xqc_enable_mp_interop) {
+    defines += [ "XQC_ENABLE_MP_INTEROP" ]
+  }
+
+  # Memory protection - changes struct layout in xquic.h
+  if (xqc_protect_pool_mem) {
+    defines += [ "XQC_PROTECT_POOL_MEM" ]
+  }
+
+  # Engine API shape (xqc_engine_packet_process signature)
+  if (xqc_no_pid_packet_process) {
+    defines += [ "XQC_NO_PID_PACKET_PROCESS" ]
+  }
+}
+
+# Private build settings used while compiling xquic itself.
+config("xquic_internal_config") {
+  include_dirs = [
+    ".",
+    "include",
+  ]
+
+  cflags_c = [
+    "-Wno-unused",
+    "-Wno-sign-compare",
+    "-Wno-unused-parameter",
+    "-Wno-pointer-sign",
+    "-Wno-missing-field-initializers",
+  ]
+
+  defines = []
+
+  # Debug assertions
+  if (xqc_enable_debug) {
+    defines += [ "XQC_DEBUG" ]
+  }
+
+  # Forward Error Correction (FEC) - implementation gates only
+  if (xqc_enable_fec) {
+    defines += [ "XQC_ENABLE_FEC" ]
+  }
+  if (xqc_enable_xor) {
+    defines += [ "XQC_ENABLE_XOR" ]
+  }
+  if (xqc_enable_rsc) {
+    defines += [ "XQC_ENABLE_RSC" ]
+  }
+  if (xqc_enable_pkm) {
+    defines += [ "XQC_ENABLE_PKM" ]
+  }
+
+  # Internal protections
+  if (xqc_ping_attack_protect) {
+    defines += [ "XQC_PING_ATTACK_PROTECT" ]
+  }
+
+  # Logging options (priority: DISABLE_LOG > ONLY_ERROR_LOG)
+  if (xqc_disable_log) {
+    # Completely disable all logging
+    defines += [ "XQC_DISABLE_LOG" ]
+  } else {
+    # Normal logging with filters
+    if (xqc_only_error_log) {
+      defines += [ "XQC_ONLY_ERROR_LOG" ]
+    }
+    if (xqc_print_secret) {
+      defines += [ "XQC_PRINT_SECRET" ]
+    }
+    if (xqc_enable_event_log) {
+      defines += [ "XQC_ENABLE_EVENT_LOG" ]
+    }
+  }
+}
 
 # Transport sources
 transport_sources = [
@@ -93,6 +201,30 @@ transport_sources = [
   "src/transport/xqc_transport_params.c",
   "src/transport/xqc_utils.c",
 ]
+
+# Optional multipath QUIC interop scheduler
+if (xqc_enable_mp_interop) {
+  transport_sources += [ "src/transport/scheduler/xqc_scheduler_interop.c" ]
+}
+
+# Optional FEC sources
+if (xqc_enable_fec) {
+  transport_sources += [
+    "src/transport/fec_schemes/xqc_galois_calculation.c",
+    "src/transport/xqc_fec.c",
+    "src/transport/xqc_fec_scheme.c",
+  ]
+
+  if (xqc_enable_xor) {
+    transport_sources += [ "src/transport/fec_schemes/xqc_xor.c" ]
+  }
+  if (xqc_enable_rsc) {
+    transport_sources += [ "src/transport/fec_schemes/xqc_reed_solomon.c" ]
+  }
+  if (xqc_enable_pkm) {
+    transport_sources += [ "src/transport/fec_schemes/xqc_packet_mask.c" ]
+  }
+}
 
 # TLS sources (BoringSSL only)
 tls_sources = [
@@ -148,123 +280,12 @@ if (xqc_enable_unlimited) {
   congestion_control_sources += [ "src/congestion_control/xqc_unlimited_cc.c" ]
 }
 
-# Multipath QUIC scheduler
-if (xqc_enable_mp_interop) {
-  transport_sources += [ "src/transport/scheduler/xqc_scheduler_interop.c" ]
-}
-
-# FEC (Forward Error Correction) sources
-if (xqc_enable_fec) {
-  fec_sources = [
-    "src/transport/fec_schemes/xqc_galois_calculation.c",
-    "src/transport/xqc_fec.c",
-    "src/transport/xqc_fec_scheme.c",
-  ]
-
-  if (xqc_enable_xor) {
-    fec_sources += [ "src/transport/fec_schemes/xqc_xor.c" ]
-  }
-
-  if (xqc_enable_rsc) {
-    fec_sources += [ "src/transport/fec_schemes/xqc_reed_solomon.c" ]
-  }
-
-  if (xqc_enable_pkm) {
-    fec_sources += [ "src/transport/fec_schemes/xqc_packet_mask.c" ]
-  }
-
-  transport_sources += fec_sources
-}
-
 shared_library("xquic") {
+  public_configs = [ ":xquic_public_config" ]
+  configs += [ ":xquic_internal_config" ]
+
   sources = transport_sources + tls_sources + common_sources +
             congestion_control_sources
-  include_dirs = [
-    ".",
-    "include",
-  ]
-  cflags_c = [
-    "-Wno-unused",
-    "-Wno-sign-compare",
-    "-Wno-unused-parameter",
-    "-Wno-pointer-sign",
-    "-Wno-missing-field-initializers",
-  ]
-
-  defines = [
-    # Note: BoringSSL auto-defines OPENSSL_IS_BORINGSSL in <openssl/base.h>
-    # NOCRYPT, NDEBUG_PRINT, NPRINT_MALLOC are not used anywhere in xquic
-    # Code checks for DEBUG_PRINT and PRINT_MALLOC (without 'N' prefix)
-    # These are disabled by default (not defined), so no need to define N* variants
-  ]
-
-  # Debug assertions
-  if (xqc_enable_debug) {
-    defines += [ "XQC_DEBUG" ]
-  }
-
-  # Congestion control algorithms
-  if (xqc_enable_bbr2) {
-    defines += [ "XQC_ENABLE_BBR2" ]
-  }
-  if (xqc_enable_copa) {
-    defines += [ "XQC_ENABLE_COPA" ]
-  }
-  if (xqc_enable_reno) {
-    defines += [ "XQC_ENABLE_RENO" ]
-  }
-  if (xqc_enable_unlimited) {
-    defines += [ "XQC_ENABLE_UNLIMITED" ]
-  }
-
-  # Multipath QUIC
-  if (xqc_enable_mp_interop) {
-    defines += [ "XQC_ENABLE_MP_INTEROP" ]
-  }
-
-  # Forward Error Correction (FEC)
-  if (xqc_enable_fec) {
-    defines += [ "XQC_ENABLE_FEC" ]
-  }
-  if (xqc_enable_xor) {
-    defines += [ "XQC_ENABLE_XOR" ]
-  }
-  if (xqc_enable_rsc) {
-    defines += [ "XQC_ENABLE_RSC" ]
-  }
-  if (xqc_enable_pkm) {
-    defines += [ "XQC_ENABLE_PKM" ]
-  }
-
-  # Protocol features
-  if (xqc_no_pid_packet_process) {
-    defines += [ "XQC_NO_PID_PACKET_PROCESS" ]
-  }
-
-  # Security and protection
-  if (xqc_protect_pool_mem) {
-    defines += [ "XQC_PROTECT_POOL_MEM" ]
-  }
-  if (xqc_ping_attack_protect) {
-    defines += [ "XQC_PING_ATTACK_PROTECT" ]
-  }
-
-  # Logging options (priority: DISABLE_LOG > ONLY_ERROR_LOG)
-  if (xqc_disable_log) {
-    # Completely disable all logging
-    defines += [ "XQC_DISABLE_LOG" ]
-  } else {
-    # Normal logging with filters
-    if (xqc_only_error_log) {
-      defines += [ "XQC_ONLY_ERROR_LOG" ]
-    }
-    if (xqc_print_secret) {
-      defines += [ "XQC_PRINT_SECRET" ]
-    }
-    if (xqc_enable_event_log) {
-      defines += [ "XQC_ENABLE_EVENT_LOG" ]
-    }
-  }
 
   deps = [
     "//boringssl:crypto",

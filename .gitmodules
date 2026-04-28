@@ -4,3 +4,6 @@
 [submodule "boringssl"]
 	path = boringssl
 	url = https://github.com/google/boringssl.git
+[submodule "c-ares"]
+	path = c-ares
+	url = git@github.com:c-ares/c-ares.git
