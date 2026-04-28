@@ -44,7 +44,7 @@ This is a **single-maintainer open-source project** with limited operational cap
 
 2. **Read the real code.** Use Read/Glob/Grep on the paths in `[Related Code or Background]`. Every file path, function name, and interface signature cited in §4, §5, §8, §12 must come from real code — no fabrication.
 
-3. **Allocate the next RFC number.** Identify the project's RFC directory (e.g., `docs/`, `frigga/docs/`, `odin/docs/`); glob `rfc_*.md` and take the next unused number (if 001–007 exist, this is 008).
+3. **Allocate the next RFC number.** Identify the project's RFC directory (e.g., `docs/`, `frigga/docs/`); glob `rfc_*.md` and take the next unused number (if 001–007 exist, this is 008).
 
 4. **Ask before guessing.** If you can't fill a section truthfully (e.g., compatibility surface unclear, success criteria undefined), **stop and ask the user**. Do not fall back to template Example content or speculation.
 

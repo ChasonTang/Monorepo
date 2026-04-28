@@ -9,6 +9,8 @@
 #   * NDEBUG_PRINT / NPRINT_MALLOC — xquic checks DEBUG_PRINT / PRINT_MALLOC
 #     (the un-prefixed forms), which we leave undefined so they stay silent.
 
+import("//build/component.gni")
+
 assert(target_os == "mac", "xquic GN build only supports macOS")
 
 declare_args() {
@@ -280,7 +282,7 @@ if (xqc_enable_unlimited) {
   congestion_control_sources += [ "src/congestion_control/xqc_unlimited_cc.c" ]
 }
 
-shared_library("xquic") {
+component("xquic") {
   public_configs = [ ":xquic_public_config" ]
   configs += [ ":xquic_internal_config" ]
 

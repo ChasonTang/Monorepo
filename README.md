@@ -27,6 +27,19 @@ rm -rf out/
 - Compiler flags: `-Wall -Wextra -Werror` (strict warnings as errors)
 - Currently supports macOS only (x86_64 and ARM64)
 
+### macOS SDK
+
+Place `Command_Line_Tools_for_Xcode_<version>.dmg` (download from
+<https://developer.apple.com/download/all/>) at the repo root and run:
+
+```bash
+./extract_sdk.sh
+```
+
+The SDK is extracted to `build/sdk/MacOSX.sdk/`, which is where the
+toolchain's `sysroot` points by default. The build will not work until this
+step is done.
+
 ## Architecture
 
 This is a C monorepo structured for scalability:
@@ -54,6 +67,9 @@ executable("my_program") {
 - `static_library()` - Creates a static library (.a)
 - `shared_library()` - Creates a shared library (.dylib on macOS)
 - `source_set()` - Lightweight alternative to static_library
+- `component()` - Resolves to `shared_library` in debug (fast incremental
+  linking) or `source_set` in release (whole-program LTO). Import via
+  `import("//build/component.gni")`.
 
 ## Important Notes
 

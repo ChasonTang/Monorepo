@@ -1,3 +1,5 @@
+import("//build/component.gni")
+
 config("boringssl_public_config") {
   include_dirs = [ "include" ]
 }
@@ -11,7 +13,7 @@ config("boringssl_config") {
   cflags = [ "-fvisibility=hidden" ]
 }
 
-shared_library("crypto") {
+component("crypto") {
   public_configs = [ ":boringssl_public_config" ]
 
   configs += [
@@ -660,7 +662,7 @@ shared_library("crypto") {
   ]
 }
 
-shared_library("ssl") {
+component("ssl") {
   public_configs = [ ":boringssl_public_config" ]
 
   configs += [

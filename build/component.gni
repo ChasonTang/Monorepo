@@ -1,0 +1,22 @@
+# component() — build mode switch keyed off is_debug.
+#
+#   is_debug = true  -> shared_library (fast relink in dev)
+#   is_debug = false -> source_set     (whole-program LTO in release)
+#
+# Use exactly like shared_library / source_set; all invoker variables are
+# forwarded. Default configs come from set_defaults("component") in
+# //build/BUILDCONFIG.gn.
+
+if (is_debug) {
+  _component_mode = "shared_library"
+} else {
+  _component_mode = "source_set"
+}
+
+template("component") {
+  target(_component_mode, target_name) {
+    # Inherit component's defaults, not shared_library's / source_set's.
+    configs = []
+    forward_variables_from(invoker, "*")
+  }
+}

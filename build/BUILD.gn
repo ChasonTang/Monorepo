@@ -42,3 +42,17 @@ config("asan") {
   cflags = [ "-fsanitize=address" ]
   ldflags = [ "-fsanitize=address" ]
 }
+
+# ThinLTO: parallel cross-module optimization with cached per-module IR.
+# Applied automatically in release (see BUILDCONFIG.gn). Skipped in debug
+# because LTO inflates compile units, slows incremental link, and degrades
+# step-through debuggability. The toolchain's llvm-ar handles bitcode .o
+# in archives correctly.
+config("lto") {
+  cflags = [ "-flto=thin" ]
+  ldflags = [
+    "-flto=thin",
+    # ld64.lld uses Mach-O syntax (not GNU --thinlto-cache-dir).
+    "-Wl,-cache_path_lto,thinlto-cache",
+  ]
+}

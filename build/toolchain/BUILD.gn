@@ -2,8 +2,8 @@
 
 toolchain("clang") {
   prefix = rebase_path("//tool/clang/bin", root_build_dir)
-  sysroot = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-  cxx_include = "$sysroot/usr/include/c++/v1"
+  clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
+  sysroot = rebase_path("//build/sdk/MacOSX.sdk", root_build_dir)
   cc = "$prefix/clang"
   cxx = "$prefix/clang++"
   asm = "$prefix/clang"
@@ -19,7 +19,7 @@ toolchain("clang") {
 
   tool("cxx") {
     depfile = "{{output}}.d"
-    command = "$cxx -nostdinc++ -isystem $cxx_include -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+    command = "$cxx -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
@@ -43,7 +43,7 @@ toolchain("clang") {
 
   tool("solink") {
     rspfile = "{{output}}.rsp"
-    command = "$ld -isysroot $sysroot -shared {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile"
+    command = "$ld -isysroot $sysroot -shared -nostdlib++ {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile $clang_lib/libc++.a"
     rspfile_content = "{{inputs}}"
     default_output_extension = ".dylib"
     output_prefix = "lib"
@@ -54,7 +54,7 @@ toolchain("clang") {
     # Output executables to the root output directory, not obj directory
     outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
     rspfile = "$outfile.rsp"
-    command = "$ld -isysroot $sysroot {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}}"
+    command = "$ld -isysroot $sysroot -nostdlib++ {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
     rspfile_content = "{{inputs}}"
     outputs = [ outfile ]
   }

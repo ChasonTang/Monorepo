@@ -4,6 +4,8 @@
 # (ares_config.h, ares_build.h) are hand-tailored for Darwin/clang and live
 # under //build/secondary/c-ares/config so the upstream tree is untouched.
 
+import("//build/component.gni")
+
 # Public-facing config: anything that depends on //c-ares gets these include
 # dirs so it can resolve <ares.h> and the generated <ares_build.h>.
 config("cares_public_config") {
@@ -40,7 +42,7 @@ config("cares_internal_config") {
   ]
 }
 
-shared_library("cares") {
+component("cares") {
   public_configs = [ ":cares_public_config" ]
   configs += [ ":cares_internal_config" ]
 

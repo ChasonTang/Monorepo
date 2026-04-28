@@ -13,6 +13,12 @@ Thumbs.db
 # Tool dependencies directory (absolute path from repo root)
 /tool/
 
+# Extracted macOS SDK (produced by extract_sdk.sh)
+/build/sdk/
+
+# Command Line Tools dmg (downloaded by developer, not committed)
+/Command_Line_Tools_for_Xcode_*.dmg
+
 # Editor and IDE files
 .vscode/
 .idea/
