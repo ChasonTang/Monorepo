@@ -6,9 +6,9 @@
 set -e  # Exit on any error
 
 # Version and platform configuration
-GN_GIT_REVISION="97b68a0bb62b7528bc3491c7949d6804223c2b82"  # Fixed gn git revision
-NINJA_VERSION="1.13.0"  # Ninja version
-CLANG_GIT_REVISION="725656bdd885483c39f482a01ea25d67acf39c46"  # Clang git revision
+GN_GIT_REVISION="11777fd3e509b2835ffdb901c1bf1744651ba314"  # Fixed gn git revision
+NINJA_VERSION="1.13.2"  # Ninja version
+CLANG_GIT_REVISION="8c7a2ce01a77c96028fe2c8566f65c45ad9408d3"  # Clang git revision
 PLATFORM="mac"  # Target platform
 
 # Detect current machine architecture to download corresponding gn and clang versions
