@@ -43,7 +43,15 @@ toolchain("clang") {
 
   tool("solink") {
     rspfile = "{{output}}.rsp"
-    command = "$ld -isysroot $sysroot -shared -nostdlib++ {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile $clang_lib/libc++.a"
+    # -install_name @rpath/<leaf> makes dependents resolve via the consumer's
+    # rpath instead of dyld's system search path. Without this, bare-name
+    # install names collide with /usr/lib/libcrypto.*.dylib and dyld aborts
+    # with "loading libcrypto in an unsafe way".
+    #
+    # -rpath @loader_path lets a dylib find its sibling dylibs in its own
+    # directory regardless of which binary loaded it, instead of relying on
+    # the consumer's rpath being set up correctly.
+    command = "$ld -isysroot $sysroot -shared -nostdlib++ -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile $clang_lib/libc++.a"
     rspfile_content = "{{inputs}}"
     default_output_extension = ".dylib"
     output_prefix = "lib"
@@ -54,7 +62,9 @@ toolchain("clang") {
     # Output executables to the root output directory, not obj directory
     outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
     rspfile = "$outfile.rsp"
-    command = "$ld -isysroot $sysroot -nostdlib++ {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
+    # -rpath @executable_path lets the binary resolve sibling dylibs whose
+    # install names start with @rpath/.
+    command = "$ld -isysroot $sysroot -nostdlib++ -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
     rspfile_content = "{{inputs}}"
     outputs = [ outfile ]
   }
