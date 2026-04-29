@@ -1,79 +1,55 @@
-## Build System
+# Monorepo
 
-This monorepo uses the GN + Ninja build system. The build tools are pre-installed in the `tool/` directory.
+A C/C++ monorepo built with GN + Ninja, vendoring BoringSSL, c-ares, xquic, and
+the macOS-only `ipsw` tool.
 
-### Essential Build Commands
+## Quick Start
 
 ```bash
-# Generate build files
+./sync_tools.sh              # Fetch pinned gn, ninja, and clang
+./extract_sdk.sh             # Extract macOS SDK (see below)
 ./tool/gn gen out
-
-# Build all targets
 ./tool/ninja -C out
-
-# Run the ipsw executable
-./out/ipsw
-
-# Clean build
-rm -rf out/
-
-# Update build tools (if needed)
-./sync_tools.sh
 ```
 
-### Build Configuration
+## SDK Setup
 
-- Debug builds by default (`is_debug = true` in `build/BUILDCONFIG.gn`)
-- Compiler flags: `-Wall -Wextra -Werror` (strict warnings as errors)
-- Currently supports macOS only (x86_64 and ARM64)
+**macOS (required for any build):** download
+`Command_Line_Tools_for_Xcode_<version>.dmg` from
+<https://developer.apple.com/download/all/>, place it at the repo root, then
+run `./extract_sdk.sh`. The SDK lands in `build/sdk/MacOSX.sdk/`.
 
-### macOS SDK
-
-Place `Command_Line_Tools_for_Xcode_<version>.dmg` (download from
-<https://developer.apple.com/download/all/>) at the repo root and run:
+**Linux x86_64 (cross-compile only):** run `./sync_linux_sysroot.sh` to fetch a
+SHA256-pinned Debian bullseye sysroot, then generate with:
 
 ```bash
-./extract_sdk.sh
+./tool/gn gen out_linux --args='target_os="linux" target_cpu="x64"'
+./tool/ninja -C out_linux
 ```
 
-The SDK is extracted to `build/sdk/MacOSX.sdk/`, which is where the
-toolchain's `sysroot` points by default. The build will not work until this
-step is done.
+## Build Arguments
 
-## Architecture
+Set via `--args=` on `gn gen`. See `build/BUILDCONFIG.gn`.
 
-This is a C monorepo structured for scalability:
+| Arg         | Default | Effect                                                  |
+| ----------- | ------- | ------------------------------------------------------- |
+| `is_debug`  | `true`  | Debug build; release enables ThinLTO.                   |
+| `is_asan`   | `false` | Enable AddressSanitizer.                                |
+| `target_os` | host    | `mac` or `linux`.                                       |
 
-### Core Build Files
-- `.gn` - Defines the root build configuration and toolchain
-- `build/BUILDCONFIG.gn` - Global build settings and compiler configurations
-- `build/toolchain/BUILD.gn` - Toolchain definitions for Clang on macOS
+## Layout
 
-### Adding New Components
-1. Create a new directory for your component
-2. Add a `BUILD.gn` file in that directory defining targets
-3. Reference the new target from the root `BUILD.gn` using `deps`
+- `BUILD.gn`, `.gn`, `build/` — root build, toolchains, and configs.
+- `build/secondary/{boringssl,c-ares,xquic}/BUILD.gn` — GN files for vendored
+  third-party sources whose own trees stay untouched.
+- `boringssl/`, `c-ares/`, `xquic/` — third-party sources (upstream layout).
+- `ipsw/` — macOS-only tool that parses `dyld_shared_cache`.
+- `tool/` — pinned `gn`, `ninja`, and `clang` (populated by `sync_tools.sh`).
+- `out/` — build output (gitignored).
 
-Example target structure:
-```gn
-executable("my_program") {
-  sources = [ "main.c" ]
-  deps = [ "//some/other:target" ]
-}
-```
+## Adding a Component
 
-### GN Target Types
-- `executable()` - Creates an executable binary
-- `static_library()` - Creates a static library (.a)
-- `shared_library()` - Creates a shared library (.dylib on macOS)
-- `source_set()` - Lightweight alternative to static_library
-- `component()` - Resolves to `shared_library` in debug (fast incremental
-  linking) or `source_set` in release (whole-program LTO). Import via
-  `import("//build/component.gni")`.
-
-## Important Notes
-
-- No test framework is currently configured
-- No linting beyond compiler warnings
-- No CI/CD pipeline set up
-- Build outputs go to `out/` directory
+Create `your_component/BUILD.gn` with a target, then add it to the root
+`BUILD.gn`'s `default` group. Use `component()` (from
+`//build/component.gni`) for libraries that should be `shared_library` in
+debug and `source_set` in release.

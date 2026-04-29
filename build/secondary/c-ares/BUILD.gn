@@ -1,17 +1,31 @@
-# GN build for c-ares (1.34.6) on macOS.
+# GN build for c-ares (1.34.6).
 #
 # Source list mirrors c-ares/src/lib/Makefile.inc. Configuration headers
-# (ares_config.h, ares_build.h) are hand-tailored for Darwin/clang and live
-# under //build/secondary/c-ares/config so the upstream tree is untouched.
+# (ares_config.h, ares_build.h) are hand-tailored per platform and live
+# under //build/secondary/c-ares/config/{mac,linux} so the upstream tree is
+# untouched and the GN build does not depend on the autotools/cmake configure
+# step. Each subdir mirrors what `cmake -DCARES_THREADS=ON` would generate
+# against that platform's sysroot.
 
 import("//build/component.gni")
+
+# Per-platform config dir holds the hand-tailored ares_config.h / ares_build.h.
+# Linux/macOS differ on epoll vs kqueue, getrandom vs arc4random, libresolv
+# usage, MSG_NOSIGNAL availability, and the *_R_ARGS counts.
+if (current_os == "mac") {
+  _cares_config_dir = "//build/secondary/c-ares/config/mac"
+} else if (current_os == "linux") {
+  _cares_config_dir = "//build/secondary/c-ares/config/linux"
+} else {
+  assert(false, "unsupported current_os for c-ares: $current_os")
+}
 
 # Public-facing config: anything that depends on //c-ares gets these include
 # dirs so it can resolve <ares.h> and the generated <ares_build.h>.
 config("cares_public_config") {
   include_dirs = [
     "//c-ares/include",
-    "//build/secondary/c-ares/config",
+    _cares_config_dir,
   ]
 }
 
@@ -20,13 +34,23 @@ config("cares_internal_config") {
   defines = [
     "HAVE_CONFIG_H=1",
     "CARES_BUILDING_LIBRARY",
-    "_DARWIN_C_SOURCE",
   ]
+
+  # Source-feature macro for the libc:
+  #   _DARWIN_C_SOURCE — exposes BSD/Darwin extensions (kqueue, connectx,
+  #                      MSG_NOSIGNAL on macOS, sys/sockio.h, ...).
+  #   _GNU_SOURCE      — exposes glibc extensions (epoll, getrandom in
+  #                      <sys/random.h>, pipe2, MSG_NOSIGNAL, ...).
+  if (current_os == "mac") {
+    defines += [ "_DARWIN_C_SOURCE" ]
+  } else if (current_os == "linux") {
+    defines += [ "_GNU_SOURCE" ]
+  }
 
   include_dirs = [
     # Order matters: ares_config.h / ares_build.h must come from our config
     # dir, ahead of the upstream include/ where ares_build.h.dist lives.
-    "//build/secondary/c-ares/config",
+    _cares_config_dir,
     "//c-ares/include",
     "//c-ares/src/lib",
     "//c-ares/src/lib/include",
@@ -148,6 +172,7 @@ component("cares") {
     "//c-ares/include/ares_version.h",
   ]
 
-  # macOS resolver routines (res_*) live in libresolv.
+  # Resolver routines (res_*, inet_net_pton) live in libresolv on both
+  # macOS (/usr/lib/libresolv.dylib) and glibc Linux (libresolv.so.2).
   libs = [ "resolv" ]
 }

@@ -11,8 +11,6 @@
 
 import("//build/component.gni")
 
-assert(target_os == "mac", "xquic GN build only supports macOS")
-
 declare_args() {
   # Congestion control algorithms (cubic + bbr are always built)
   xqc_enable_bbr2 = false

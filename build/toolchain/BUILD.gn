@@ -4,6 +4,18 @@ toolchain("clang") {
   prefix = rebase_path("//tool/clang/bin", root_build_dir)
   clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
   sysroot = rebase_path("//build/sdk/MacOSX.sdk", root_build_dir)
+
+  # -isysroot is needed by both the frontend (header search) and the linker
+  # (-syslibroot), so it lives in the shared compile_flags.
+  compile_flags = "-isysroot $sysroot"
+
+  # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld (Xcode's
+  # ld64), so the link is fully hermetic and faster.
+  # -nostdlib++ suppresses the driver's automatic -lc++ (which would resolve to
+  # the SDK's libc++.dylib); we link the bundled static libc++.a explicitly so
+  # binaries don't depend on the host's libc++ ABI.
+  link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
+
   cc = "$prefix/clang"
   cxx = "$prefix/clang++"
   asm = "$prefix/clang"
@@ -12,21 +24,21 @@ toolchain("clang") {
 
   tool("cc") {
     depfile = "{{output}}.d"
-    command = "$cc -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("cxx") {
     depfile = "{{output}}.d"
-    command = "$cxx -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("asm") {
     depfile = "{{output}}.d"
-    command = "$asm -isysroot $sysroot -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
@@ -51,7 +63,7 @@ toolchain("clang") {
     # -rpath @loader_path lets a dylib find its sibling dylibs in its own
     # directory regardless of which binary loaded it, instead of relying on
     # the consumer's rpath being set up correctly.
-    command = "$ld -isysroot $sysroot -shared -nostdlib++ -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} {{solibs}} {{libs}} @$rspfile $clang_lib/libc++.a"
+    command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
     rspfile_content = "{{inputs}}"
     default_output_extension = ".dylib"
     output_prefix = "lib"
@@ -64,7 +76,7 @@ toolchain("clang") {
     rspfile = "$outfile.rsp"
     # -rpath @executable_path lets the binary resolve sibling dylibs whose
     # install names start with @rpath/.
-    command = "$ld -isysroot $sysroot -nostdlib++ -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
+    command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
     rspfile_content = "{{inputs}}"
     outputs = [ outfile ]
   }
@@ -83,6 +95,110 @@ toolchain("clang") {
     current_cpu = host_cpu  # Use actual host CPU architecture (x64 or arm64)
 
     # Forward target platform arguments for cross-compilation support
+    target_os = target_os
+    target_cpu = target_cpu
+  }
+}
+
+toolchain("clang_linux_x64") {
+  prefix = rebase_path("//tool/clang/bin", root_build_dir)
+  sysroot = rebase_path("//build/sdk/debian_bullseye_amd64-sysroot",
+                        root_build_dir)
+  target_triple = "x86_64-unknown-linux-gnu"
+
+  # -fPIC is required for code that ends up in a .so. Mach-O is PIC by
+  # construction so the macOS toolchain doesn't need this; ELF defaults to
+  # absolute addressing and ld.lld rejects R_X86_64_PC32 against globals
+  # when producing a shared object. Applied uniformly because component()
+  # in debug mode is shared_library and in release mode is source_set that
+  # gets aggregated into a .so by consumers — both want PIC.
+  compile_flags = "--target=$target_triple --sysroot=$sysroot -fPIC"
+
+  # -fuse-ld=lld is required, not optional: the bundled Fuchsia clang has
+  # CLANG_DEFAULT_LINKER unset, so without it the driver would invoke
+  # /usr/bin/ld (ld64 on a macOS host) and refuse the ELF objects.
+  #
+  # -static-libstdc++ + -unwindlib=libunwind let the driver itself find and
+  # statically link the bundled libc++.a / libunwind.a from
+  # tool/clang/lib/<triple>/, plus the right CRT objects and compiler-rt.
+  # No need to spell out paths or -nostdlib++.
+  link_flags = "$compile_flags -fuse-ld=lld -static-libstdc++ -unwindlib=libunwind"
+
+  cc = "$prefix/clang"
+  cxx = "$prefix/clang++"
+  asm = "$prefix/clang"
+  ar = "$prefix/llvm-ar"
+  ld = "$prefix/clang++"
+
+  tool("cc") {
+    depfile = "{{output}}.d"
+    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    depsformat = "gcc"
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+  }
+
+  tool("cxx") {
+    depfile = "{{output}}.d"
+    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+    depsformat = "gcc"
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+  }
+
+  tool("asm") {
+    depfile = "{{output}}.d"
+    command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+    depsformat = "gcc"
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+  }
+
+  tool("alink") {
+    rspfile = "{{output}}.rsp"
+    command = "$ar rcs {{output}} @$rspfile"
+    rspfile_content = "{{inputs}}"
+    outputs =
+        [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
+    default_output_extension = ".a"
+    output_prefix = "lib"
+  }
+
+  tool("solink") {
+    rspfile = "{{output}}.rsp"
+    # ELF analogues of the macOS solink flags:
+    #   -Wl,-soname,<leaf>     ↔ -install_name @rpath/<leaf>
+    #     records DT_SONAME so consumers reference the leaf, not the build path.
+    #   -Wl,-rpath,$ORIGIN     ↔ -Wl,-rpath,@loader_path
+    #     lets a .so locate sibling .so files in its own directory.
+    # The driver auto-adds --as-needed -lunwind --no-as-needed; pthread/dl are
+    # not added by the driver, so we wrap them manually so pure-C targets don't
+    # carry spurious DT_NEEDED entries.
+    command = "$ld $link_flags -shared -Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\$ORIGIN {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
+    rspfile_content = "{{inputs}}"
+    default_output_extension = ".so"
+    output_prefix = "lib"
+    outputs = [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
+  }
+
+  tool("link") {
+    outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
+    rspfile = "$outfile.rsp"
+    # -Wl,-rpath,$ORIGIN ↔ -Wl,-rpath,@executable_path on macOS.
+    command = "$ld $link_flags -Wl,-rpath,\$ORIGIN {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
+    rspfile_content = "{{inputs}}"
+    outputs = [ outfile ]
+  }
+
+  tool("stamp") {
+    command = "touch {{output}}"
+  }
+
+  tool("copy") {
+    command = "cp -af {{source}} {{output}}"
+  }
+
+  toolchain_args = {
+    current_os = "linux"
+    current_cpu = "x64"
+
     target_os = target_os
     target_cpu = target_cpu
   }

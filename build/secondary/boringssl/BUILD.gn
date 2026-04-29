@@ -9,8 +9,9 @@ config("boringssl_config") {
     "BORINGSSL_IMPLEMENTATION",
     "BORINGSSL_SHARED_LIBRARY",
   ]
-
-  cflags = [ "-fvisibility=hidden" ]
+  # -fvisibility=hidden + -fno-rtti + -fno-exceptions come from
+  # //build:compiler_defaults. OPENSSL_EXPORT marks the public API as
+  # visibility("default") so it stays exported under the global hidden default.
 }
 
 component("crypto") {
@@ -20,7 +21,6 @@ component("crypto") {
     ":boringssl_config",
     "//build:cxx17",
     "//build:no_unused_parameter",
-    "//build:no_rtti_no_exceptions",
   ]
 
   sources = [
@@ -669,7 +669,6 @@ component("ssl") {
     ":boringssl_config",
     "//build:cxx17",
     "//build:no_unused_parameter",
-    "//build:no_rtti_no_exceptions",
   ]
 
   sources = [

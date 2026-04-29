@@ -4,9 +4,14 @@ group("default") {
   deps = [
     "//boringssl:ssl",
     "//c-ares:cares",
-    "//ipsw:ipsw",
     "//xquic",
   ]
+
+  # ipsw parses dyld_shared_cache via <mach-o/loader.h>; Darwin-only by
+  # construction.
+  if (target_os == "mac") {
+    deps += [ "//ipsw:ipsw" ]
+  }
 }
 
 group("all") {

@@ -67,6 +67,7 @@
 #define HAVE_O_NONBLOCK         1
 #define HAVE_FIONBIO            1
 #define HAVE_IOCTL_SIOCGIFADDR  1
+#define HAVE_MSG_NOSIGNAL       1
 
 /* Functions */
 #define HAVE_ARC4RANDOM_BUF     1

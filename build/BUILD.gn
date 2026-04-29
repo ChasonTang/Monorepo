@@ -1,10 +1,31 @@
 # Build configuration
 
+# Defaults applied to every target via BUILDCONFIG.gn. Aim for the smallest
+# binaries and the smallest surface area exposed across module boundaries;
+# targets that need the opposite opt back in via :rtti, :exceptions, or
+# :default_visibility.
 config("compiler_defaults") {
   cflags = [
     "-Wall",
     "-Wextra",
     "-Werror",
+
+    # Hidden by default so the per-dylib libc++ copies we statically link
+    # don't leak and collide across modules, and dyld/ld.so see a smaller
+    # dynamic symbol table. APIs that must cross module boundaries need
+    # __attribute__((visibility("default"))).
+    "-fvisibility=hidden",
+  ]
+  cflags_cc = [
+    # Also hide inline member functions and template instantiations,
+    # otherwise vtables and inline thunks would still be exported.
+    "-fvisibility-inlines-hidden",
+
+    # No RTTI / no exceptions: drops typeinfo and .eh_frame /
+    # __unwind_info from the binary, and removes the cross-dylib RTTI /
+    # exception ABI risk of embedding libc++ into every module.
+    "-fno-rtti",
+    "-fno-exceptions",
   ]
 }
 
@@ -16,11 +37,24 @@ config("no_unused_parameter") {
   cflags = [ "-Wno-unused-parameter" ]
 }
 
-config("no_rtti_no_exceptions") {
-  cflags_cc = [
-    "-fno-rtti",
-    "-fno-exceptions",
-  ]
+# Opt-in: re-enable RTTI for targets that need dynamic_cast / typeid /
+# std::any (rare; mostly imported third-party code).
+config("rtti") {
+  cflags_cc = [ "-frtti" ]
+}
+
+# Opt-in: re-enable C++ exceptions for targets that throw / catch.
+config("exceptions") {
+  cflags_cc = [ "-fexceptions" ]
+}
+
+# Opt-in: undo the global hidden visibility for targets whose public API
+# isn't annotated with explicit visibility attributes (typical of imported
+# third-party headers). Last -fvisibility on the command line wins, and
+# -fno-visibility-inlines-hidden cancels the inline-hidden flag.
+config("default_visibility") {
+  cflags = [ "-fvisibility=default" ]
+  cflags_cc = [ "-fno-visibility-inlines-hidden" ]
 }
 
 config("debug") {
@@ -50,9 +84,16 @@ config("asan") {
 # in archives correctly.
 config("lto") {
   cflags = [ "-flto=thin" ]
-  ldflags = [
-    "-flto=thin",
-    # ld64.lld uses Mach-O syntax (not GNU --thinlto-cache-dir).
-    "-Wl,-cache_path_lto,thinlto-cache",
-  ]
+  ldflags = [ "-flto=thin" ]
+
+  # ThinLTO cache directory flag is linker-flavor specific:
+  #   ld64.lld (Mach-O):  -cache_path_lto <dir>
+  #   ld.lld   (ELF):     --thinlto-cache-dir=<dir>
+  # Picked off the toolchain's current_os since the linker is selected by
+  # the same -fuse-ld=lld driver invocation that picks the object format.
+  if (current_os == "mac") {
+    ldflags += [ "-Wl,-cache_path_lto,thinlto-cache" ]
+  } else if (current_os == "linux") {
+    ldflags += [ "-Wl,--thinlto-cache-dir=thinlto-cache" ]
+  }
 }
