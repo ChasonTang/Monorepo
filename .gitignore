@@ -1,11 +1,4 @@
-# macOS system files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
 # Build output directory (absolute path from repo root)
 /out/
@@ -18,14 +11,3 @@ Thumbs.db
 
 # Command Line Tools dmg (downloaded by developer, not committed)
 /Command_Line_Tools_for_Xcode_*.dmg
-
-# Editor and IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Temporary files
-*.tmp
-*.temp 

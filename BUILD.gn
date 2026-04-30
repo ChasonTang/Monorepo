@@ -10,7 +10,7 @@ group("default") {
   # ipsw parses dyld_shared_cache via <mach-o/loader.h>; Darwin-only by
   # construction.
   if (target_os == "mac") {
-    deps += [ "//ipsw:ipsw" ]
+    deps += [ "//ipsw" ]
   }
 }
 

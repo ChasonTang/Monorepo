@@ -7,4 +7,4 @@ buildconfig = "//build/BUILDCONFIG.gn"
 secondary_source = "//build/secondary/"
 
 # These are the targets to check when running "gn check".
-check_targets = [] 
+check_targets = []
