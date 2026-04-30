@@ -14,10 +14,8 @@ import("//build/component.gni")
 # usage, MSG_NOSIGNAL availability, and the *_R_ARGS counts.
 if (current_os == "mac") {
   _cares_config_dir = "//build/secondary/c-ares/config/mac"
-} else if (current_os == "linux") {
-  _cares_config_dir = "//build/secondary/c-ares/config/linux"
 } else {
-  assert(false, "unsupported current_os for c-ares: $current_os")
+  _cares_config_dir = "//build/secondary/c-ares/config/linux"
 }
 
 # Public-facing config: anything that depends on //c-ares gets these include

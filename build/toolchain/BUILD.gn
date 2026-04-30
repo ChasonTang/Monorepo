@@ -5,9 +5,24 @@ toolchain("clang") {
   clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
   sysroot = rebase_path("//build/sdk/MacOSX.sdk", root_build_dir)
 
+  # Map current_cpu to a Mach-O target triple. --target= tells clang to emit
+  # objects for the requested architecture and tells the lld driver which
+  # slice to pull from the universal libc++.a / libclang_rt.osx.a / *.tbd
+  # inputs the bundled SDK and toolchain ship. Driving the arch off
+  # current_cpu lets a single toolchain definition serve both the default
+  # toolchain (current_cpu defaults from target_cpu in BUILDCONFIG) and any
+  # secondary references (current_cpu set via toolchain_args below).
+  if (current_cpu == "x64") {
+    target_triple = "x86_64-apple-macos"
+  } else {
+    target_triple = "arm64-apple-macos"
+  }
+
   # -isysroot is needed by both the frontend (header search) and the linker
-  # (-syslibroot), so it lives in the shared compile_flags.
-  compile_flags = "-isysroot $sysroot"
+  # (-syslibroot), so it lives in the shared compile_flags. --target= must be
+  # in both compile and link flags so the driver picks the right backend and
+  # passes -arch + -platform_version to ld64.lld.
+  compile_flags = "--target=$target_triple -isysroot $sysroot"
 
   # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld (Xcode's
   # ld64), so the link is fully hermetic and faster.
@@ -92,13 +107,13 @@ toolchain("clang") {
   }
 
   toolchain_args = {
-    # Fixed values for the build machine (where toolchain runs)
+    # This toolchain produces binaries for the build's target_cpu — the
+    # arch selection is keyed off current_cpu (see target_triple above), so
+    # any secondary reference to //build/toolchain:clang must set
+    # current_cpu = target_cpu, not host_cpu, otherwise it would silently
+    # build host-arch binaries and link them into a target-arch dylib.
     current_os = "mac"
-    current_cpu = host_cpu  # Use actual host CPU architecture (x64 or arm64)
-
-    # Forward target platform arguments for cross-compilation support
-    target_os = target_os
-    target_cpu = target_cpu
+    current_cpu = target_cpu
   }
 }
 
@@ -203,8 +218,5 @@ toolchain("clang_linux_x64") {
   toolchain_args = {
     current_os = "linux"
     current_cpu = "x64"
-
-    target_os = target_os
-    target_cpu = target_cpu
   }
 }

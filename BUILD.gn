@@ -13,7 +13,3 @@ group("default") {
     deps += [ "//ipsw" ]
   }
 }
-
-group("all") {
-  deps = [ ":default" ]
-}
