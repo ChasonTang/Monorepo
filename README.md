@@ -39,9 +39,9 @@ the C++ runtime travels with the binary regardless of target OS.
   `-static-libstdc++ -unwindlib=libunwind`.
 
 ```bash
-./tool/gn gen out_mac_arm64  --args='target_cpu="arm64"'                  # Apple Silicon
-./tool/gn gen out_mac_x64    --args='target_cpu="x64"'                    # Intel mac
-./tool/gn gen out_linux_x64  --args='target_os="linux" target_cpu="x64"'  # Linux (sysroot first)
+./tool/gn gen out/mac_arm64  --args='target_cpu="arm64"'                  # Apple Silicon
+./tool/gn gen out/mac_x64    --args='target_cpu="x64"'                    # Intel mac
+./tool/gn gen out/linux_x64  --args='target_os="linux" target_cpu="x64"'  # Linux (sysroot first)
 ```
 
 ## Build Arguments

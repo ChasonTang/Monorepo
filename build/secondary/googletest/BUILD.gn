@@ -1,0 +1,167 @@
+# GN build for googletest (v1.17.0).
+#
+# Provides four targets used by unit tests:
+#   :gtest        — Google Test framework (no main)
+#   :gtest_main   — :gtest + a default main() that calls InitGoogleTest
+#   :gmock        — Google Mock framework (depends on :gtest)
+#   :gmock_main   — :gmock + a default main() that inits both gtest and gmock
+#
+# Source list mirrors googletest/CMakeLists.txt and googlemock/CMakeLists.txt
+# at v1.17.0. The umbrella files (gtest-all.cc, gmock-all.cc) and the *_main.cc
+# files are deliberately split off — including the umbrella alongside the
+# individual translation units would cause duplicate-symbol errors, and main()
+# must live in its own source_set so consumers can opt in or supply their
+# own.
+#
+# RTTI / exceptions: googletest auto-detects via __cpp_rtti / __cpp_exceptions
+# (gtest-port.h), so the project-wide -fno-rtti / -fno-exceptions defaults are
+# fine — gtest compiles with GTEST_HAS_RTTI=0 / GTEST_HAS_EXCEPTIONS=0 and the
+# affected matchers fall back to non-RTTI paths.
+#
+# pthread / dl: the Linux toolchain auto-links both (see
+# //build/toolchain:clang_linux_x64), and on macOS pthread is part of
+# libSystem. No `libs` needed here.
+
+# Public-facing config: anything depending on //googletest:gtest gets the
+# include dir so it can resolve <gtest/gtest.h>.
+config("gtest_public_config") {
+  include_dirs = [ "//googletest/googletest/include" ]
+}
+
+# Private build settings used while compiling gtest itself. The extra include
+# dir lets src/*.cc resolve "src/gtest-internal-inl.h".
+config("gtest_internal_config") {
+  include_dirs = [
+    "//googletest/googletest/include",
+    "//googletest/googletest",
+  ]
+
+  cflags_cc = [
+    # gtest's own headers trip these under -Wall -Wextra -Werror.
+    "-Wno-unused-parameter",
+    "-Wno-missing-field-initializers",
+  ]
+}
+
+# Public-facing config for gmock. Consumers that depend on //googletest:gmock
+# get both include trees because gmock's headers transitively include gtest's.
+config("gmock_public_config") {
+  include_dirs = [
+    "//googletest/googlemock/include",
+    "//googletest/googletest/include",
+  ]
+}
+
+config("gmock_internal_config") {
+  include_dirs = [
+    "//googletest/googlemock/include",
+    "//googletest/googlemock",
+    "//googletest/googletest/include",
+    "//googletest/googletest",
+  ]
+
+  cflags_cc = [
+    "-Wno-unused-parameter",
+    "-Wno-missing-field-initializers",
+  ]
+}
+
+source_set("gtest") {
+  testonly = true
+
+  public_configs = [ ":gtest_public_config" ]
+  configs += [
+    ":gtest_internal_config",
+    "//build:cxx17",
+  ]
+
+  sources = [
+    "//googletest/googletest/src/gtest-assertion-result.cc",
+    "//googletest/googletest/src/gtest-death-test.cc",
+    "//googletest/googletest/src/gtest-filepath.cc",
+    "//googletest/googletest/src/gtest-matchers.cc",
+    "//googletest/googletest/src/gtest-port.cc",
+    "//googletest/googletest/src/gtest-printers.cc",
+    "//googletest/googletest/src/gtest-test-part.cc",
+    "//googletest/googletest/src/gtest-typed-test.cc",
+    "//googletest/googletest/src/gtest.cc",
+
+    # Internal headers consumed by the .cc above.
+    "//googletest/googletest/src/gtest-internal-inl.h",
+  ]
+
+  public = [
+    "//googletest/googletest/include/gtest/gtest-assertion-result.h",
+    "//googletest/googletest/include/gtest/gtest-death-test.h",
+    "//googletest/googletest/include/gtest/gtest-matchers.h",
+    "//googletest/googletest/include/gtest/gtest-message.h",
+    "//googletest/googletest/include/gtest/gtest-param-test.h",
+    "//googletest/googletest/include/gtest/gtest-printers.h",
+    "//googletest/googletest/include/gtest/gtest-spi.h",
+    "//googletest/googletest/include/gtest/gtest-test-part.h",
+    "//googletest/googletest/include/gtest/gtest-typed-test.h",
+    "//googletest/googletest/include/gtest/gtest.h",
+    "//googletest/googletest/include/gtest/gtest_pred_impl.h",
+    "//googletest/googletest/include/gtest/gtest_prod.h",
+  ]
+}
+
+source_set("gtest_main") {
+  testonly = true
+
+  public_configs = [ ":gtest_public_config" ]
+  configs += [
+    ":gtest_internal_config",
+    "//build:cxx17",
+  ]
+
+  sources = [ "//googletest/googletest/src/gtest_main.cc" ]
+
+  public_deps = [ ":gtest" ]
+}
+
+source_set("gmock") {
+  testonly = true
+
+  public_configs = [ ":gmock_public_config" ]
+  configs += [
+    ":gmock_internal_config",
+    "//build:cxx17",
+  ]
+
+  sources = [
+    "//googletest/googlemock/src/gmock-cardinalities.cc",
+    "//googletest/googlemock/src/gmock-internal-utils.cc",
+    "//googletest/googlemock/src/gmock-matchers.cc",
+    "//googletest/googlemock/src/gmock-spec-builders.cc",
+    "//googletest/googlemock/src/gmock.cc",
+  ]
+
+  public = [
+    "//googletest/googlemock/include/gmock/gmock-actions.h",
+    "//googletest/googlemock/include/gmock/gmock-cardinalities.h",
+    "//googletest/googlemock/include/gmock/gmock-function-mocker.h",
+    "//googletest/googlemock/include/gmock/gmock-matchers.h",
+    "//googletest/googlemock/include/gmock/gmock-more-actions.h",
+    "//googletest/googlemock/include/gmock/gmock-more-matchers.h",
+    "//googletest/googlemock/include/gmock/gmock-nice-strict.h",
+    "//googletest/googlemock/include/gmock/gmock-spec-builders.h",
+    "//googletest/googlemock/include/gmock/gmock.h",
+  ]
+
+  public_deps = [ ":gtest" ]
+}
+
+source_set("gmock_main") {
+  testonly = true
+
+  public_configs = [ ":gmock_public_config" ]
+  configs += [
+    ":gmock_internal_config",
+    "//build:cxx17",
+  ]
+
+  sources = [ "//googletest/googlemock/src/gmock_main.cc" ]
+
+  public_deps = [ ":gmock" ]
+}
