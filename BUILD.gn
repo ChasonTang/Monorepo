@@ -4,6 +4,7 @@ group("default") {
   deps = [
     "//boringssl:ssl",
     "//c-ares:cares",
+    "//skia",
     "//xquic",
   ]
 
