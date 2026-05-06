@@ -12,11 +12,21 @@
 # What's included:
 #   - skia_core_sources                — canvas, raster pipeline, shaders, …
 #   - skia_colorfilters_sources        — referenced by SkRuntimeEffect
+#   - skia_effects_sources             — gradients (Linear/Radial/Sweep/
+#                                        Conical), SkDashPathEffect,
+#                                        SkBlurMaskFilter, SkColorMatrixFilter,
+#                                        path effects, …
+#   - skia_effects_imagefilter_sources — SkImageFilters::Blur / Dilate /
+#                                        Erode / Compose / MatrixTransform /
+#                                        ColorFilter / RuntimeShader …
+#                                        (needed by display_list)
 #   - skia_sksl_core_sources +
 #     skia_sksl_core_module_sources +
 #     skia_sksl_tracing_sources        — SkSL compiler (needed by
 #                                        SkRuntimeEffect)
 #   - skia_ports_sources               — global init + SkOSFile_stdio
+#   - skia_utils_private               — SkShadowUtils, SkDashPath impl,
+#                                        misc utils
 #   - SkMemory_malloc / SkOSFile_posix /
 #     SkDebug_stdio / SkDiscardableMemory_none /
 #     SkOTTable_name / SkOTUtils       — hardcoded ports the upstream skia
@@ -24,14 +34,15 @@
 #   - modules/skcms                    — color management (vendored in
 #                                        third_party/skia/modules/skcms)
 #
+# Note on SK_DISABLE_EFFECT_DESERIALIZATION (see skia_internal_config below):
+# kept ON. Effects/image filters are reachable via factory APIs
+# (SkImageFilters::Blur, SkGradientShader::MakeLinear, …) which work fine.
+# Only deserializing them from a binary stream is disabled — display_list
+# doesn't need that path.
+#
 # What's excluded (explicitly):
 #   - GPU backends (Ganesh, Graphite) — SK_GANESH / SK_GRAPHITE undefined
 #   - Image codecs (PNG/JPEG/WebP/…)  — needs libpng/libjpeg-turbo/libwebp
-#   - Path effects + image filters    — gated off via
-#                                       SK_DISABLE_EFFECT_DESERIALIZATION
-#                                       (so we don't link skia_effects_sources
-#                                       / skia_effects_imagefilter_sources
-#                                       and their reverse refs)
 #   - Font managers                   — SkFontMgr::RefEmpty() is the only
 #                                       built-in factory; system fontmgrs
 #                                       need freetype / fontconfig / CoreText
@@ -50,9 +61,11 @@
 
 import("//third_party/skia/gn/core.gni")
 import("//third_party/skia/gn/effects.gni")
+import("//third_party/skia/gn/effects_imagefilters.gni")
 import("//third_party/skia/gn/opts.gni")
 import("//third_party/skia/gn/ports.gni")
 import("//third_party/skia/gn/sksl.gni")
+import("//third_party/skia/gn/utils.gni")
 import("//third_party/skia/modules/skcms/skcms.gni")
 
 # Public-facing config: anything that depends on //skia gets these include
@@ -89,10 +102,11 @@ config("skia_internal_config") {
     "SK_DISABLE_TRACING",
 
     # Skip flattenable (path-effect / image-filter) deserialization
-    # registration in src/ports/SkGlobalInitialization_default.cpp — that
-    # file would otherwise pull symbols from skia_effects_sources +
-    # skia_effects_imagefilter_sources + path effects + Perlin / gradient
-    # shaders, none of which we link in the minimal build.
+    # registration in src/ports/SkGlobalInitialization_default.cpp.
+    # The factory APIs (SkImageFilters::Blur, SkGradientShader::MakeLinear,
+    # SkDashPathEffect::Make, …) work without this registration; only
+    # deserializing them from a binary stream is unavailable. display_list
+    # constructs everything via factories, so this is fine.
     "SK_DISABLE_EFFECT_DESERIALIZATION",
   ]
 
@@ -214,10 +228,13 @@ static_library("skia") {
   sources = []
   sources += skia_core_sources
   sources += skia_colorfilters_sources
+  sources += skia_effects_sources
+  sources += skia_effects_imagefilter_sources
   sources += skia_sksl_core_sources
   sources += skia_sksl_core_module_sources
   sources += skia_sksl_tracing_sources
   sources += skia_ports_sources
+  sources += skia_utils_private
   sources += _skia_extra_sources
 
   public_deps = [ ":skcms" ]
