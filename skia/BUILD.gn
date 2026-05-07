@@ -95,7 +95,6 @@ config("skia_internal_config") {
 
     # skia_private defaults.
     "SK_GAMMA_APPLY_TO_A8",
-    "SK_DISABLE_LEGACY_NONCONST_SERIAL_PROCS",
 
     # Drop the trace-event glue. Without this, every TRACE_EVENT0/1/2 macro
     # would resolve to a Perfetto/Chrome tracing call we don't ship.
@@ -108,6 +107,14 @@ config("skia_internal_config") {
     # deserializing them from a binary stream is unavailable. display_list
     # constructs everything via factories, so this is fine.
     "SK_DISABLE_EFFECT_DESERIALIZATION",
+
+    # Match display_list/dl_public_config's same define so
+    # SkGradientShader::Make{Linear,Radial,Sweep,TwoPointConical}'s legacy
+    # SkColor[]+SkScalar[]+count overloads are actually compiled into
+    # libskia.a — display_list/skia/dl_sk_conversions.cc calls them.
+    # Without this, full DL dispatch links break (the unused demo path
+    # happens to skip those .o, masking it).
+    "SK_SUPPORT_LEGACY_UNSPANNED_GRADIENTS",
   ]
 
   cflags = [

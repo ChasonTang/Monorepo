@@ -15,3 +15,11 @@ group("default") {
     deps += [ "//ipsw" ]
   }
 }
+
+# testonly so this group can pull in test executables (which depend on the
+# testonly //googletest:gtest target). Kept out of :default so production
+# builds don't drag in test code; build with `ninja -C out/Default tests`.
+group("tests") {
+  testonly = true
+  deps = [ "//display_list/testing:dl_render_unittests" ]
+}

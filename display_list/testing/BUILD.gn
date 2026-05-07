@@ -1,0 +1,26 @@
+# Rendering smoke tests for display_list. Builds a DisplayList from each
+# (Variation × Op) combination and dispatches it through the Skia raster
+# backend; later phases plug in additional dispatchers (e.g. CALayer) and
+# upgrade the assertion from "renders any pixel" to a tolerance-based
+# image diff.
+
+executable("dl_render_unittests") {
+  testonly = true
+
+  sources = [
+    "dl_render_test.h",
+    "dl_render_test_env.cc",
+    "dl_render_test_env.h",
+    "dl_render_unittests.cc",
+  ]
+
+  deps = [
+    "//display_list",
+    "//googletest:gtest",
+  ]
+
+  configs += [
+    "//display_list:dl_internal_config",
+    "//build:cxx20",
+  ]
+}
