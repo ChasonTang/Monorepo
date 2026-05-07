@@ -21,5 +21,11 @@ group("default") {
 # builds don't drag in test code; build with `ninja -C out/Default tests`.
 group("tests") {
   testonly = true
-  deps = [ "//display_list/testing:dl_render_unittests" ]
+  deps = []
+  # display_list render tests compare a CALayer backend against the Skia
+  # raster baseline — without that second backend there's nothing to compare,
+  # so the suite is built (and run) on macOS only.
+  if (target_os == "mac") {
+    deps += [ "//display_list/testing:dl_render_unittests" ]
+  }
 }

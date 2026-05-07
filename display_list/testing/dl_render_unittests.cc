@@ -43,13 +43,22 @@ static const std::vector<VariationCase>& BaselineVariations() {
 class DlRenderTest : public ::testing::TestWithParam<
                          std::tuple<VariationCase, OpCase>> {};
 
-TEST_P(DlRenderTest, Smoke) {
+// Renders the same DisplayList through Skia raster (baseline) and the
+// CALayer backend, then asserts the resulting pixel buffers are exactly equal.
+TEST_P(DlRenderTest, BackendsAgree) {
   const auto& variation = std::get<0>(GetParam());
   const auto& op = std::get<1>(GetParam());
+
   RenderEnv env;
-  sk_sp<SkSurface> surface = env.RenderToSkia(variation, op);
-  ASSERT_NE(surface, nullptr);
-  EXPECT_TRUE(RenderEnv::HasNonClearPixel(surface));
+  sk_sp<SkSurface> skia_surface = env.RenderToSkia(variation, op);
+  ASSERT_NE(skia_surface, nullptr);
+  sk_sp<SkSurface> ca_surface = env.RenderToCALayer(variation, op);
+  ASSERT_NE(ca_surface, nullptr);
+
+  std::string msg;
+  EXPECT_TRUE(RenderEnv::CompareSurfaces(skia_surface, ca_surface,
+                                         /*max_per_channel_diff=*/0, &msg))
+      << msg;
 }
 
 INSTANTIATE_TEST_SUITE_P(

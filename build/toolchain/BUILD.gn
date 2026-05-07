@@ -51,6 +51,20 @@ toolchain("clang") {
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
+  tool("objc") {
+    depfile = "{{output}}.d"
+    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_objc}} -c {{source}} -o {{output}}"
+    depsformat = "gcc"
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+  }
+
+  tool("objcxx") {
+    depfile = "{{output}}.d"
+    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_objcc}} -c {{source}} -o {{output}}"
+    depsformat = "gcc"
+    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+  }
+
   tool("asm") {
     depfile = "{{output}}.d"
     command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"

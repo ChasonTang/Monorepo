@@ -1,13 +1,22 @@
-# Rendering smoke tests for display_list. Builds a DisplayList from each
-# (Variation × Op) combination and dispatches it through the Skia raster
-# backend; later phases plug in additional dispatchers (e.g. CALayer) and
-# upgrade the assertion from "renders any pixel" to a tolerance-based
-# image diff.
+# Render tests for display_list. Builds a DisplayList from each
+# (Variation × Op) combination, dispatches it through the Skia raster
+# baseline AND the CALayer backend, and asserts the resulting pixel buffers
+# agree within a small per-channel tolerance.
+#
+# Restricted to macOS: the comparison only has meaning when both backends
+# are available, and the CALayer backend is Apple-only. On other platforms
+# the suite would degenerate into a no-op Skia-only smoke test, so we skip
+# it entirely (the //:tests group already gates the dep on target_os=mac).
+
+assert(current_os == "mac",
+       "dl_render_unittests is macOS-only; gate the dep with target_os check")
 
 executable("dl_render_unittests") {
   testonly = true
 
   sources = [
+    "//display_list/calayer/dl_ca_dispatcher.h",
+    "//display_list/calayer/dl_ca_dispatcher.mm",
     "dl_render_test.h",
     "dl_render_test_env.cc",
     "dl_render_test_env.h",
@@ -22,5 +31,14 @@ executable("dl_render_unittests") {
   configs += [
     "//display_list:dl_internal_config",
     "//build:cxx20",
+  ]
+
+  ldflags = [
+    "-framework",
+    "QuartzCore",
+    "-framework",
+    "CoreGraphics",
+    "-framework",
+    "Foundation",
   ]
 }
