@@ -1,0 +1,42 @@
+# odin client/server QUIC proxy protocol — wire-format encoder/decoder.
+# Implementation is plain C so it sits comfortably alongside xquic and
+# c-ares; the unit-test binary is C++ for googletest. See
+# //odin/docs/rfc_001_quic_proxy_protocol.md for the spec this target
+# implements.
+
+import("//build/component.gni")
+
+# Public-facing config: every consumer of //odin:odin_protocol gets "//" on
+# the include path so "odin/protocol.h" resolves to //odin/protocol.h.
+config("odin_public_config") {
+  include_dirs = [ "//" ]
+}
+
+# component() (see //build/component.gni): shared_library in debug for fast
+# relink, source_set in release for whole-program LTO. Matches xquic /
+# c-ares / boringssl, which odin will be linked alongside.
+component("odin_protocol") {
+  sources = [
+    "protocol.c",
+    "protocol.h",
+  ]
+
+  public_configs = [ ":odin_public_config" ]
+}
+
+# Wire-format unit tests for :odin_protocol. The .test.cpp suffix lives next
+# to the production source by convention; see RFC §8 for scenario coverage.
+# Wired into the root //:tests group so it builds and runs under
+# `ninja -C out/Default tests`.
+executable("protocol_test") {
+  testonly = true
+
+  sources = [ "protocol.test.cpp" ]
+
+  deps = [
+    ":odin_protocol",
+    "//googletest:gtest",
+  ]
+
+  configs += [ "//build:cxx20" ]
+}
