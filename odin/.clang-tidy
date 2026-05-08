@@ -11,4 +11,3 @@ Checks: >
   -misc-no-recursion,
   -performance-enum-size
 WarningsAsErrors: '*'
-HeaderFilterRegex: 'odin/.*'
