@@ -51,16 +51,26 @@ toolchain("clang") {
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
+  # ObjC is a superset of C and ObjC++ a superset of C++, so the C / C++
+  # flag streams are inherited too — a config that sets cflags_cc (e.g.
+  # //build:compiler_defaults' -fno-rtti / -fno-exceptions) takes effect on
+  # .mm sources without having to also set cflags_objcc. This matches the
+  # convention in Chromium / Flutter engine's mac toolchains.
+  #
+  # -fobjc-arc is appended after {{cflags_objc}} / {{cflags_objcc}} so it wins
+  # over any per-target opt-out — ARC is a project-wide policy, not a knob.
+  # Manual retain/release/autorelease in .m/.mm sources will fail to compile,
+  # which is the intended guardrail.
   tool("objc") {
     depfile = "{{output}}.d"
-    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_objc}} -c {{source}} -o {{output}}"
+    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} {{cflags_objc}} -fobjc-arc -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }
 
   tool("objcxx") {
     depfile = "{{output}}.d"
-    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_objcc}} -c {{source}} -o {{output}}"
+    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -fobjc-arc -c {{source}} -o {{output}}"
     depsformat = "gcc"
     outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
   }

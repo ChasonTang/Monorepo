@@ -5,8 +5,8 @@
 namespace flutter {
 
 // CALayer / NSMutableArray live behind an opaque struct so the header stays
-// pure C++. ARC is intentionally OFF (no -fobjc-arc) to avoid forcing it on
-// the rest of the build; we use manual retain/release.
+// pure C++. ARC is enabled globally on the objc / objcxx tools, so the
+// __strong ObjC members below are released by the synthesized destructor.
 struct DlCALayerDispatcher::Impl {
   CALayer* root_layer = nil;
 
@@ -15,11 +15,6 @@ struct DlCALayerDispatcher::Impl {
   // restore() can pop without losing the root); future save_layer() will
   // push a fresh layer.
   NSMutableArray<CALayer*>* parent_stack = nil;
-
-  ~Impl() {
-    [parent_stack release];
-    [root_layer release];
-  }
 };
 
 namespace {
@@ -53,7 +48,6 @@ void AppendFullBoundsColorLayer(CALayer* parent,
   layer.backgroundColor = cg;
   CGColorRelease(cg);
   [parent addSublayer:layer];
-  [layer release];
 }
 
 }  // namespace
