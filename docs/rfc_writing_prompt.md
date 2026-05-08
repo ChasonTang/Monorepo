@@ -1,9 +1,3 @@
-# RFC Writing Prompt
-
-> **How to use:** Copy everything from the `# Task` heading below to the end of this file. Paste it into a fresh Claude Code session. Fill in the three bracketed inputs (`[Requirement]`, `[Related Code or Background]`, `[Author]`) before sending.
-
----
-
 # Task: Write a Technical Design RFC
 
 Generate an RFC using the project's RFC template at `docs/rfc_000_design_doc_template.md`.
@@ -18,7 +12,7 @@ This is a **single-maintainer open-source project** with limited operational cap
   - **Permitted observability changes:** only "log {what} at {level} to {existing log stream}".
 - **Code changes only.** Pure-process, organizational, or documentation-only proposals are out of scope. §5 Interface Changes always describes real code/config/protocol — no pseudo-code or flowcharts in place of real interfaces.
 
-## Inputs (fill in before sending)
+## Inputs
 
 ```
 [Requirement]
