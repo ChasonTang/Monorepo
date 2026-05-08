@@ -1,8 +1,8 @@
 # RFC-{NNN}: {Feature Title}
 
-**Version:** 1.0<br>
-**Author(s):** {Name, or comma-separated list}<br>
-**Date:** {YYYY-MM-DD}<br>
+**Version:** 1.0  
+**Author(s):** {Name, or comma-separated list}  
+**Date:** {YYYY-MM-DD}  
 **Status:** Proposed | Implemented
 *(First draft is `Proposed`. Flip to `Implemented` only after the work is merged and reviewed.)*
 
@@ -23,7 +23,7 @@ These rules override the instinct to "fill every section." Treat them as hard co
 - Delete every `---` horizontal rule from the final output.
 - **Delete this Writing Instructions section and the Pre-submit Checklist** — the final RFC ends after §12 References. Do not append Changelog / History / Revision / Version History — anything after §12 is forbidden.
 
-**Preserve metadata `<br>` tags.** The `<br>` after `**Version:**`, `**Author(s):**`, and `**Date:**` is an intentional Markdown line break — without it those fields collapse into a single rendered line. `**Status:**` does not need one (the blank line before `## 1. Summary` ends the paragraph).
+**Preserve metadata trailing spaces.** The two trailing spaces (`  `) after `**Version:**`, `**Author(s):**`, and `**Date:**` are an intentional Markdown line break — without them those fields collapse into a single rendered line. `**Status:**` does not need them (the blank line before `## 1. Summary` ends the paragraph).
 
 **Scope discipline:**
 - **Match scope to change.** Simple proposals use minimum counts (1 Goal, 1 §4.2 subsection, 3 §8 scenarios, 2 §9 phases, 0 §10 risks). Don't invent subsections, scenarios, or risks to fill the shape.
@@ -216,6 +216,6 @@ Verify each item before submitting. Any unchecked item is a blocker.
 - [ ] Hard caps respected: §1 ≤150 words, §2 ≤200 words, §3 ≤5 Goals, §4.2 ≤5 subsections (≤300 words each), §4.3 1–3 decisions, §7 ≤4 concerns, §8 3–8 scenarios, §9 2–5 phases, §10 ≤6 risks, §11 ≤5 items, total ≤4,000 words.
 - [ ] No banned phrases ("we will monitor", "we will document", "comprehensively improve", "leverage", "ensure that", etc. — full list in Writing Instructions).
 - [ ] §12 references are all real paths or URLs that were actually checked.
-- [ ] `<br>` tags after `**Version:**`, `**Author(s):**`, and `**Date:**` are intact.
+- [ ] Two trailing spaces (`  `) after `**Version:**`, `**Author(s):**`, and `**Date:**` are intact.
 - [ ] No `---` horizontal rules remain.
 - [ ] Document ends after §12 — no Changelog / History / Revision section appended.

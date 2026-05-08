@@ -44,7 +44,7 @@ This is a **single-maintainer open-source project** with limited operational cap
 
 5. **Fill the template.** Apply both Writing Instructions and Project Context as you go. In particular:
    - Strip every `{...}` placeholder, every `**Example...**` block, every sample table row, and every `---` horizontal rule.
-   - Preserve the `<br>` at the end of `Version`, `Author(s)`, and `Date` lines (keeps the metadata block from collapsing). `Status` does not need one.
+   - Preserve the two trailing spaces (`  `) at the end of `Version`, `Author(s)`, and `Date` lines (keeps the metadata block from collapsing). `Status` does not need them.
    - Use today's absolute date (format `YYYY-MM-DD`).
    - Optional sections (§5, §6, §7) that don't apply: keep the heading, write `Not applicable — {one-sentence reason}` in the body. Never delete or renumber.
    - **Cross-section consistency:** every §3 `G#` appears in §8's `Covers` (comma-separated, e.g., `G1, G3`) AND in §9's "Done when". Untestable goals carry `(non-testable: {reason})` in §3 — max 1 per RFC.
@@ -57,7 +57,7 @@ This is a **single-maintainer open-source project** with limited operational cap
    - Zero banned phrases.
    - Every Goal covered in §8 (or marked non-testable in §3).
    - Word count in the 1,000–2,500 typical band; >4,000 → consider splitting.
-   - `<br>` tags after `Version`/`Author(s)`/`Date` intact; zero `---` rules; document ends at §12 with no Changelog.
+   - Two trailing spaces (`  `) after `Version`/`Author(s)`/`Date` intact; zero `---` rules; document ends at §12 with no Changelog.
 
 ## Output
 
