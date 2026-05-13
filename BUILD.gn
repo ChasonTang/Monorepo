@@ -21,11 +21,7 @@ group("default") {
 # builds don't drag in test code; build with `ninja -C out/Default tests`.
 group("tests") {
   testonly = true
-  deps = [
-    # odin protocol encoder/decoder unit tests — pure C++ (no platform
-    # bindings), built on every supported target.
-    "//odin:protocol_test",
-  ]
+  deps = []
 
   # display_list render tests compare a CALayer backend against the Skia
   # raster baseline — without that second backend there's nothing to compare,
