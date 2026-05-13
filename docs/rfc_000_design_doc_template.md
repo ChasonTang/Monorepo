@@ -104,7 +104,7 @@ Why it fails: fabricates a metric (`200 hours per year`) and an incident ID (`#4
 
 > - **G1.** Expose `uint32_t gcd(uint32_t a, uint32_t b)` from a new empty `numkit` project, returning the greatest common divisor for every input pair.
 > - **G2.** The public header documents the zero-input contract `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n`; the implementation honors it.
-> - **G3.** Unit tests cover the zero-input contract, equal inputs, coprime pairs, one-side-multiple-of-the-other, and `(UINT32_MAX, UINT32_MAX - 1)`; all pass when the project's local test suite is run.
+> - **G3.** Unit tests cover the zero-input contract, equal inputs, coprime pairs, one-side-multiple-of-the-other, and the largest `uint32_t` Fibonacci pair `(F47, F46) = (2971215073, 1836311903)`; all pass when the project's local test suite is run.
 >
 > **Non-Goals:**
 >
@@ -424,9 +424,9 @@ Why it fails: `gcd` takes two `uint32_t` arguments by value with no array access
 > | T2 | Equal inputs | `gcd(42, 42)` | Returns `42` | G1 | unit |
 > | T3 | Coprime pair | `gcd(17, 31)` | Returns `1` | G1 | unit |
 > | T4 | One side multiple of the other | `gcd(12, 36)`, `gcd(100, 25)` | Returns `12`, `25` respectively | G1 | unit |
-> | T5 | Worst-case Fibonacci pair | `gcd(UINT32_MAX, UINT32_MAX - 1)` | Returns `1`, terminates within the `O(log(min(a, b)))` bound pinned in §4.2.1 | G1, G3 | unit |
+> | T5 | Worst-case Fibonacci pair (F47, F46) | `gcd(2971215073u, 1836311903u)` | Returns `1` | G1, G3 | unit |
 
-Why it works: five rows line up one-to-one with the five edge cases G3 enumerates (zero-input, equal, coprime, one-side-multiple, worst-case), each with exact inputs and exact return values a future author can port straight into a test function; T1 folds the three zero-input sub-cases the header pins into one row because they share Goal (G2) and setup pattern — splitting them into three rows only to pad `Covers` is exactly what the "Don't inflate" rule forbids; T5 asserts both correctness (returns `1`) and the termination bound from §4.2.1's Mechanism paragraph, so G3's "passes when the project's local test suite is run" clause gets a concrete hook instead of a hand-wave and G1 rides along for free; every `G#` from §3 appears in at least one `Covers` cell (G1 in T2/T3/T4/T5, G2 in T1, G3 in T5), clearing the cross-section consistency rule; Level stays `unit` throughout because a pure function has no integration boundary — escalating to `integration` or `e2e` would be ceremony the "pick the cheapest level" rule forbids.
+Why it works: five rows line up one-to-one with the five edge cases G3 enumerates (zero-input, equal, coprime, one-side-multiple, worst-case), each with exact inputs and exact return values a future author can port straight into a test function; T1 folds the three zero-input sub-cases the header pins into one row because they share Goal (G2) and setup pattern — splitting them into three rows only to pad `Covers` is exactly what the "Don't inflate" rule forbids; T5 picks the actual Fibonacci-pair worst case named in §4.2.1's Mechanism paragraph (consecutive `UINT32_MAX` values would be coprime and finish in 2 steps, missing the bound entirely), so G3's "passes when the project's local test suite is run" clause gets a concrete hook on the worst-case input and G1 rides along for free; every `G#` from §3 appears in at least one `Covers` cell (G1 in T2/T3/T4/T5, G2 in T1, G3 in T5), clearing the cross-section consistency rule; Level stays `unit` throughout because a pure function has no integration boundary — escalating to `integration` or `e2e` would be ceremony the "pick the cheapest level" rule forbids.
 
 **Bad:**
 
