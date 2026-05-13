@@ -1,7 +1,7 @@
 # RFC-{NNN}: {Feature Title}
 
 **Version:** 1.0  
-**Author:** {Name}  
+**Author:** Chason Tang  
 **Date:** {YYYY-MM-DD}  
 **Status:** Proposed
 
