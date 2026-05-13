@@ -10,7 +10,7 @@
 These rules override the instinct to "fill every section." Treat them as hard constraints.
 
 **Anti-fabrication:**
-- **No invented data.** No fake metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or commit SHAs. If data is missing, write `No data available at this time` and move on.
+- **No invented data.** No fake metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or commit SHAs. If quantitative or supporting data is unavailable, include `No data available at this time`; still describe observable behavior and concrete value without inventing evidence.
 - **References must be real** — when citing paths in this repo, URLs, or prior RFCs anywhere in the document, verify they exist. Verify any commit SHA with `git cat-file -e <sha>^{commit}` before citing.
 - **Code is authoritative; prior RFCs are not.** RFCs capture the design at write-time, but later changes routinely skip RFC review, so the docs drift from the implementation. Before citing a prior RFC's signature, path, schema, flag, or behavior, verify against the current code (read the file, grep the symbol, run the test). When the code disagrees with the RFC, trust the code — either skip the citation or note the divergence in this RFC. Never copy a contract surface from a prior RFC without re-reading the file it documents.
 
@@ -58,7 +58,7 @@ Why it fails: opens with backstory that belongs in §2; vague claims (`comprehen
 
 {**Hard cap: 200 words (problem + value combined).**
 
-What problem exists today? Reference real behavior, error messages, or data. Without data, write `No data available at this time` and stop — do not pad with speculation, generic claims, or fabricated numbers.
+What problem exists today? Reference real behavior, error messages, or available data. If quantitative or supporting data is unavailable, include `No data available at this time`; still describe the observable problem and concrete value without speculation, generic claims, or fabricated numbers.
 
 What value does solving this bring? Concrete benefits — improved DX, performance, reduced complexity, new capabilities unlocked.}
 
@@ -68,7 +68,7 @@ What value does solving this bring? Concrete benefits — improved DX, performan
 
 > No shared numeric utility exists in the Monorepo today, so each module that needs GCD writes its own. Two concrete pains follow: (1) zero-input semantics drift between copies — some return `0` for `gcd(0, 0)`, others abnormal termination, and there is no canonical reference to point reviewers at; (2) follow-on numeric helpers (`lcm`, fraction reduction) cannot land until GCD has a home. Standing up a new empty `numkit` project with `gcd` as its first export resolves both at minimal cost: pure function, zero dependencies, no caller migration required because the project starts empty. No data available at this time.
 
-Why it works: names specific, observable problems instead of generic complaints; uses the prescribed fallback wording for missing data rather than fabricating numbers; ties each value claim (`removes divergence`, `unblocks follow-ups`) back to a listed problem; ~110 words, under the 200-word cap.
+Why it works: names specific, observable problems instead of generic complaints; uses the prescribed fallback wording for missing quantitative/supporting data rather than fabricating numbers; ties each value claim (`removes divergence`, `unblocks follow-ups`) back to a listed problem; ~110 words, under the 200-word cap.
 
 **Bad:**
 
@@ -517,7 +517,7 @@ Walk every box before submitting; any unchecked item is a blocker. The categorie
 - [ ] No invented metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or commit SHAs.
 - [ ] Every in-repo path, URL, and prior-RFC citation has been verified to resolve; every cited commit SHA passes `git cat-file -e <sha>^{commit}`.
 - [ ] Every prior-RFC citation has been cross-checked against the current code (signature, file path, schema, flag, behavior); where the code disagrees with the RFC, this document follows the code, not the RFC.
-- [ ] When supporting data is missing, §2 uses the exact phrase `No data available at this time`; §5 and §6 use the exact phrase `Not applicable — {one-sentence reason}`. Neither section pads with speculation.
+- [ ] When quantitative/supporting data is missing, §2 still describes the observable problem and concrete value, and includes the exact phrase `No data available at this time`; §5 and §6 use the exact phrase `Not applicable — {one-sentence reason}`. Neither section pads with speculation.
 
 **Section shape and hard caps.**
 
