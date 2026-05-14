@@ -30,7 +30,7 @@ These rules override the instinct to "fill every section." Treat them as hard co
 **Cross-section consistency:**
 - Every `G#` in §3 must appear in at least one §4.2 subsection's `Satisfies:` line, at least one §7 row's `Covers` cell, **and** at least one §8 phase's "Done when" clause.
 - Every `T#` in §7 must transition red→green across §8 phases — at least one earlier phase's "Done when" lists the row as red (committed but skipped/`xfail`/flag-gated so the project's local test suite stays green), a later phase's "Done when" lists it as green (un-marked, asserting for real).
-- Untestable Goals: append `non-testable: {one-sentence reason}` in §3 — at most 1 per RFC. Such goals may be omitted from §7 but must still appear in §4.2 `Satisfies:` and §8 "Done when".
+- Untestable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §3 only for genuinely subjective/qualitative outcomes (DX gain, readability, judgment-based observability) that cannot be expressed as a §7 row. Test infrastructure and build-graph integration are §8 phase deliverables, not non-testable Goals. Hard cap: 1 per RFC. Such goals may be omitted from §7 but must still appear in §4.2 `Satisfies:` and §8 "Done when".
 
 **Avoid vague phrases.** Do not use broad claims as a substitute for specific behavior, metrics, or actions. Rewrite phrases such as "comprehensively improve", "significantly enhance", "robust and scalable", "works correctly", "behaves as expected", "best practices", and "industry standard" into concrete acceptance criteria. "We will monitor" and "we will document" are not valid mitigations unless they name the exact signal, threshold, owner, artifact, or enforcement point.
 
@@ -80,13 +80,13 @@ Why it fails: fabricates a metric (`200 hours per year`) and an incident ID (`#4
 
 ## 3. Goals and Non-Goals
 
-{**Hard cap: 1–5 Goals, 0–5 Non-Goals, max 1 non-testable Goal.**
+{**Hard cap: 1–5 Goals, 0–5 Non-Goals, 0–1 non-testable Goals (default 0).**
 
 **Goals:** numbered `G1`, `G2`, ... so §7 and §8 can cite them by ID. Each must be concrete and verifiable.
 
-**Means vs Goals.** Goals describe outcomes (e.g., "P95 < 50 ms"), not implementations (e.g., "use Redis"). If swapping implementations invalidates the goal, rewrite it.
+**Means vs Goals.** Goals describe outcomes (e.g., "P95 < 50 ms"), not implementations (e.g., "use Redis"). If swapping implementations invalidates the goal, rewrite it. Test infrastructure ("ships with a unit-test binary") and build-graph integration ("registers the project in the GN `tests` group") are means, not outcomes — they belong in §8 phase Done-when clauses, never as Goals.
 
-**Non-testable Goals (fallback):** if a goal isn't expressible as a §7 scenario (e.g., subjective DX gain), append `non-testable: {one-sentence reason}`. Needing 2+ usually means goals are vague — rewrite as testable outcomes.}
+**Non-testable Goals (fallback, default 0):** reserved for genuinely subjective/qualitative outcomes — e.g., DX gain, readability, judgment-based observability — that cannot be expressed as a §7 row. If a Goal is testable in principle, write a §7 row for it; do not hide it behind this annotation. Test-binary scaffolding and build-graph integration are §8 deliverables verified by Done-when clauses, never non-testable Goals. Append `non-testable: {one-sentence reason}` only when no §7 expression is possible. Hard cap: 1 per RFC; needing 2+ means Goals are vague — rewrite as testable outcomes.}
 
 - **G1.** {Concrete, measurable outcome}
 
@@ -525,7 +525,7 @@ Walk every box before submitting; any unchecked item is a blocker. The categorie
 - [ ] Total length ≤ 4,000 words (most RFCs fit in 800–2,500).
 - [ ] §1 is one paragraph ≤ 150 words, stating the proposal and its core idea without backstory.
 - [ ] §2 ≤ 200 words (problem + value combined).
-- [ ] §3 has 1–5 Goals numbered `G1`, `G2`, …; 0–5 Non-Goals (empty → `None`); at most one Goal carries `non-testable: {one-sentence reason}`. Goals name outcomes, not implementations.
+- [ ] §3 has 1–5 Goals numbered `G1`, `G2`, …; 0–5 Non-Goals (empty → `None`); 0–1 Goals carry `non-testable: {one-sentence reason}` (default 0; reserved for genuine subjective outcomes, never test infrastructure or build-graph integration). Goals name outcomes, not implementations.
 - [ ] §4.1 supplies a diagram or uses the exact `N/A — textual description above is sufficient` fallback.
 - [ ] §4.2 has 1–5 subsections with descriptive aspect names, each ≤ 300 words; each subsection pins in order the **contract surface**, the **unstated contract**, and the **mechanism**, then closes with a `Satisfies: G# via {one phrase}` line (use `;` to separate when one subsection covers multiple goals).
 - [ ] §4.3 documents 0–3 decisions (or the literal `None`), each as `Chosen` / `Reason` / `Ruled out`; when no real alternative was considered, the `Ruled out` line reads `N/A — no viable alternative considered`.
