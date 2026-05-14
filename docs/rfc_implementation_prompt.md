@@ -45,5 +45,3 @@ Report, in this exact order:
 5. **Next phase blockers:** open questions or unanswered clarifications that prevent `P{#+1}` from starting. `None` is the expected default.
 
 If a phase cannot complete (ambiguity, missing dependency), stop and ask. Do not partially-implement to look productive.
-
-## RFC
