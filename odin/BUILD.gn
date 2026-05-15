@@ -1,0 +1,28 @@
+# odin GN build (RFC-001).
+#
+# Two targets:
+#   :odin                — source_set with the codec (.c + .h)
+#   :protocol_unittests  — googletest binary built from protocol_unittests.cpp
+#
+# Pure byte-buffer surface — no I/O, no allocation, no QUIC. The test binary
+# does not link xquic and runs on every supported target.
+
+source_set("odin") {
+  sources = [
+    "protocol.c",
+    "protocol.h",
+  ]
+}
+
+executable("protocol_unittests") {
+  testonly = true
+
+  sources = [ "protocol_unittests.cpp" ]
+
+  deps = [
+    ":odin",
+    "//googletest:gtest_main",
+  ]
+
+  configs += [ "//build:cxx17" ]
+}
