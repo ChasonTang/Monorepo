@@ -8,3 +8,7 @@ secondary_source = "//build/secondary/"
 
 # These are the targets to check when running "gn check".
 check_targets = []
+
+# Run all GN action() scripts through python3. Without this, GN would search
+# $PATH for "python", which is absent on systems that ship only python3.
+script_executable = "python3"

@@ -1,28 +1,86 @@
-# odin GN build (RFC-001).
+# odin GN build (RFC-001 codec + RFC-002 single-binary CLI skeleton).
 #
-# Two targets:
-#   :odin                — source_set with the codec (.c + .h)
-#   :protocol_unittests  — googletest binary built from protocol_unittests.cpp
-#
-# Pure byte-buffer surface — no I/O, no allocation, no QUIC. The test binary
-# does not link xquic and runs on every supported target.
+# Targets:
+#   :odin                — source_set: codec (RFC-001) + CLI parser (RFC-002).
+#   :odin_main           — executable wrapping odin_cli_main; output_name is
+#                          "odin" so the produced binary is out/odin. (Named
+#                          :odin_main because :odin already labels the
+#                          source_set.)
+#   :odin_symlinks       — GN action that creates relative symlinks
+#                          out/odin-client and out/odin-server pointing to
+#                          basename "odin". Intentionally has no deps on
+#                          :odin_main: link contents depend only on script
+#                          and link/target paths, so relinking out/odin
+#                          must not re-run the action.
+#   :odin_cli_artifacts  — group bundling :odin_main + :odin_symlinks.
+#   :odin_unittests      — googletest binary (cli_unittests.cpp owns main(),
+#                          so we link :gtest, not :gtest_main). Pulls in
+#                          :odin_cli_artifacts via data_deps so
+#                          `ninja -C out/ tests` produces the runtime
+#                          artifacts T9 spawns. _GNU_SOURCE is set on
+#                          Linux only — T8's fmemopen is hidden behind that
+#                          feature macro by glibc.
 
 source_set("odin") {
   sources = [
+    "cli.c",
+    "cli.h",
     "protocol.c",
     "protocol.h",
   ]
 }
 
-executable("protocol_unittests") {
+executable("odin_main") {
+  output_name = "odin"
+
+  sources = [ "main.c" ]
+
+  deps = [ ":odin" ]
+}
+
+action("odin_symlinks") {
+  script = "//build/symlink.py"
+
+  outputs = [
+    "$root_out_dir/odin-client",
+    "$root_out_dir/odin-server",
+  ]
+
+  args = [
+    "--target",
+    "odin",
+    "--link",
+    rebase_path("$root_out_dir/odin-client", root_build_dir),
+    "--link",
+    rebase_path("$root_out_dir/odin-server", root_build_dir),
+  ]
+}
+
+group("odin_cli_artifacts") {
+  deps = [
+    ":odin_main",
+    ":odin_symlinks",
+  ]
+}
+
+executable("odin_unittests") {
   testonly = true
 
-  sources = [ "protocol_unittests.cpp" ]
+  sources = [
+    "cli_unittests.cpp",
+    "protocol_unittests.cpp",
+  ]
 
   deps = [
     ":odin",
-    "//googletest:gtest_main",
+    "//googletest:gtest",
   ]
 
+  data_deps = [ ":odin_cli_artifacts" ]
+
   configs += [ "//build:cxx17" ]
+
+  if (target_os == "linux") {
+    defines = [ "_GNU_SOURCE" ]
+  }
 }

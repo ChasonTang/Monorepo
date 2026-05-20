@@ -5,6 +5,7 @@ group("default") {
     "//boringssl:ssl",
     "//c-ares:cares",
     "//display_list",
+    "//odin:odin_cli_artifacts",
     "//skia",
     "//xquic",
   ]
@@ -21,7 +22,7 @@ group("default") {
 # builds don't drag in test code; build with `ninja -C out/Default tests`.
 group("tests") {
   testonly = true
-  deps = [ "//odin:protocol_unittests" ]
+  deps = [ "//odin:odin_unittests" ]
 
   # display_list render tests compare a CALayer backend against the Skia
   # raster baseline — without that second backend there's nothing to compare,
