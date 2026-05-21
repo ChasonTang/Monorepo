@@ -2,7 +2,7 @@
 //
 // Unit tests T1-T8 from §7 of odin/docs/rfc_001_control_frame_codec.md.
 
-#include "protocol.h"
+#include "odin/protocol.h"
 
 #include <cstdint>
 #include <cstring>

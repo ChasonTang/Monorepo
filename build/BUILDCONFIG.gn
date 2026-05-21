@@ -49,7 +49,12 @@ if (target_os == "mac" && (target_cpu == "x64" || target_cpu == "arm64")) {
 }
 
 # Configs that will be applied to all targets.
-_native_compiler_configs = [ "//build:compiler_defaults" ]
+_native_compiler_configs = [
+  "//build:compiler_defaults",
+  "//build:visibility_hidden",
+  "//build:no_rtti",
+  "//build:no_exceptions",
+]
 
 if (is_debug) {
   _native_compiler_configs += [ "//build:debug" ]

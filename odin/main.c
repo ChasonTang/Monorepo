@@ -1,5 +1,5 @@
 /* odin/main.c — entire file */
-#include "cli.h"
+#include "odin/cli.h"
 
 #include <stdio.h>
 

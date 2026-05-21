@@ -2,7 +2,7 @@
 //
 // Tests T1-T10 from §7 of odin/docs/rfc_002_cli_skeleton.md.
 
-#include "cli.h"
+#include "odin/cli.h"
 
 #include <cerrno>
 #include <cstdio>

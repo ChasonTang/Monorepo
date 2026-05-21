@@ -53,9 +53,9 @@ toolchain("clang") {
 
   # ObjC is a superset of C and ObjC++ a superset of C++, so the C / C++
   # flag streams are inherited too — a config that sets cflags_cc (e.g.
-  # //build:compiler_defaults' -fno-rtti / -fno-exceptions) takes effect on
-  # .mm sources without having to also set cflags_objcc. This matches the
-  # convention in Chromium / Flutter engine's mac toolchains.
+  # //build:no_rtti / //build:no_exceptions) takes effect on .mm sources
+  # without having to also set cflags_objcc. This matches the convention in
+  # Chromium / Flutter engine's mac toolchains.
   #
   # -fobjc-arc is appended after {{cflags_objc}} / {{cflags_objcc}} so it wins
   # over any per-target opt-out — ARC is a project-wide policy, not a knob.

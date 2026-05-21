@@ -17,14 +17,6 @@
 # need to see "flutter/..." includes inside their own .cc files) gets these.
 config("dl_public_config") {
   include_dirs = [
-    # "//" so "display_list/foo.h" resolves to //display_list/foo.h, and
-    # "third_party/dart/runtime/include/..." (pulled in by
-    # flutter/fml/trace_event.h) resolves to the Dart embedding C API
-    # headers vendored under //third_party/dart/runtime/include/. Those
-    # headers come from the CIPD dart-sdk-mac-amd64 package but are
-    # platform-agnostic — same set works for linux-amd64 / mac-arm64.
-    "//",
-
     # "//flutter/engine/src" so "flutter/fml/..." and "flutter/impeller/..."
     # resolve to the vendored flutter source tree.
     "//flutter/engine/src",

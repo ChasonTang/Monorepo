@@ -2,7 +2,7 @@
 //
 // Unit tests T1-T10 from §7 of odin/docs/rfc_003_http_connect_parser.md.
 
-#include "http_connect.h"
+#include "odin/http_connect.h"
 
 #include <cstdint>
 #include <cstring>

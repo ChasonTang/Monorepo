@@ -14,9 +14,9 @@
 # own.
 #
 # RTTI / exceptions: googletest auto-detects via __cpp_rtti / __cpp_exceptions
-# (gtest-port.h), so the project-wide -fno-rtti / -fno-exceptions defaults are
-# fine — gtest compiles with GTEST_HAS_RTTI=0 / GTEST_HAS_EXCEPTIONS=0 and the
-# affected matchers fall back to non-RTTI paths.
+# (gtest-port.h), so the project-wide //build:no_rtti / //build:no_exceptions
+# defaults are fine — gtest compiles with GTEST_HAS_RTTI=0 /
+# GTEST_HAS_EXCEPTIONS=0 and the affected matchers fall back to non-RTTI paths.
 #
 # pthread / dl: the Linux toolchain auto-links both (see
 # //build/toolchain:clang_linux_x64), and on macOS pthread is part of

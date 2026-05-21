@@ -1,6 +1,6 @@
 /* odin/protocol.c — RFC-001 codec implementation. */
 
-#include "protocol.h"
+#include "odin/protocol.h"
 
 #include <assert.h>
 #include <stddef.h>

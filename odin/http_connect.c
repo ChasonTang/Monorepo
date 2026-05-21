@@ -1,6 +1,6 @@
 /* odin/http_connect.c — HTTPS_PROXY CONNECT request parser (RFC-003). */
 
-#include "http_connect.h"
+#include "odin/http_connect.h"
 
 #include <assert.h>
 #include <stddef.h>

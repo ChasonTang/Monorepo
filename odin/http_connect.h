@@ -28,7 +28,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "protocol.h" /* ODIN_PROTO_HOST_MAX */
+#include "odin/protocol.h" /* ODIN_PROTO_HOST_MAX */
 
 #ifdef __cplusplus
 extern "C" {

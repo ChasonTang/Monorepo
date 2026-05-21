@@ -23,7 +23,7 @@
  * directly (no symlink basename) yields ERR_UNKNOWN_MODE / 2.
  */
 
-#include "cli.h"
+#include "odin/cli.h"
 
 #include <getopt.h>
 #include <string.h>
