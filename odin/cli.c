@@ -9,14 +9,16 @@
  *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR' or "
  *              "'odin-server --listen ADDR'"
  *
- * | status               | mode    | out         | err                                                | return |
+ * | status               | mode    | out         | err | return |
  * |----------------------|---------|-------------|----------------------------------------------------|--------|
- * | OK                   | CLIENT  | -           | "odin: mode=client listen=<L> server=<S>\n"        |   0    |
- * | OK                   | SERVER  | -           | "odin: mode=server listen=<L>\n"                   |   0    |
- * | HELP                 | M       | "<U_M>\n"   | -                                                  |   0    |
- * | ERR_UNKNOWN_MODE     | UNKNOWN | -           | "odin: unrecognized invocation name\n<U_BOTH>\n"   |   2    |
- * | ERR_MISSING_REQUIRED | M       | -           | "odin: missing required flag\n<U_M>\n"             |   2    |
- * | ERR_UNKNOWN_FLAG     | M       | -           | "odin: unknown or invalid flag\n<U_M>\n"           |   2    |
+ * | OK                   | CLIENT  | -           | "odin: mode=client
+ * listen=<L> server=<S>\n"        |   0    | | OK                   | SERVER  |
+ * -           | "odin: mode=server listen=<L>\n"                   |   0    |
+ * | HELP                 | M       | "<U_M>\n"   | - |   0    | |
+ * ERR_UNKNOWN_MODE     | UNKNOWN | -           | "odin: unrecognized invocation
+ * name\n<U_BOTH>\n"   |   2    | | ERR_MISSING_REQUIRED | M       | - | "odin:
+ * missing required flag\n<U_M>\n"             |   2    | | ERR_UNKNOWN_FLAG | M
+ * | -           | "odin: unknown or invalid flag\n<U_M>\n"           |   2    |
  *
  * Both streams are flushed before odin_cli_main returns; success writes to
  * `err` so future proxy data never shares `out`. Running `out/odin`
@@ -86,7 +88,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   /* Save getopt globals so callers see no side effect on any return path. */
   const int saved_optind = optind;
   const int saved_opterr = opterr;
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
     defined(__NetBSD__)
   const int saved_optreset = optreset;
   optreset = 1;
@@ -126,8 +128,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       } else {
         tok_idx = optind - 1;
       }
-      const char *tok =
-          (tok_idx > 0 && tok_idx < argc) ? argv[tok_idx] : NULL;
+      const char *tok = (tok_idx > 0 && tok_idx < argc) ? argv[tok_idx] : NULL;
       const char *exp = longopts[longindex].name;
       const size_t exp_len = strlen(exp);
       if (tok == NULL || tok[0] != '-' || tok[1] != '-' ||
@@ -138,21 +139,21 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       }
     }
     switch (c) {
-      case 'l':
-        listen_arg = optarg;
-        break;
-      case 's':
-        server_arg = optarg;
-        break;
-      case 'h':
-        help_seen = 1;
-        break;
-      default:
-        /* getopt_long returns '?' on unknown option / missing required
-         * argument; the `default` arm folds that with any other unexpected
-         * return value. */
-        unknown_flag_seen = 1;
-        break;
+    case 'l':
+      listen_arg = optarg;
+      break;
+    case 's':
+      server_arg = optarg;
+      break;
+    case 'h':
+      help_seen = 1;
+      break;
+    default:
+      /* getopt_long returns '?' on unknown option / missing required
+       * argument; the `default` arm folds that with any other unexpected
+       * return value. */
+      unknown_flag_seen = 1;
+      break;
     }
   }
   if (optind < argc) {
@@ -179,7 +180,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
 
   optind = saved_optind;
   opterr = saved_opterr;
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||      \
     defined(__NetBSD__)
   optreset = saved_optreset;
 #endif
@@ -201,43 +202,43 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
 
   int rc = 2;
   switch (status) {
-    case ODIN_CLI_OK:
-      if (args.mode == ODIN_CLI_MODE_CLIENT) {
-        (void)fputs("odin: mode=client listen=", err);
-        (void)fputs(args.listen_addr, err);
-        (void)fputs(" server=", err);
-        (void)fputs(args.server_addr, err);
-        (void)fputc('\n', err);
-      } else {
-        (void)fputs("odin: mode=server listen=", err);
-        (void)fputs(args.listen_addr, err);
-        (void)fputc('\n', err);
-      }
-      rc = 0;
-      break;
-    case ODIN_CLI_HELP:
-      (void)fputs(um, out);
-      (void)fputc('\n', out);
-      rc = 0;
-      break;
-    case ODIN_CLI_ERR_UNKNOWN_MODE:
-      (void)fputs("odin: unrecognized invocation name\n", err);
-      (void)fputs(kUBoth, err);
+  case ODIN_CLI_OK:
+    if (args.mode == ODIN_CLI_MODE_CLIENT) {
+      (void)fputs("odin: mode=client listen=", err);
+      (void)fputs(args.listen_addr, err);
+      (void)fputs(" server=", err);
+      (void)fputs(args.server_addr, err);
       (void)fputc('\n', err);
-      rc = 2;
-      break;
-    case ODIN_CLI_ERR_MISSING_REQUIRED:
-      (void)fputs("odin: missing required flag\n", err);
-      (void)fputs(um, err);
+    } else {
+      (void)fputs("odin: mode=server listen=", err);
+      (void)fputs(args.listen_addr, err);
       (void)fputc('\n', err);
-      rc = 2;
-      break;
-    case ODIN_CLI_ERR_UNKNOWN_FLAG:
-      (void)fputs("odin: unknown or invalid flag\n", err);
-      (void)fputs(um, err);
-      (void)fputc('\n', err);
-      rc = 2;
-      break;
+    }
+    rc = 0;
+    break;
+  case ODIN_CLI_HELP:
+    (void)fputs(um, out);
+    (void)fputc('\n', out);
+    rc = 0;
+    break;
+  case ODIN_CLI_ERR_UNKNOWN_MODE:
+    (void)fputs("odin: unrecognized invocation name\n", err);
+    (void)fputs(kUBoth, err);
+    (void)fputc('\n', err);
+    rc = 2;
+    break;
+  case ODIN_CLI_ERR_MISSING_REQUIRED:
+    (void)fputs("odin: missing required flag\n", err);
+    (void)fputs(um, err);
+    (void)fputc('\n', err);
+    rc = 2;
+    break;
+  case ODIN_CLI_ERR_UNKNOWN_FLAG:
+    (void)fputs("odin: unknown or invalid flag\n", err);
+    (void)fputs(um, err);
+    (void)fputc('\n', err);
+    rc = 2;
+    break;
   }
 
   (void)fflush(out);

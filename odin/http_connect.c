@@ -77,9 +77,8 @@ odin_http_status_t odin_http_parse_connect(const uint8_t *buf, size_t n,
 
   /* Validate HTTP-version: buf[sp+1..rl_end) must be "HTTP/1.0" or
    * "HTTP/1.1" (exactly 8 bytes). */
-  if (rl_end - (sp + 1) != 8 ||
-      (memcmp(buf + sp + 1, "HTTP/1.0", 8) != 0 &&
-       memcmp(buf + sp + 1, "HTTP/1.1", 8) != 0)) {
+  if (rl_end - (sp + 1) != 8 || (memcmp(buf + sp + 1, "HTTP/1.0", 8) != 0 &&
+                                 memcmp(buf + sp + 1, "HTTP/1.1", 8) != 0)) {
     return ODIN_HTTP_ERR_BAD_VERSION;
   }
 

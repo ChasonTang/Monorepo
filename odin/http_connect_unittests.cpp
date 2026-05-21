@@ -102,11 +102,10 @@ TEST(OdinHttpConnectTest, T2IPv6BracketStrip) {
 TEST(OdinHttpConnectTest, T3HeadersConsumedTrailingBytesUntouched) {
 
   // 92-byte request followed by 16-byte tail (total 108).
-  const char *req_str =
-      "CONNECT example.com:443 HTTP/1.1\r\n"
-      "Host: example.com:443\r\n"
-      "Proxy-Authorization: Bearer abc\r\n"
-      "\r\n";
+  const char *req_str = "CONNECT example.com:443 HTTP/1.1\r\n"
+                        "Host: example.com:443\r\n"
+                        "Proxy-Authorization: Bearer abc\r\n"
+                        "\r\n";
   const size_t req_len = 92;
   const char *tail = "GET / HTTP/1.1\r\n";
   const size_t tail_len = 16;
@@ -130,10 +129,9 @@ TEST(OdinHttpConnectTest, T3HeadersConsumedTrailingBytesUntouched) {
   EXPECT_EQ(consumed, req_len);
   EXPECT_EQ(out.host_len, static_cast<size_t>(11));
   EXPECT_EQ(out.port, static_cast<uint16_t>(443));
-  EXPECT_EQ(
-      std::string(reinterpret_cast<const char *>(buf + out.host_off),
-                  out.host_len),
-      "example.com");
+  EXPECT_EQ(std::string(reinterpret_cast<const char *>(buf + out.host_off),
+                        out.host_len),
+            "example.com");
   // Trailing bytes must be unmodified.
   EXPECT_EQ(std::memcmp(buf + req_len, saved_tail, tail_len), 0);
 }
@@ -166,7 +164,8 @@ TEST(OdinHttpConnectTest, T4PrefixParserNeedMore) {
   {
     size_t consumed = kSentinelConsumed;
     odin_http_connect_t out = sentinel_out();
-    EXPECT_EQ(odin_http_parse_connect(buf, total, &consumed, &out), ODIN_HTTP_OK);
+    EXPECT_EQ(odin_http_parse_connect(buf, total, &consumed, &out),
+              ODIN_HTTP_OK);
     EXPECT_EQ(consumed, total);
   }
 
@@ -244,10 +243,10 @@ TEST(OdinHttpConnectTest, T5BadMethodFastFail) {
 TEST(OdinHttpConnectTest, T6MalformedRequestTarget) {
 
   const char *const cases[] = {
-      "CONNECT  HTTP/1.1\r\n\r\n",       // empty target between SPs
+      "CONNECT  HTTP/1.1\r\n\r\n",            // empty target between SPs
       "CONNECT example.com HTTP/1.1\r\n\r\n", // no :port
-      "CONNECT [::1:443 HTTP/1.1\r\n\r\n",   // unbalanced [
-      "CONNECT [::1]443 HTTP/1.1\r\n\r\n",   // bracket without :
+      "CONNECT [::1:443 HTTP/1.1\r\n\r\n",    // unbalanced [
+      "CONNECT [::1]443 HTTP/1.1\r\n\r\n",    // bracket without :
   };
 
   for (const char *req : cases) {
@@ -269,12 +268,9 @@ TEST(OdinHttpConnectTest, T6MalformedRequestTarget) {
 TEST(OdinHttpConnectTest, T7PortInvalid) {
 
   const char *const cases[] = {
-      "CONNECT a:65536 HTTP/1.1\r\n\r\n",
-      "CONNECT a:99999 HTTP/1.1\r\n\r\n",
-      "CONNECT a:123456 HTTP/1.1\r\n\r\n",
-      "CONNECT a:abc HTTP/1.1\r\n\r\n",
-      "CONNECT a: HTTP/1.1\r\n\r\n",
-      "CONNECT a:b:443 HTTP/1.1\r\n\r\n",
+      "CONNECT a:65536 HTTP/1.1\r\n\r\n",  "CONNECT a:99999 HTTP/1.1\r\n\r\n",
+      "CONNECT a:123456 HTTP/1.1\r\n\r\n", "CONNECT a:abc HTTP/1.1\r\n\r\n",
+      "CONNECT a: HTTP/1.1\r\n\r\n",       "CONNECT a:b:443 HTTP/1.1\r\n\r\n",
   };
 
   for (const char *req : cases) {
@@ -357,7 +353,8 @@ TEST(OdinHttpConnectTest, T10RequestTooLarge) {
   for (size_t n = 0; n <= 8232; ++n) {
     size_t consumed = kSentinelConsumed;
     odin_http_connect_t out = sentinel_out();
-    const odin_http_status_t status = odin_http_parse_connect(buf, n, &consumed, &out);
+    const odin_http_status_t status =
+        odin_http_parse_connect(buf, n, &consumed, &out);
     if (n < ODIN_HTTP_REQUEST_MAX) {
       EXPECT_EQ(status, ODIN_HTTP_NEED_MORE) << "n=" << n;
     } else {

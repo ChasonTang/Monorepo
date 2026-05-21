@@ -33,7 +33,7 @@ std::string g_test_argv0;
 // is mutated after construction; only the pointer vector grows when
 // argv_terminated() appends the NULL.
 class MutableArgv {
- public:
+public:
   MutableArgv(std::initializer_list<const char *> tokens) {
     storage_.reserve(tokens.size());
     for (const char *t : tokens) {
@@ -57,7 +57,7 @@ class MutableArgv {
     return ptrs_.data();
   }
 
- private:
+private:
   void rebuild_ptrs() {
     ptrs_.clear();
     ptrs_.reserve(storage_.size());
@@ -88,20 +88,19 @@ std::string Basename(const std::string &path) {
   return path.substr(pos + 1);
 }
 
-constexpr const char kUC[] =
-    "usage: odin-client --listen ADDR --server ADDR";
+constexpr const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
 constexpr const char kUS[] = "usage: odin-server --listen ADDR";
 constexpr const char kUBoth[] =
     "usage: 'odin-client --listen ADDR --server ADDR' or "
     "'odin-server --listen ADDR'";
 
-}  // namespace
+} // namespace
 
 // T1 — Client basename with both flags, short and long forms.
 TEST(OdinCliTest, T1ClientBasenameBothFlagsShortLong) {
   {
-    MutableArgv argv({"odin-client", "-l", "127.0.0.1:8443", "-s",
-                      "quic.example.com:4433"});
+    MutableArgv argv(
+        {"odin-client", "-l", "127.0.0.1:8443", "-s", "quic.example.com:4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
@@ -170,8 +169,7 @@ TEST(OdinCliTest, T4MissingRequiredFlagCarriesMode) {
   };
   const std::vector<Case> cases = {
       {{"odin-client", "-l", "127.0.0.1:8443"}, ODIN_CLI_MODE_CLIENT},
-      {{"odin-client", "-s", "quic.example.com:4433"},
-       ODIN_CLI_MODE_CLIENT},
+      {{"odin-client", "-s", "quic.example.com:4433"}, ODIN_CLI_MODE_CLIENT},
       {{"odin-server"}, ODIN_CLI_MODE_SERVER},
   };
   for (const auto &c : cases) {
@@ -202,8 +200,7 @@ TEST(OdinCliTest, T5UnknownFlagPrecedesMissingRequired) {
       {{"odin-client", "-x"}, ODIN_CLI_MODE_CLIENT},
       {{"odin-server", "-s", "S"}, ODIN_CLI_MODE_SERVER},
       {{"odin-client", "-l"}, ODIN_CLI_MODE_CLIENT},
-      {{"odin-client", "-l", "L", "-s", "S", "extra"},
-       ODIN_CLI_MODE_CLIENT},
+      {{"odin-client", "-l", "L", "-s", "S", "extra"}, ODIN_CLI_MODE_CLIENT},
       {{"odin-client", "extra"}, ODIN_CLI_MODE_CLIENT},
       // Abbreviated --listen (unique prefix of an allowed long option).
       {{"odin-client", "--lis", "L", "-s", "S"}, ODIN_CLI_MODE_CLIENT},
@@ -244,8 +241,7 @@ TEST(OdinCliTest, T6HelpShortCircuits) {
   for (const auto &c : cases) {
     MutableArgv argv(c.tokens);
     odin_cli_args_t out{};
-    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
-              ODIN_CLI_HELP);
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_HELP);
     EXPECT_EQ(out.mode, c.expected_mode);
     EXPECT_EQ(out.listen_addr, nullptr);
     EXPECT_EQ(out.server_addr, nullptr);
@@ -264,13 +260,14 @@ TEST(OdinCliTest, T7GetoptGlobalsRestored) {
     odin_cli_mode_t expected_mode;
   };
   const std::vector<Case> sequence = {
-      {{"odin-client", "-l", "L", "-s", "S"}, ODIN_CLI_OK,
+      {{"odin-client", "-l", "L", "-s", "S"},
+       ODIN_CLI_OK,
        ODIN_CLI_MODE_CLIENT},
       {{"odin-client", "--help"}, ODIN_CLI_HELP, ODIN_CLI_MODE_CLIENT},
-      {{"odin-client", "--bogus"}, ODIN_CLI_ERR_UNKNOWN_FLAG,
+      {{"odin-client", "--bogus"},
+       ODIN_CLI_ERR_UNKNOWN_FLAG,
        ODIN_CLI_MODE_CLIENT},
-      {{"odin-client"}, ODIN_CLI_ERR_MISSING_REQUIRED,
-       ODIN_CLI_MODE_CLIENT},
+      {{"odin-client"}, ODIN_CLI_ERR_MISSING_REQUIRED, ODIN_CLI_MODE_CLIENT},
       {{"odin"}, ODIN_CLI_ERR_UNKNOWN_MODE, ODIN_CLI_MODE_UNKNOWN},
       {{"odin-server", "-l", "L"}, ODIN_CLI_OK, ODIN_CLI_MODE_SERVER},
   };
@@ -297,8 +294,10 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
   };
   const std::vector<Row> rows = {
       // OK CLIENT
-      {{"odin-client", "-l", "L", "-s", "S"}, "",
-       "odin: mode=client listen=L server=S\n", 0},
+      {{"odin-client", "-l", "L", "-s", "S"},
+       "",
+       "odin: mode=client listen=L server=S\n",
+       0},
       // OK SERVER
       {{"odin-server", "-l", "L"}, "", "odin: mode=server listen=L\n", 0},
       // HELP CLIENT
@@ -306,21 +305,30 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
       // HELP SERVER
       {{"odin-server", "-h"}, std::string(kUS) + "\n", "", 0},
       // ERR_UNKNOWN_MODE
-      {{"odin"}, "",
+      {{"odin"},
+       "",
        std::string("odin: unrecognized invocation name\n") + kUBoth + "\n",
        2},
       // ERR_MISSING_REQUIRED CLIENT
-      {{"odin-client"}, "",
-       std::string("odin: missing required flag\n") + kUC + "\n", 2},
+      {{"odin-client"},
+       "",
+       std::string("odin: missing required flag\n") + kUC + "\n",
+       2},
       // ERR_MISSING_REQUIRED SERVER
-      {{"odin-server"}, "",
-       std::string("odin: missing required flag\n") + kUS + "\n", 2},
+      {{"odin-server"},
+       "",
+       std::string("odin: missing required flag\n") + kUS + "\n",
+       2},
       // ERR_UNKNOWN_FLAG CLIENT
-      {{"odin-client", "--bogus"}, "",
-       std::string("odin: unknown or invalid flag\n") + kUC + "\n", 2},
+      {{"odin-client", "--bogus"},
+       "",
+       std::string("odin: unknown or invalid flag\n") + kUC + "\n",
+       2},
       // ERR_UNKNOWN_FLAG SERVER
-      {{"odin-server", "--bogus"}, "",
-       std::string("odin: unknown or invalid flag\n") + kUS + "\n", 2},
+      {{"odin-server", "--bogus"},
+       "",
+       std::string("odin: unknown or invalid flag\n") + kUS + "\n",
+       2},
   };
 
   char out_buf[512];
@@ -355,8 +363,8 @@ TEST(OdinCliTest, T9SymlinkDispatchExec) {
   const pid_t pid = fork();
   ASSERT_NE(pid, -1) << "fork failed: " << std::strerror(errno);
   if (pid == 0) {
-    MutableArgv child_argv({client_path.c_str(), "--listen", "L",
-                            "--server", "S"});
+    MutableArgv child_argv(
+        {client_path.c_str(), "--listen", "L", "--server", "S"});
     execve(client_path.c_str(), child_argv.argv_terminated(), environ);
     // execve only returns on failure.
     _exit(127);
