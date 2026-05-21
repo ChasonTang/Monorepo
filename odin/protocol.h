@@ -31,9 +31,8 @@
  * Multi-byte integers (port, error_code) are big-endian; 1-byte fields are
  * endianness-agnostic. host bytes are opaque — DNS hostname syntax and
  * IP-literal grammar are the Server's concern, and the codec does not
- * reject embedded NUL (callers that want a NUL-safe view check
- * strlen(host_out) == *out_host_len). Each frame is self-delimiting from
- * its own bytes: CONNECT_REQ's total size is 5 + host_len (byte 2),
+ * reject embedded NUL. Each frame is self-delimiting from its own bytes:
+ * CONNECT_REQ's total size is 5 + host_len (byte 2),
  * CONNECT_RESP's is fixed at 4. QUIC streams are byte-oriented, so the
  * decoders are prefix parsers that consume one frame and leave any
  * trailing bytes for the next layer. No padding, no reserved bits in v1;
@@ -67,24 +66,6 @@ typedef enum {
   ODIN_PROTO_ERR_BAD_FRAME_TYPE,
 } odin_proto_status_t;
 
-/* DEPRECATED as of RFC-004: prefer odin_proto_encode_connect_req_v2, which
- * fills a 3-slot iovec aliasing the caller's host pointer instead of
- * copying host bytes into a contiguous output buffer. v1 remains callable
- * and behaviour-preserving; a follow-up RFC owns its removal. */
-odin_proto_status_t odin_proto_encode_connect_req(const char *host,
-                                                  size_t host_len,
-                                                  uint16_t port, uint8_t *buf,
-                                                  size_t cap, size_t *out_n);
-
-/* DEPRECATED as of RFC-004: prefer odin_proto_decode_connect_req_v2, which
- * returns a non-owning {host_off, host_len, port} view aliasing the caller's
- * input buffer instead of copying host bytes into a caller-supplied buffer.
- * v1 remains callable and behaviour-preserving; a follow-up RFC owns its
- * removal. */
-odin_proto_status_t odin_proto_decode_connect_req(
-    const uint8_t *buf, size_t n, size_t *out_consumed, char *host_out,
-    size_t host_cap, size_t *out_host_len, uint16_t *out_port);
-
 typedef struct {
   const void *base;
   size_t len;
@@ -111,13 +92,6 @@ typedef struct {
 
 void odin_proto_encode_connect_resp_v2(uint16_t error_code,
                                        odin_proto_connect_resp_frame_t *out);
-
-/* For new fixed-size CONNECT_RESP frames, prefer
- * odin_proto_encode_connect_resp_v2. v1 remains callable and
- * behaviour-preserving; a follow-up RFC owns its removal. */
-odin_proto_status_t odin_proto_encode_connect_resp(uint16_t error_code,
-                                                   uint8_t *buf, size_t cap,
-                                                   size_t *out_n);
 
 odin_proto_status_t odin_proto_decode_connect_resp(const uint8_t *buf, size_t n,
                                                    size_t *out_consumed,
