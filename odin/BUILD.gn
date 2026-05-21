@@ -25,6 +25,8 @@ source_set("odin") {
   sources = [
     "cli.c",
     "cli.h",
+    "http_connect.c",
+    "http_connect.h",
     "protocol.c",
     "protocol.h",
   ]
@@ -68,6 +70,7 @@ executable("odin_unittests") {
 
   sources = [
     "cli_unittests.cpp",
+    "http_connect_unittests.cpp",
     "protocol_unittests.cpp",
   ]
 
