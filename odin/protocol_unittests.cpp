@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -460,4 +461,263 @@ TEST(OdinProtoTest, T8RejectUndersizedBuffer) {
       ASSERT_EQ(out_buf[i], kHostFill);
     }
   }
+}
+
+// RFC-004 v2 codec tests T1-T5.
+
+namespace {
+
+constexpr uint8_t kScratchFill = 0xCC;
+constexpr size_t kIovLenSentinel = static_cast<size_t>(0xFEEDFACEul);
+
+const uint8_t kIovBaseSentinelByte = 0xEE;
+const void *const kIovBaseSentinel = &kIovBaseSentinelByte;
+
+void SentinelFillIov(odin_proto_iov_t iov[3]) {
+  for (size_t i = 0; i < 3; ++i) {
+    iov[i].base = kIovBaseSentinel;
+    iov[i].len = kIovLenSentinel;
+  }
+}
+
+} // namespace
+
+// T1 — v2 encode emits byte-equivalent output to v1; host slot aliases the
+// caller's pointer.
+TEST(OdinProtoV2Test, T1V2EncodeByteEquivalentAndAliasing) {
+  struct Case {
+    std::string host;
+    size_t host_len;
+    uint16_t port;
+    size_t total;
+  };
+  const std::string host_a = "example.com";
+  const std::string host_b = "a";
+  const std::string host_c(ODIN_PROTO_HOST_MAX, 'x');
+  const Case cases[] = {
+      {host_a, 11, 443, 16},
+      {host_b, 1, 0, 6},
+      {host_c, ODIN_PROTO_HOST_MAX, 65535, 260},
+  };
+
+  for (const Case &c : cases) {
+    odin_proto_iov_t iov[3];
+    uint8_t scratch_header[3] = {0};
+    uint8_t scratch_port[2] = {0};
+    ASSERT_EQ(odin_proto_encode_connect_req_v2(c.host.data(), c.host_len,
+                                               c.port, iov, scratch_header,
+                                               scratch_port),
+              ODIN_PROTO_OK)
+        << "host_len=" << c.host_len;
+
+    EXPECT_EQ(iov[0].len, static_cast<size_t>(3));
+    EXPECT_EQ(iov[1].len, c.host_len);
+    EXPECT_EQ(iov[2].len, static_cast<size_t>(2));
+    EXPECT_EQ(iov[1].base, static_cast<const void *>(c.host.data()));
+
+    std::vector<uint8_t> flat;
+    flat.reserve(c.total);
+    for (size_t i = 0; i < 3; ++i) {
+      const uint8_t *p = static_cast<const uint8_t *>(iov[i].base);
+      flat.insert(flat.end(), p, p + iov[i].len);
+    }
+    ASSERT_EQ(flat.size(), c.total);
+
+    uint8_t v1_buf[ODIN_PROTO_CONNECT_REQ_MAX] = {0};
+    size_t v1_n = 0;
+    ASSERT_EQ(odin_proto_encode_connect_req(c.host.data(), c.host_len, c.port,
+                                            v1_buf, sizeof(v1_buf), &v1_n),
+              ODIN_PROTO_OK);
+    ASSERT_EQ(v1_n, c.total);
+    EXPECT_EQ(std::memcmp(flat.data(), v1_buf, c.total), 0)
+        << "host_len=" << c.host_len;
+  }
+}
+
+// T2 — v2 encode rejects host_len out of [1, 255]; writes nothing on error.
+TEST(OdinProtoV2Test, T2V2EncodeRejectsBadHostLen) {
+  // host_len=0
+  {
+    odin_proto_iov_t iov[3];
+    SentinelFillIov(iov);
+    uint8_t scratch_header[3];
+    uint8_t scratch_port[2];
+    std::memset(scratch_header, kScratchFill, sizeof(scratch_header));
+    std::memset(scratch_port, kScratchFill, sizeof(scratch_port));
+    EXPECT_EQ(odin_proto_encode_connect_req_v2("", 0, 443, iov, scratch_header,
+                                               scratch_port),
+              ODIN_PROTO_ERR_HOST_LEN_INVALID);
+    for (size_t i = 0; i < 3; ++i) {
+      EXPECT_EQ(iov[i].base, kIovBaseSentinel);
+      EXPECT_EQ(iov[i].len, kIovLenSentinel);
+    }
+    for (size_t i = 0; i < sizeof(scratch_header); ++i) {
+      ASSERT_EQ(scratch_header[i], kScratchFill);
+    }
+    for (size_t i = 0; i < sizeof(scratch_port); ++i) {
+      ASSERT_EQ(scratch_port[i], kScratchFill);
+    }
+  }
+
+  // host_len=256
+  {
+    const std::string host(256, 'x');
+    odin_proto_iov_t iov[3];
+    SentinelFillIov(iov);
+    uint8_t scratch_header[3];
+    uint8_t scratch_port[2];
+    std::memset(scratch_header, kScratchFill, sizeof(scratch_header));
+    std::memset(scratch_port, kScratchFill, sizeof(scratch_port));
+    EXPECT_EQ(odin_proto_encode_connect_req_v2(host.data(), 256, 443, iov,
+                                               scratch_header, scratch_port),
+              ODIN_PROTO_ERR_HOST_LEN_INVALID);
+    for (size_t i = 0; i < 3; ++i) {
+      EXPECT_EQ(iov[i].base, kIovBaseSentinel);
+      EXPECT_EQ(iov[i].len, kIovLenSentinel);
+    }
+    for (size_t i = 0; i < sizeof(scratch_header); ++i) {
+      ASSERT_EQ(scratch_header[i], kScratchFill);
+    }
+    for (size_t i = 0; i < sizeof(scratch_port); ++i) {
+      ASSERT_EQ(scratch_port[i], kScratchFill);
+    }
+  }
+}
+
+// T3 — v2 decode round-trip yields the aliasing view and the slice matches the
+// original host bytes.
+TEST(OdinProtoV2Test, T3V2DecodeAliasingView) {
+  struct Case {
+    std::string host;
+    size_t host_len;
+    uint16_t port;
+    size_t total;
+  };
+  const std::string host_a = "example.com";
+  const std::string host_b = "a";
+  const std::string host_c(ODIN_PROTO_HOST_MAX, 'x');
+  const Case cases[] = {
+      {host_a, 11, 443, 16},
+      {host_b, 1, 0, 6},
+      {host_c, ODIN_PROTO_HOST_MAX, 65535, 260},
+  };
+
+  for (const Case &c : cases) {
+    uint8_t frame[ODIN_PROTO_CONNECT_REQ_MAX] = {0};
+    size_t frame_n = 0;
+    ASSERT_EQ(odin_proto_encode_connect_req(c.host.data(), c.host_len, c.port,
+                                            frame, sizeof(frame), &frame_n),
+              ODIN_PROTO_OK);
+    ASSERT_EQ(frame_n, c.total);
+
+    size_t consumed = 0;
+    odin_proto_connect_req_view_t view = {};
+    EXPECT_EQ(
+        odin_proto_decode_connect_req_v2(frame, frame_n, &consumed, &view),
+        ODIN_PROTO_OK)
+        << "host_len=" << c.host_len;
+    EXPECT_EQ(consumed, c.total);
+    EXPECT_EQ(view.host_off, static_cast<size_t>(3));
+    EXPECT_EQ(view.host_len, c.host_len);
+    EXPECT_EQ(view.port, c.port);
+    EXPECT_EQ(
+        std::memcmp(&frame[view.host_off], c.host.data(), view.host_len), 0)
+        << "host_len=" << c.host_len;
+  }
+}
+
+// T4 — v2 decode rejects bad version / frame_type / host_len; *out and
+// *consumed unmodified.
+TEST(OdinProtoV2Test, T4V2DecodeRejectsBadBytes) {
+  // Canonical 16-byte frame for example.com:443.
+  uint8_t canonical[16] = {0};
+  size_t canonical_n = 0;
+  ASSERT_EQ(odin_proto_encode_connect_req("example.com", 11, 443, canonical,
+                                          sizeof(canonical), &canonical_n),
+            ODIN_PROTO_OK);
+  ASSERT_EQ(canonical_n, static_cast<size_t>(16));
+
+  auto check = [](const uint8_t *buf, size_t n,
+                  odin_proto_status_t expected) {
+    size_t consumed = kSentinelSize;
+    odin_proto_connect_req_view_t view;
+    view.host_off = kSentinelSize;
+    view.host_len = kSentinelSize;
+    view.port = kSentinelU16;
+    EXPECT_EQ(odin_proto_decode_connect_req_v2(buf, n, &consumed, &view),
+              expected)
+        << "n=" << n;
+    EXPECT_EQ(consumed, kSentinelSize);
+    EXPECT_EQ(view.host_off, kSentinelSize);
+    EXPECT_EQ(view.host_len, kSentinelSize);
+    EXPECT_EQ(view.port, kSentinelU16);
+  };
+
+  // Bad version: buf[0] = 0x00, 0x02; at n=1 and n=16.
+  for (const uint8_t v : {static_cast<uint8_t>(0x00), static_cast<uint8_t>(0x02)}) {
+    uint8_t buf[16];
+    std::memcpy(buf, canonical, sizeof(buf));
+    buf[0] = v;
+    check(buf, 1, ODIN_PROTO_ERR_BAD_VERSION);
+    check(buf, 16, ODIN_PROTO_ERR_BAD_VERSION);
+  }
+
+  // Bad frame_type: buf[1] = 0x00, 0x02, 0x03; at n=2 and n=16.
+  for (const uint8_t ft : {static_cast<uint8_t>(0x00), static_cast<uint8_t>(0x02),
+                           static_cast<uint8_t>(0x03)}) {
+    uint8_t buf[16];
+    std::memcpy(buf, canonical, sizeof(buf));
+    buf[1] = ft;
+    check(buf, 2, ODIN_PROTO_ERR_BAD_FRAME_TYPE);
+    check(buf, 16, ODIN_PROTO_ERR_BAD_FRAME_TYPE);
+  }
+
+  // Bad host_len: buf[2] = 0x00; at n=5 with otherwise-syntactically-valid frame.
+  {
+    uint8_t buf[5] = {0x01, 0x01, 0x00, 0x00, 0x00};
+    check(buf, 5, ODIN_PROTO_ERR_HOST_LEN_INVALID);
+  }
+}
+
+// T5 — v2 decode returns NEED_MORE on every partial prefix, OK at full frame,
+// and leaves trailing bytes untouched.
+TEST(OdinProtoV2Test, T5V2DecodeNeedMoreAndTrailing) {
+  uint8_t buf[116] = {0};
+  size_t frame_n = 0;
+  ASSERT_EQ(odin_proto_encode_connect_req("example.com", 11, 443, buf, 16,
+                                          &frame_n),
+            ODIN_PROTO_OK);
+  ASSERT_EQ(frame_n, static_cast<size_t>(16));
+  for (size_t i = 0; i < 100; ++i) {
+    buf[16 + i] = static_cast<uint8_t>(i ^ 0x55);
+  }
+  uint8_t saved_trailing[100];
+  std::memcpy(saved_trailing, &buf[16], 100);
+
+  for (size_t n = 0; n < 16; ++n) {
+    size_t consumed = kSentinelSize;
+    odin_proto_connect_req_view_t view;
+    view.host_off = kSentinelSize;
+    view.host_len = kSentinelSize;
+    view.port = kSentinelU16;
+    EXPECT_EQ(odin_proto_decode_connect_req_v2(buf, n, &consumed, &view),
+              ODIN_PROTO_NEED_MORE)
+        << "n=" << n;
+    EXPECT_EQ(consumed, kSentinelSize);
+    EXPECT_EQ(view.host_off, kSentinelSize);
+    EXPECT_EQ(view.host_len, kSentinelSize);
+    EXPECT_EQ(view.port, kSentinelU16);
+  }
+
+  size_t consumed = 0;
+  odin_proto_connect_req_view_t view = {};
+  EXPECT_EQ(odin_proto_decode_connect_req_v2(buf, 116, &consumed, &view),
+            ODIN_PROTO_OK);
+  EXPECT_EQ(consumed, static_cast<size_t>(16));
+  EXPECT_EQ(view.host_off, static_cast<size_t>(3));
+  EXPECT_EQ(view.host_len, static_cast<size_t>(11));
+  EXPECT_EQ(view.port, static_cast<uint16_t>(443));
+  EXPECT_LE(view.host_off + view.host_len, consumed);
+  EXPECT_LE(consumed, static_cast<size_t>(116));
+  EXPECT_EQ(std::memcmp(&buf[16], saved_trailing, 100), 0);
 }

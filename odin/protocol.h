@@ -67,14 +67,43 @@ typedef enum {
   ODIN_PROTO_ERR_BAD_FRAME_TYPE,
 } odin_proto_status_t;
 
+/* DEPRECATED as of RFC-004: prefer odin_proto_encode_connect_req_v2, which
+ * fills a 3-slot iovec aliasing the caller's host pointer instead of
+ * copying host bytes into a contiguous output buffer. v1 remains callable
+ * and behaviour-preserving; a follow-up RFC owns its removal. */
 odin_proto_status_t odin_proto_encode_connect_req(const char *host,
                                                   size_t host_len,
                                                   uint16_t port, uint8_t *buf,
                                                   size_t cap, size_t *out_n);
 
+/* DEPRECATED as of RFC-004: prefer odin_proto_decode_connect_req_v2, which
+ * returns a non-owning {host_off, host_len, port} view aliasing the caller's
+ * input buffer instead of copying host bytes into a caller-supplied buffer.
+ * v1 remains callable and behaviour-preserving; a follow-up RFC owns its
+ * removal. */
 odin_proto_status_t odin_proto_decode_connect_req(
     const uint8_t *buf, size_t n, size_t *out_consumed, char *host_out,
     size_t host_cap, size_t *out_host_len, uint16_t *out_port);
+
+typedef struct {
+  const void *base;
+  size_t len;
+} odin_proto_iov_t;
+
+odin_proto_status_t odin_proto_encode_connect_req_v2(
+    const char *host, size_t host_len, uint16_t port,
+    odin_proto_iov_t out_iov[3],
+    uint8_t scratch_header[3], uint8_t scratch_port[2]);
+
+typedef struct {
+  size_t host_off;
+  size_t host_len;
+  uint16_t port;
+} odin_proto_connect_req_view_t;
+
+odin_proto_status_t odin_proto_decode_connect_req_v2(
+    const uint8_t *buf, size_t n, size_t *out_consumed,
+    odin_proto_connect_req_view_t *out);
 
 odin_proto_status_t odin_proto_encode_connect_resp(uint16_t error_code,
                                                    uint8_t *buf, size_t cap,
