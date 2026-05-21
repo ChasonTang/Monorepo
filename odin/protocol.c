@@ -6,8 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void odin_proto_encode_connect_resp_v2(uint16_t error_code,
-                                       odin_proto_connect_resp_frame_t *out) {
+void odin_proto_encode_connect_resp(uint16_t error_code,
+                                    odin_proto_connect_resp_frame_t *out) {
   assert(out != NULL);
 
   out->bytes[0] = ODIN_PROTO_VERSION_V1;
@@ -44,11 +44,12 @@ odin_proto_status_t odin_proto_decode_connect_resp(const uint8_t *buf, size_t n,
   return ODIN_PROTO_OK;
 }
 
-odin_proto_status_t
-odin_proto_encode_connect_req_v2(const char *host, size_t host_len,
-                                 uint16_t port, odin_proto_iov_t out_iov[3],
-                                 uint8_t scratch_header[3],
-                                 uint8_t scratch_port[2]) {
+odin_proto_status_t odin_proto_encode_connect_req(const char *host,
+                                                  size_t host_len,
+                                                  uint16_t port,
+                                                  odin_proto_iov_t out_iov[3],
+                                                  uint8_t scratch_header[3],
+                                                  uint8_t scratch_port[2]) {
   assert(host != NULL);
   assert(out_iov != NULL);
   assert(scratch_header != NULL);
@@ -74,9 +75,9 @@ odin_proto_encode_connect_req_v2(const char *host, size_t host_len,
 }
 
 odin_proto_status_t
-odin_proto_decode_connect_req_v2(const uint8_t *buf, size_t n,
-                                 size_t *out_consumed,
-                                 odin_proto_connect_req_view_t *out) {
+odin_proto_decode_connect_req(const uint8_t *buf, size_t n,
+                              size_t *out_consumed,
+                              odin_proto_connect_req_view_t *out) {
   assert(buf != NULL);
   assert(out_consumed != NULL);
   assert(out != NULL);

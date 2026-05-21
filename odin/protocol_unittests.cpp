@@ -1,8 +1,8 @@
 // odin/protocol_unittests.cpp
 //
 // Unit tests from RFC-001, RFC-004, and RFC-005 for the Odin control-frame
-// codec. v1 request/response encoders and the v1 request decoder are no longer
-// referenced here; RFC-004/RFC-005 v2 APIs own that coverage.
+// codec. The zero-copy request codec and fixed-frame response encoder own
+// request encode/decode and response encode coverage.
 
 #include "odin/protocol.h"
 
@@ -30,13 +30,12 @@ void SentinelFillIov(odin_proto_iov_t iov[3]) {
   }
 }
 
-bool FlattenConnectReqV2ForTest(const char *host, size_t host_len,
-                                uint16_t port, uint8_t *buf, size_t cap,
-                                size_t *out_n) {
+bool FlattenConnectReqForTest(const char *host, size_t host_len, uint16_t port,
+                              uint8_t *buf, size_t cap, size_t *out_n) {
   odin_proto_iov_t iov[3];
   uint8_t scratch_header[3];
   uint8_t scratch_port[2];
-  const odin_proto_status_t status = odin_proto_encode_connect_req_v2(
+  const odin_proto_status_t status = odin_proto_encode_connect_req(
       host, host_len, port, iov, scratch_header, scratch_port);
   if (status != ODIN_PROTO_OK) {
     return false;
@@ -131,7 +130,7 @@ TEST(OdinProtoTest, T2ConnectRespDecoderDecodesBoundaryCodes) {
 // partial prefix and OK at the full frame length.
 TEST(OdinProtoTest, T6ConnectRespNeedMoreOnPartialPrefix) {
   odin_proto_connect_resp_frame_t resp_frame = {};
-  odin_proto_encode_connect_resp_v2(0x1234, &resp_frame);
+  odin_proto_encode_connect_resp(0x1234, &resp_frame);
 
   for (size_t n = 0; n < ODIN_PROTO_CONNECT_RESP_SIZE; ++n) {
     size_t consumed = kSentinelSize;
@@ -154,11 +153,11 @@ TEST(OdinProtoTest, T6ConnectRespNeedMoreOnPartialPrefix) {
   EXPECT_EQ(out_code, static_cast<uint16_t>(0x1234));
 }
 
-// RFC-004 v2 CONNECT_REQ codec tests T1-T5.
+// RFC-004 CONNECT_REQ codec tests T1-T5.
 
-// T1 — v2 encode emits exact protocol bytes; host slot aliases the caller's
+// T1 — encode emits exact protocol bytes; host slot aliases the caller's
 // pointer.
-TEST(OdinProtoV2Test, T1V2EncodeExactBytesAndAliasing) {
+TEST(OdinProtoReqTest, T1EncodeExactBytesAndAliasing) {
   struct Case {
     std::string host;
     size_t host_len;
@@ -178,9 +177,8 @@ TEST(OdinProtoV2Test, T1V2EncodeExactBytesAndAliasing) {
     odin_proto_iov_t iov[3];
     uint8_t scratch_header[3] = {0};
     uint8_t scratch_port[2] = {0};
-    ASSERT_EQ(odin_proto_encode_connect_req_v2(c.host.data(), c.host_len,
-                                               c.port, iov, scratch_header,
-                                               scratch_port),
+    ASSERT_EQ(odin_proto_encode_connect_req(c.host.data(), c.host_len, c.port,
+                                            iov, scratch_header, scratch_port),
               ODIN_PROTO_OK)
         << "host_len=" << c.host_len;
 
@@ -210,8 +208,8 @@ TEST(OdinProtoV2Test, T1V2EncodeExactBytesAndAliasing) {
   }
 }
 
-// T2 — v2 encode rejects host_len out of [1, 255]; writes nothing on error.
-TEST(OdinProtoV2Test, T2V2EncodeRejectsBadHostLen) {
+// T2 — encode rejects host_len out of [1, 255]; writes nothing on error.
+TEST(OdinProtoReqTest, T2EncodeRejectsBadHostLen) {
   // host_len=0
   {
     odin_proto_iov_t iov[3];
@@ -220,8 +218,8 @@ TEST(OdinProtoV2Test, T2V2EncodeRejectsBadHostLen) {
     uint8_t scratch_port[2];
     std::memset(scratch_header, kScratchFill, sizeof(scratch_header));
     std::memset(scratch_port, kScratchFill, sizeof(scratch_port));
-    EXPECT_EQ(odin_proto_encode_connect_req_v2("", 0, 443, iov, scratch_header,
-                                               scratch_port),
+    EXPECT_EQ(odin_proto_encode_connect_req("", 0, 443, iov, scratch_header,
+                                            scratch_port),
               ODIN_PROTO_ERR_HOST_LEN_INVALID);
     for (size_t i = 0; i < 3; ++i) {
       EXPECT_EQ(iov[i].base, kIovBaseSentinel);
@@ -244,8 +242,8 @@ TEST(OdinProtoV2Test, T2V2EncodeRejectsBadHostLen) {
     uint8_t scratch_port[2];
     std::memset(scratch_header, kScratchFill, sizeof(scratch_header));
     std::memset(scratch_port, kScratchFill, sizeof(scratch_port));
-    EXPECT_EQ(odin_proto_encode_connect_req_v2(host.data(), 256, 443, iov,
-                                               scratch_header, scratch_port),
+    EXPECT_EQ(odin_proto_encode_connect_req(host.data(), 256, 443, iov,
+                                            scratch_header, scratch_port),
               ODIN_PROTO_ERR_HOST_LEN_INVALID);
     for (size_t i = 0; i < 3; ++i) {
       EXPECT_EQ(iov[i].base, kIovBaseSentinel);
@@ -260,9 +258,9 @@ TEST(OdinProtoV2Test, T2V2EncodeRejectsBadHostLen) {
   }
 }
 
-// T3 — v2 decode round-trip yields the aliasing view and the slice matches the
+// T3 — decode round-trip yields the aliasing view and the slice matches the
 // original host bytes.
-TEST(OdinProtoV2Test, T3V2DecodeAliasingView) {
+TEST(OdinProtoReqTest, T3DecodeAliasingView) {
   struct Case {
     std::string host;
     size_t host_len;
@@ -281,15 +279,14 @@ TEST(OdinProtoV2Test, T3V2DecodeAliasingView) {
   for (const Case &c : cases) {
     uint8_t frame[ODIN_PROTO_CONNECT_REQ_MAX] = {0};
     size_t frame_n = 0;
-    ASSERT_TRUE(FlattenConnectReqV2ForTest(c.host.data(), c.host_len, c.port,
-                                           frame, sizeof(frame), &frame_n));
+    ASSERT_TRUE(FlattenConnectReqForTest(c.host.data(), c.host_len, c.port,
+                                         frame, sizeof(frame), &frame_n));
     ASSERT_EQ(frame_n, c.total);
 
     size_t consumed = 0;
     odin_proto_connect_req_view_t view = {};
-    EXPECT_EQ(
-        odin_proto_decode_connect_req_v2(frame, frame_n, &consumed, &view),
-        ODIN_PROTO_OK)
+    EXPECT_EQ(odin_proto_decode_connect_req(frame, frame_n, &consumed, &view),
+              ODIN_PROTO_OK)
         << "host_len=" << c.host_len;
     EXPECT_EQ(consumed, c.total);
     EXPECT_EQ(view.host_off, static_cast<size_t>(3));
@@ -301,13 +298,13 @@ TEST(OdinProtoV2Test, T3V2DecodeAliasingView) {
   }
 }
 
-// T4 — v2 decode rejects bad version / frame_type / host_len; *out and
+// T4 — decode rejects bad version / frame_type / host_len; *out and
 // *consumed unmodified.
-TEST(OdinProtoV2Test, T4V2DecodeRejectsBadBytes) {
+TEST(OdinProtoReqTest, T4DecodeRejectsBadBytes) {
   uint8_t canonical[16] = {0};
   size_t canonical_n = 0;
-  ASSERT_TRUE(FlattenConnectReqV2ForTest("example.com", 11, 443, canonical,
-                                         sizeof(canonical), &canonical_n));
+  ASSERT_TRUE(FlattenConnectReqForTest("example.com", 11, 443, canonical,
+                                       sizeof(canonical), &canonical_n));
   ASSERT_EQ(canonical_n, static_cast<size_t>(16));
 
   auto check = [](const uint8_t *buf, size_t n, odin_proto_status_t expected) {
@@ -316,8 +313,7 @@ TEST(OdinProtoV2Test, T4V2DecodeRejectsBadBytes) {
     view.host_off = kSentinelSize;
     view.host_len = kSentinelSize;
     view.port = kSentinelU16;
-    EXPECT_EQ(odin_proto_decode_connect_req_v2(buf, n, &consumed, &view),
-              expected)
+    EXPECT_EQ(odin_proto_decode_connect_req(buf, n, &consumed, &view), expected)
         << "n=" << n;
     EXPECT_EQ(consumed, kSentinelSize);
     ExpectReqViewUnmodified(view);
@@ -352,13 +348,13 @@ TEST(OdinProtoV2Test, T4V2DecodeRejectsBadBytes) {
   }
 }
 
-// T5 — v2 decode returns NEED_MORE on every partial prefix, OK at full frame,
+// T5 — decode returns NEED_MORE on every partial prefix, OK at full frame,
 // and leaves trailing bytes untouched.
-TEST(OdinProtoV2Test, T5V2DecodeNeedMoreAndTrailing) {
+TEST(OdinProtoReqTest, T5DecodeNeedMoreAndTrailing) {
   uint8_t buf[116] = {0};
   size_t frame_n = 0;
   ASSERT_TRUE(
-      FlattenConnectReqV2ForTest("example.com", 11, 443, buf, 16, &frame_n));
+      FlattenConnectReqForTest("example.com", 11, 443, buf, 16, &frame_n));
   ASSERT_EQ(frame_n, static_cast<size_t>(16));
   for (size_t i = 0; i < 100; ++i) {
     buf[16 + i] = static_cast<uint8_t>(i ^ 0x55);
@@ -372,7 +368,7 @@ TEST(OdinProtoV2Test, T5V2DecodeNeedMoreAndTrailing) {
     view.host_off = kSentinelSize;
     view.host_len = kSentinelSize;
     view.port = kSentinelU16;
-    EXPECT_EQ(odin_proto_decode_connect_req_v2(buf, n, &consumed, &view),
+    EXPECT_EQ(odin_proto_decode_connect_req(buf, n, &consumed, &view),
               ODIN_PROTO_NEED_MORE)
         << "n=" << n;
     EXPECT_EQ(consumed, kSentinelSize);
@@ -381,7 +377,7 @@ TEST(OdinProtoV2Test, T5V2DecodeNeedMoreAndTrailing) {
 
   size_t consumed = 0;
   odin_proto_connect_req_view_t view = {};
-  EXPECT_EQ(odin_proto_decode_connect_req_v2(buf, 116, &consumed, &view),
+  EXPECT_EQ(odin_proto_decode_connect_req(buf, 116, &consumed, &view),
             ODIN_PROTO_OK);
   EXPECT_EQ(consumed, static_cast<size_t>(16));
   EXPECT_EQ(view.host_off, static_cast<size_t>(3));
@@ -392,24 +388,25 @@ TEST(OdinProtoV2Test, T5V2DecodeNeedMoreAndTrailing) {
   EXPECT_EQ(std::memcmp(&buf[16], saved_trailing, 100), 0);
 }
 
-// RFC-005 CONNECT_RESP v2 encoder tests T1-T3.
+// RFC-005 CONNECT_RESP encoder tests T1-T3.
 
-// T1 — v2 emits exact boundary-code bytes.
-TEST(OdinProtoRespV2Test, T1V2EmitsBoundaryCodeBytes) {
+// T1 — encode emits exact boundary-code bytes.
+TEST(OdinProtoRespTest, T1EmitsBoundaryCodeBytes) {
   odin_proto_connect_resp_frame_t lo = {};
-  odin_proto_encode_connect_resp_v2(0x0000, &lo);
+  odin_proto_encode_connect_resp(0x0000, &lo);
   const uint8_t expected_lo[] = {0x01, 0x02, 0x00, 0x00};
   EXPECT_EQ(std::memcmp(lo.bytes, expected_lo, sizeof(expected_lo)), 0);
 
   odin_proto_connect_resp_frame_t hi = {};
-  odin_proto_encode_connect_resp_v2(0xFFFF, &hi);
+  odin_proto_encode_connect_resp(0xFFFF, &hi);
   const uint8_t expected_hi[] = {0x01, 0x02, 0xFF, 0xFF};
   EXPECT_EQ(std::memcmp(hi.bytes, expected_hi, sizeof(expected_hi)), 0);
 }
 
-// T2 — v2 frame type is exactly four bytes and writes stay inside the frame
+// T2 — response frame type is exactly four bytes and writes stay inside the
+// frame
 // field.
-TEST(OdinProtoRespV2Test, T2V2FrameSizeAndCanaries) {
+TEST(OdinProtoRespTest, T2FrameSizeAndCanaries) {
   struct Wrapper {
     uint8_t before;
     odin_proto_connect_resp_frame_t frame;
@@ -422,7 +419,7 @@ TEST(OdinProtoRespV2Test, T2V2FrameSizeAndCanaries) {
   ASSERT_EQ(sizeof(odin_proto_connect_resp_frame_t),
             static_cast<size_t>(ODIN_PROTO_CONNECT_RESP_SIZE));
 
-  odin_proto_encode_connect_resp_v2(0x1234, &wrapper.frame);
+  odin_proto_encode_connect_resp(0x1234, &wrapper.frame);
 
   const uint8_t expected[] = {0x01, 0x02, 0x12, 0x34};
   EXPECT_EQ(std::memcmp(wrapper.frame.bytes, expected, sizeof(expected)), 0);
@@ -430,12 +427,12 @@ TEST(OdinProtoRespV2Test, T2V2FrameSizeAndCanaries) {
   EXPECT_EQ(wrapper.after, static_cast<uint8_t>(0x5A));
 }
 
-// T3 — v2 output interops with the existing decoder and preserves trailing
+// T3 — encoder output interops with the existing decoder and preserves trailing
 // bytes.
-TEST(OdinProtoRespV2Test, T3V2DecoderInteropAndTrailing) {
+TEST(OdinProtoRespTest, T3DecoderInteropAndTrailing) {
   uint8_t buffer[ODIN_PROTO_CONNECT_RESP_SIZE + 100] = {0};
   odin_proto_connect_resp_frame_t frame = {};
-  odin_proto_encode_connect_resp_v2(0xABCD, &frame);
+  odin_proto_encode_connect_resp(0xABCD, &frame);
   std::memcpy(buffer, frame.bytes, sizeof(frame.bytes));
   for (size_t i = 0; i < 100; ++i) {
     buffer[ODIN_PROTO_CONNECT_RESP_SIZE + i] = static_cast<uint8_t>(i ^ 0x55);
