@@ -18,7 +18,7 @@ These rules override the instinct to "fill every section." Treat them as hard co
 - Every `{...}` token is a hint, not content — replace or delete the surrounding line. Zero `{YYYY-MM-DD}`, `{Name}`, `{Input}`, etc. should remain. Date is absolute (e.g., `2026-04-23`), never relative ("today").
 - Delete every block from `**TEMPLATE EXAMPLE BEGIN**` through `**TEMPLATE EXAMPLE END**` — they are author guidance, not document content.
 - Delete sample table rows in §7 (marked `TEMPLATE SAMPLE ROW - delete before submitting`).
-- **Delete this Writing Instructions section and the Pre-submit Checklist** — the final RFC ends after §8 Implementation Plan.
+- **Delete this Writing Instructions section** — the final RFC ends after §8 Implementation Plan.
 
 **Preserve metadata trailing spaces.** The two trailing spaces (`  `) after `**Version:**`, `**Author:**`, and `**Date:**` are an intentional Markdown line break — without them those fields collapse into a single rendered line. `**Status:**` does not need them (the blank line before `## 1. Summary` ends the paragraph).
 
@@ -495,55 +495,3 @@ Why it works: two phases — matching the TDD red→green default and the simple
 Why it fails: every phase is a calendar week (`Week 1`, `Week 2–3`, …) — the "a phase is a mergeable unit, not a timebox" rule forbids this directly, and any slip on Phase 1 cascades into a meaningless "Phase 2 is late" status with no merge gate a reviewer can point at; lists owners (`Alice`, `Bob`, `TBD`) — the Don't list bans staffing because it drifts and an RFC reviews the plan, not who holds the pager; "Phase 1: Design and kickoff" is the banned open-with-planning pattern — this RFC *is* the design artifact, so Phase 1 cannot also be design; "Implement `gcd` and write comprehensive tests" collapses two phases with a real ordering edge (tests cannot compile before the header merges) into one, erasing the verification point a reviewer needs to grant or refuse Phase 2 — and worse, ships every §7 row alongside its own implementation, so the local test suite never observes any `T#` in red state and the TDD red→green transition the rule requires never occurs; "comprehensive tests" is the banned vague phrase with no `T#` row to cite and no `G#` to prove complete; Phase 3 ("code review and address review feedback") is not a deliverable — every phase ships through code review, so promoting it to a phase pads the count without adding a merge gate; Phase 4 ("monitor production and iterate") has no `Scope`, no `Depends on`, no `Done when`, and no end state — a monitoring-only phase has no mergeable deliverable to close on; no phase declares a `Done when` line, so none of `G1`–`G3` has a traceable completion hook and the cross-section consistency rule fails on every Goal.
 
 **TEMPLATE EXAMPLE END**
-
-## Pre-submit Checklist (delete before submitting)
-
-Walk every box before submitting; any unchecked item is a blocker. The categories below mirror the Writing Instructions at the top of this template — if a check fails, the fix is in the rule it cites.
-
-**Template scaffolding removed.**
-
-- [ ] No `TEMPLATE SAMPLE ROW - delete before submitting` row remains in §7.
-- [ ] Every `**TEMPLATE EXAMPLE BEGIN**` through `**TEMPLATE EXAMPLE END**` block is removed from the body of §1–§8.
-- [ ] No `{...}` placeholder token remains.
-- [ ] The Writing Instructions section at the top and this Pre-submit Checklist are both removed; the body ends after §8 Implementation Plan with no Future Work, References, Changelog, History, or Revision section appended.
-
-**Header metadata intact.**
-
-- [ ] Header date is absolute (e.g., `2026-04-23`); no `{YYYY-MM-DD}`, no "today", no other relative form.
-- [ ] The two trailing spaces (`  `) after `**Version:**`, `**Author:**`, and `**Date:**` are preserved so each field renders on its own line; `**Status:**` does not carry them.
-
-**No fabricated content.**
-
-- [ ] No invented metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or commit SHAs.
-- [ ] Every in-repo path, URL, and prior-RFC citation has been verified to resolve; every cited commit SHA passes `git cat-file -e <sha>^{commit}`.
-- [ ] Every prior-RFC citation has been cross-checked against the current code (signature, file path, schema, flag, behavior); where the code disagrees with the RFC, this document follows the code, not the RFC.
-- [ ] When quantitative/supporting data is missing, §2 still describes the observable problem and concrete value, and includes the exact phrase `No data available at this time`; §5 and §6 use the exact phrase `Not applicable — {one-sentence reason}`. Neither section pads with speculation.
-
-**Section shape and hard caps.**
-
-- [ ] §5 and §6 remain numbered — neither deleted nor renumbered — and are either filled or carry the prescribed `Not applicable — {one-sentence reason}` fallback.
-- [ ] Total length ≤ 4,000 words (most RFCs fit in 800–2,500).
-- [ ] §1 is one paragraph ≤ 150 words, stating the proposal and its core idea without backstory.
-- [ ] §2 ≤ 200 words (problem + value combined).
-- [ ] §3 has 1–5 Goals numbered `G1`, `G2`, …; 0–5 Non-Goals (empty → `None`); 0–1 Goals carry `non-testable: {one-sentence reason}` (default 0; reserved for genuine subjective outcomes, never test infrastructure or build-graph integration). Goals name outcomes, not implementations.
-- [ ] §4.1 supplies a diagram or uses the exact `N/A — textual description above is sufficient` fallback.
-- [ ] §4.2 has 1–5 subsections with descriptive aspect names, each ≤ 300 words; each subsection pins in order the **contract surface**, the **unstated contract**, and the **mechanism**, then closes with a `Satisfies: G# via {one phrase}` line (use `;` to separate when one subsection covers multiple goals).
-- [ ] §4.3 documents 0–3 decisions (or the literal `None`), each as `Chosen` / `Reason` / `Ruled out`; when no real alternative was considered, the `Ruled out` line reads `N/A — no viable alternative considered`.
-- [ ] §5 has 1–5 break entries (or the Skip fallback), each as `Breaks` / `Symptom on un-migrated caller` / `Migration`, each citing the §4.2 subsection that pins the new contract.
-- [ ] §6 has 1–4 concern entries (or the Skip fallback), each as `Threat` / `Mitigation` / `Enforcement`; no padding with generic threats (XSS, SQLi, buffer overflow, …) the code path does not actually expose.
-- [ ] §7 uses the single prescribed `# | Scenario | Input / Setup | Expected Result | Covers | Level` table with 3–10 rows; row IDs (`T1`, `T2`, …) are stable so §8 phases can cite them; each `Level` names the cheapest harness that exercises the contract.
-- [ ] §8 has 2–5 phases, each as `Scope` / `Depends on` / `Done when`; phases are mergeable units — never calendar weeks, never a "planning" phase, never a monitoring-only phase; no owners or dates appear; `Depends on` uses phase IDs (`P1`, `P2`, …) or `None`.
-- [ ] §8 follows TDD red→green: every §7 row lands first in a red phase (test committed via `xfail`/`skip`/feature-flag so the local test suite stays green) before a later green phase that removes the marker; the red-phase mechanism is named in the red phase's `Scope`. No phase ships a §7 row alongside its own implementation.
-
-**Cross-section traceability.**
-
-- [ ] Every `G#` in §3 is named in at least one §4.2 subsection's `Satisfies:` line.
-- [ ] Every testable `G#` in §3 appears in at least one §7 row's `Covers` cell; Goals tagged `non-testable:` may skip §7 but still need §4.2 and §8 hooks.
-- [ ] Every `G#` in §3 (testable and non-testable alike) appears in at least one §8 phase's `Done when` clause.
-- [ ] Every `T#` in §7 transitions red→green across §8 phases: an earlier phase's `Done when` names the row as red (committed but skipped/`xfail`/flag-gated, so the local test suite stays green), a later phase's `Done when` names it as green (un-marked, asserting for real).
-- [ ] Every §5 entry is paired with at least one §7 row exercising the new behavior on previously-succeeding input, and the migration lands in the §8 phase that introduces the break.
-- [ ] Every §6 concern is paired with at least one §7 row firing the trigger input and asserting the safe outcome, and the mitigation lands in the §8 phase that exposes the trigger surface.
-
-**Language discipline.**
-
-- [ ] No vague substitute phrases ("we will monitor", "we will document", "comprehensively improve", "significantly enhance", "robust and scalable", "works correctly", "behaves as expected", "best practices", "industry standard"); each claim names a specific behavior, metric, action, owner, threshold, or enforcement point.
