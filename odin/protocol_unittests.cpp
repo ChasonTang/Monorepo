@@ -721,3 +721,67 @@ TEST(OdinProtoV2Test, T5V2DecodeNeedMoreAndTrailing) {
   EXPECT_LE(consumed, static_cast<size_t>(116));
   EXPECT_EQ(std::memcmp(&buf[16], saved_trailing, 100), 0);
 }
+
+// RFC-005 CONNECT_RESP v2 encoder tests T1-T3.
+
+// T1 — v2 emits exact boundary-code bytes.
+TEST(OdinProtoRespV2Test, T1V2EmitsBoundaryCodeBytes) {
+  odin_proto_connect_resp_frame_t lo = {};
+  odin_proto_encode_connect_resp_v2(0x0000, &lo);
+  const uint8_t expected_lo[] = {0x01, 0x02, 0x00, 0x00};
+  EXPECT_EQ(std::memcmp(lo.bytes, expected_lo, sizeof(expected_lo)), 0);
+
+  odin_proto_connect_resp_frame_t hi = {};
+  odin_proto_encode_connect_resp_v2(0xFFFF, &hi);
+  const uint8_t expected_hi[] = {0x01, 0x02, 0xFF, 0xFF};
+  EXPECT_EQ(std::memcmp(hi.bytes, expected_hi, sizeof(expected_hi)), 0);
+}
+
+// T2 — v2 frame type is exactly four bytes and writes stay inside the frame
+// field.
+TEST(OdinProtoRespV2Test, T2V2FrameSizeAndCanaries) {
+  struct Wrapper {
+    uint8_t before;
+    odin_proto_connect_resp_frame_t frame;
+    uint8_t after;
+  };
+
+  Wrapper wrapper = {};
+  wrapper.before = 0xA5;
+  wrapper.after = 0x5A;
+  ASSERT_EQ(sizeof(odin_proto_connect_resp_frame_t),
+            static_cast<size_t>(ODIN_PROTO_CONNECT_RESP_SIZE));
+
+  odin_proto_encode_connect_resp_v2(0x1234, &wrapper.frame);
+
+  const uint8_t expected[] = {0x01, 0x02, 0x12, 0x34};
+  EXPECT_EQ(std::memcmp(wrapper.frame.bytes, expected, sizeof(expected)), 0);
+  EXPECT_EQ(wrapper.before, static_cast<uint8_t>(0xA5));
+  EXPECT_EQ(wrapper.after, static_cast<uint8_t>(0x5A));
+}
+
+// T3 — v2 output interops with the existing decoder and preserves trailing
+// bytes.
+TEST(OdinProtoRespV2Test, T3V2DecoderInteropAndTrailing) {
+  uint8_t buffer[ODIN_PROTO_CONNECT_RESP_SIZE + 100] = {0};
+  odin_proto_connect_resp_frame_t frame = {};
+  odin_proto_encode_connect_resp_v2(0xABCD, &frame);
+  std::memcpy(buffer, frame.bytes, sizeof(frame.bytes));
+  for (size_t i = 0; i < 100; ++i) {
+    buffer[ODIN_PROTO_CONNECT_RESP_SIZE + i] =
+        static_cast<uint8_t>(i ^ 0x55);
+  }
+  uint8_t saved_trailing[100];
+  std::memcpy(saved_trailing, &buffer[ODIN_PROTO_CONNECT_RESP_SIZE], 100);
+
+  size_t consumed = 0;
+  uint16_t out_code = 0;
+  EXPECT_EQ(odin_proto_decode_connect_resp(buffer, sizeof(buffer), &consumed,
+                                           &out_code),
+            ODIN_PROTO_OK);
+  EXPECT_EQ(consumed, static_cast<size_t>(ODIN_PROTO_CONNECT_RESP_SIZE));
+  EXPECT_EQ(out_code, static_cast<uint16_t>(0xABCD));
+  EXPECT_EQ(std::memcmp(&buffer[ODIN_PROTO_CONNECT_RESP_SIZE], saved_trailing,
+                        100),
+            0);
+}

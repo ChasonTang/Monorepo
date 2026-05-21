@@ -105,6 +105,16 @@ odin_proto_status_t odin_proto_decode_connect_req_v2(
     const uint8_t *buf, size_t n, size_t *out_consumed,
     odin_proto_connect_req_view_t *out);
 
+typedef struct {
+  uint8_t bytes[ODIN_PROTO_CONNECT_RESP_SIZE];
+} odin_proto_connect_resp_frame_t;
+
+void odin_proto_encode_connect_resp_v2(uint16_t error_code,
+                                       odin_proto_connect_resp_frame_t *out);
+
+/* For new fixed-size CONNECT_RESP frames, prefer
+ * odin_proto_encode_connect_resp_v2. v1 remains callable and
+ * behaviour-preserving; a follow-up RFC owns its removal. */
 odin_proto_status_t odin_proto_encode_connect_resp(uint16_t error_code,
                                                    uint8_t *buf, size_t cap,
                                                    size_t *out_n);

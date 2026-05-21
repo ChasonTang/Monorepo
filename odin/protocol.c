@@ -96,6 +96,16 @@ odin_proto_status_t odin_proto_encode_connect_resp(uint16_t error_code,
   return ODIN_PROTO_OK;
 }
 
+void odin_proto_encode_connect_resp_v2(uint16_t error_code,
+                                       odin_proto_connect_resp_frame_t *out) {
+  assert(out != NULL);
+
+  out->bytes[0] = ODIN_PROTO_VERSION_V1;
+  out->bytes[1] = ODIN_PROTO_FRAME_CONNECT_RESP;
+  out->bytes[2] = (uint8_t)((error_code >> 8) & 0xFF);
+  out->bytes[3] = (uint8_t)(error_code & 0xFF);
+}
+
 odin_proto_status_t odin_proto_decode_connect_resp(const uint8_t *buf, size_t n,
                                                    size_t *out_consumed,
                                                    uint16_t *out_error_code) {
