@@ -1,10 +1,12 @@
 // odin/cli_unittests.cpp
 //
-// Tests T1-T10 from §7 of odin/docs/rfc_002_cli_skeleton.md.
+// Tests T1-T10 from §7 of odin/docs/rfc_002_cli_skeleton.md and
+// T1-T8 from §7 of odin/docs/rfc_006_cli_listen_port_parser.md.
 
 #include "odin/cli.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -100,20 +102,20 @@ constexpr const char kUBoth[] =
 TEST(OdinCliTest, T1ClientBasenameBothFlagsShortLong) {
   {
     MutableArgv argv(
-        {"odin-client", "-l", "127.0.0.1:8443", "-s", "quic.example.com:4433"});
+        {"odin-client", "-l", "8080", "-s", "quic.example.com:4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
-    EXPECT_EQ(out.listen_addr, argv.argv()[2]);
+    EXPECT_EQ(out.listen_port, 8080);
     EXPECT_EQ(out.server_addr, argv.argv()[4]);
   }
   {
-    MutableArgv argv({"./bin/odin-client", "--listen", "127.0.0.1:8443",
-                      "--server", "quic.example.com:4433"});
+    MutableArgv argv({"./bin/odin-client", "--listen", "8080", "--server",
+                      "quic.example.com:4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
-    EXPECT_EQ(out.listen_addr, argv.argv()[2]);
+    EXPECT_EQ(out.listen_port, 8080);
     EXPECT_EQ(out.server_addr, argv.argv()[4]);
   }
 }
@@ -121,19 +123,19 @@ TEST(OdinCliTest, T1ClientBasenameBothFlagsShortLong) {
 // T2 — Server basename with listen flag, short and long forms.
 TEST(OdinCliTest, T2ServerBasenameListenFlagShortLong) {
   {
-    MutableArgv argv({"odin-server", "--listen", "0.0.0.0:4433"});
+    MutableArgv argv({"odin-server", "--listen", "4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
-    EXPECT_EQ(out.listen_addr, argv.argv()[2]);
+    EXPECT_EQ(out.listen_port, 4433);
     EXPECT_EQ(out.server_addr, nullptr);
   }
   {
-    MutableArgv argv({"/usr/local/bin/odin-server", "-l", "0.0.0.0:4433"});
+    MutableArgv argv({"/usr/local/bin/odin-server", "-l", "4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
-    EXPECT_EQ(out.listen_addr, argv.argv()[2]);
+    EXPECT_EQ(out.listen_port, 4433);
     EXPECT_EQ(out.server_addr, nullptr);
   }
 }
@@ -147,7 +149,7 @@ TEST(OdinCliTest, T3UnknownOrMissingBasename) {
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
               ODIN_CLI_ERR_UNKNOWN_MODE);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_UNKNOWN);
-    EXPECT_EQ(out.listen_addr, nullptr);
+    EXPECT_EQ(out.listen_port, 0);
     EXPECT_EQ(out.server_addr, nullptr);
   }
   // argc=0 with a one-slot argv whose argv[0] = NULL.
@@ -156,21 +158,23 @@ TEST(OdinCliTest, T3UnknownOrMissingBasename) {
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(0, slot, &out), ODIN_CLI_ERR_UNKNOWN_MODE);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_UNKNOWN);
-    EXPECT_EQ(out.listen_addr, nullptr);
+    EXPECT_EQ(out.listen_port, 0);
     EXPECT_EQ(out.server_addr, nullptr);
   }
 }
 
 // T4 — Missing required flag carries mode for usage-line selection.
+// RFC-006 removes the `--listen` requirement, so the prior
+// `{"odin-client", "-s", …}` and `{"odin-server"}` cases now return OK
+// and are covered by RFC-006 T1; only the `--server`-required case
+// remains.
 TEST(OdinCliTest, T4MissingRequiredFlagCarriesMode) {
   struct Case {
     std::vector<std::string> tokens;
     odin_cli_mode_t expected_mode;
   };
   const std::vector<Case> cases = {
-      {{"odin-client", "-l", "127.0.0.1:8443"}, ODIN_CLI_MODE_CLIENT},
-      {{"odin-client", "-s", "quic.example.com:4433"}, ODIN_CLI_MODE_CLIENT},
-      {{"odin-server"}, ODIN_CLI_MODE_SERVER},
+      {{"odin-client", "-l", "8080"}, ODIN_CLI_MODE_CLIENT},
   };
   for (const auto &c : cases) {
     MutableArgv argv(c.tokens);
@@ -178,7 +182,7 @@ TEST(OdinCliTest, T4MissingRequiredFlagCarriesMode) {
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
               ODIN_CLI_ERR_MISSING_REQUIRED);
     EXPECT_EQ(out.mode, c.expected_mode);
-    EXPECT_EQ(out.listen_addr, nullptr);
+    EXPECT_EQ(out.listen_port, 0);
     EXPECT_EQ(out.server_addr, nullptr);
   }
 }
@@ -194,18 +198,18 @@ TEST(OdinCliTest, T5UnknownFlagPrecedesMissingRequired) {
     odin_cli_mode_t expected_mode;
   };
   const std::vector<Case> cases = {
-      {{"odin-client", "--bogus=x", "-l", "L", "-s", "S"},
+      {{"odin-client", "--bogus=x", "-l", "8080", "-s", "S"},
        ODIN_CLI_MODE_CLIENT},
-      {{"odin-server", "-l", "L", "-s", "S"}, ODIN_CLI_MODE_SERVER},
+      {{"odin-server", "-l", "4433", "-s", "S"}, ODIN_CLI_MODE_SERVER},
       {{"odin-client", "-x"}, ODIN_CLI_MODE_CLIENT},
       {{"odin-server", "-s", "S"}, ODIN_CLI_MODE_SERVER},
       {{"odin-client", "-l"}, ODIN_CLI_MODE_CLIENT},
-      {{"odin-client", "-l", "L", "-s", "S", "extra"}, ODIN_CLI_MODE_CLIENT},
+      {{"odin-client", "-l", "8080", "-s", "S", "extra"}, ODIN_CLI_MODE_CLIENT},
       {{"odin-client", "extra"}, ODIN_CLI_MODE_CLIENT},
       // Abbreviated --listen (unique prefix of an allowed long option).
       {{"odin-client", "--lis", "L", "-s", "S"}, ODIN_CLI_MODE_CLIENT},
       // Abbreviated --server (unique prefix of an allowed long option).
-      {{"odin-client", "-l", "L", "--serv", "S"}, ODIN_CLI_MODE_CLIENT},
+      {{"odin-client", "-l", "8080", "--serv", "S"}, ODIN_CLI_MODE_CLIENT},
       // Abbreviated --help must NOT short-circuit to HELP — exact spelling
       // only.
       {{"odin-client", "--he"}, ODIN_CLI_MODE_CLIENT},
@@ -221,7 +225,7 @@ TEST(OdinCliTest, T5UnknownFlagPrecedesMissingRequired) {
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
               ODIN_CLI_ERR_UNKNOWN_FLAG);
     EXPECT_EQ(out.mode, c.expected_mode);
-    EXPECT_EQ(out.listen_addr, nullptr);
+    EXPECT_EQ(out.listen_port, 0);
     EXPECT_EQ(out.server_addr, nullptr);
   }
 }
@@ -243,7 +247,7 @@ TEST(OdinCliTest, T6HelpShortCircuits) {
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_HELP);
     EXPECT_EQ(out.mode, c.expected_mode);
-    EXPECT_EQ(out.listen_addr, nullptr);
+    EXPECT_EQ(out.listen_port, 0);
     EXPECT_EQ(out.server_addr, nullptr);
   }
 }
@@ -260,7 +264,7 @@ TEST(OdinCliTest, T7GetoptGlobalsRestored) {
     odin_cli_mode_t expected_mode;
   };
   const std::vector<Case> sequence = {
-      {{"odin-client", "-l", "L", "-s", "S"},
+      {{"odin-client", "-l", "8080", "-s", "S"},
        ODIN_CLI_OK,
        ODIN_CLI_MODE_CLIENT},
       {{"odin-client", "--help"}, ODIN_CLI_HELP, ODIN_CLI_MODE_CLIENT},
@@ -269,7 +273,7 @@ TEST(OdinCliTest, T7GetoptGlobalsRestored) {
        ODIN_CLI_MODE_CLIENT},
       {{"odin-client"}, ODIN_CLI_ERR_MISSING_REQUIRED, ODIN_CLI_MODE_CLIENT},
       {{"odin"}, ODIN_CLI_ERR_UNKNOWN_MODE, ODIN_CLI_MODE_UNKNOWN},
-      {{"odin-server", "-l", "L"}, ODIN_CLI_OK, ODIN_CLI_MODE_SERVER},
+      {{"odin-server", "-l", "4433"}, ODIN_CLI_OK, ODIN_CLI_MODE_SERVER},
   };
   for (const auto &c : sequence) {
     MutableArgv argv(c.tokens);
@@ -294,12 +298,12 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
   };
   const std::vector<Row> rows = {
       // OK CLIENT
-      {{"odin-client", "-l", "L", "-s", "S"},
+      {{"odin-client", "-l", "8080", "-s", "S"},
        "",
-       "odin: mode=client listen=L server=S\n",
+       "odin: mode=client listen=8080 server=S\n",
        0},
       // OK SERVER
-      {{"odin-server", "-l", "L"}, "", "odin: mode=server listen=L\n", 0},
+      {{"odin-server", "-l", "4433"}, "", "odin: mode=server listen=4433\n", 0},
       // HELP CLIENT
       {{"odin-client", "--help"}, std::string(kUC) + "\n", "", 0},
       // HELP SERVER
@@ -313,11 +317,6 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
       {{"odin-client"},
        "",
        std::string("odin: missing required flag\n") + kUC + "\n",
-       2},
-      // ERR_MISSING_REQUIRED SERVER
-      {{"odin-server"},
-       "",
-       std::string("odin: missing required flag\n") + kUS + "\n",
        2},
       // ERR_UNKNOWN_FLAG CLIENT
       {{"odin-client", "--bogus"},
@@ -364,7 +363,7 @@ TEST(OdinCliTest, T9SymlinkDispatchExec) {
   ASSERT_NE(pid, -1) << "fork failed: " << std::strerror(errno);
   if (pid == 0) {
     MutableArgv child_argv(
-        {client_path.c_str(), "--listen", "L", "--server", "S"});
+        {client_path.c_str(), "--listen", "8080", "--server", "S"});
     execve(client_path.c_str(), child_argv.argv_terminated(), environ);
     // execve only returns on failure.
     _exit(127);
@@ -392,6 +391,184 @@ TEST(OdinCliTest, T10CodecTestsCarryUnderRenamedBinary) {
     }
   }
   EXPECT_TRUE(found_odin_proto_suite);
+}
+
+// ---------------------------------------------------------------------
+// RFC-006 §7 — T1–T8 for the strict ASCII-decimal `--listen` parser.
+// Committed in P1 wrapped in GTEST_SKIP; the skip is removed in P2 once
+// the real parser, default-fill, and banner-format updates land.
+// ---------------------------------------------------------------------
+
+// T1 — Per-mode default fires when `--listen` is omitted.
+TEST(OdinCliListenPortTest, T1PerModeDefaultWhenListenOmitted) {
+  {
+    MutableArgv argv({"odin-client", "-s", "S"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
+    EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT);
+    EXPECT_EQ(out.server_addr, argv.argv()[2]);
+  }
+  {
+    MutableArgv argv({"odin-server"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
+    EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
+    EXPECT_EQ(out.server_addr, nullptr);
+  }
+}
+
+// T2 — Empty `--listen` value resolves to per-mode default.
+TEST(OdinCliListenPortTest, T2EmptyListenValueResolvesToDefault) {
+  {
+    MutableArgv argv({"odin-client", "-l", "", "-s", "S"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT);
+  }
+  {
+    MutableArgv argv({"odin-server", "-l", ""});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
+  }
+}
+
+// T3 — Valid digit string parses to exact port (boundaries + typical).
+TEST(OdinCliListenPortTest, T3ValidDigitStringParsesToExactPort) {
+  struct Case {
+    const char *port;
+    uint16_t expected;
+  };
+  const Case cases[] = {
+      {"0", 0},         {"1", 1},         {"80", 80},      {"8080", 8080},
+      {"8443", 8443},   {"65535", 65535}, {"00080", 80},
+  };
+  for (const auto &c : cases) {
+    MutableArgv argv({"odin-server", "-l", c.port});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK)
+        << "port=" << c.port;
+    EXPECT_EQ(out.listen_port, c.expected) << "port=" << c.port;
+  }
+}
+
+// T4 — Out-of-range or oversized digit string returns ERR_BAD_LISTEN_PORT.
+TEST(OdinCliListenPortTest, T4OutOfRangeOrOversizedReturnsBadListenPort) {
+  const char *const ports[] = {
+      "65536", "99999", "123456", "4294967296", "18446744073709551616",
+  };
+  for (const char *port : ports) {
+    MutableArgv argv({"odin-server", "-l", port});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_BAD_LISTEN_PORT)
+        << "port=" << port;
+    EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER) << "port=" << port;
+    EXPECT_EQ(out.listen_port, 0) << "port=" << port;
+    EXPECT_EQ(out.server_addr, nullptr) << "port=" << port;
+  }
+}
+
+// T5 — Non-digit content returns ERR_BAD_LISTEN_PORT.
+TEST(OdinCliListenPortTest, T5NonDigitContentReturnsBadListenPort) {
+  const char *const ports[] = {
+      "abc", "8080abc", "abc8080", "-1",  "+80",   "0x50",
+      "8 0", " 80",     "80 ",     "80.0", "8_080",
+  };
+  for (const char *port : ports) {
+    MutableArgv argv({"odin-server", "-l", port});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_BAD_LISTEN_PORT)
+        << "port=" << port;
+    EXPECT_EQ(out.listen_port, 0) << "port=" << port;
+  }
+}
+
+// T6 — Status precedence: HELP > UNKNOWN_FLAG > BAD_LISTEN_PORT >
+// MISSING_REQUIRED.
+TEST(OdinCliListenPortTest, T6StatusPrecedence) {
+  {
+    MutableArgv argv({"odin-client", "-x", "-l", "abc"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_UNKNOWN_FLAG);
+  }
+  {
+    MutableArgv argv({"odin-client", "--help", "-l", "abc"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_HELP);
+  }
+  {
+    MutableArgv argv({"odin-client", "-l", "abc"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_BAD_LISTEN_PORT);
+  }
+}
+
+// T7 — odin_cli_main banner prints parsed port as decimal on every OK
+// row, and the new error row writes the dedicated BAD_LISTEN_PORT banner.
+TEST(OdinCliListenPortTest, T7MainBannerPrintsParsedPort) {
+  struct Row {
+    std::vector<std::string> tokens;
+    std::string expected_err;
+    int expected_return;
+  };
+  const std::vector<Row> rows = {
+      {{"odin-client", "-l", "8443", "-s", "S"},
+       "odin: mode=client listen=8443 server=S\n",
+       0},
+      {{"odin-server", "-l", "4433"}, "odin: mode=server listen=4433\n", 0},
+      {{"odin-client", "-s", "S"},
+       "odin: mode=client listen=8080 server=S\n",
+       0},
+      {{"odin-server"}, "odin: mode=server listen=4433\n", 0},
+      {{"odin-server", "-l", "abc"},
+       std::string("odin: invalid --listen port\n") + kUS + "\n",
+       2},
+  };
+
+  char out_buf[512];
+  char err_buf[512];
+  for (const auto &r : rows) {
+    std::memset(out_buf, 0, sizeof(out_buf));
+    std::memset(err_buf, 0, sizeof(err_buf));
+    FILE *out = fmemopen(out_buf, sizeof(out_buf), "w");
+    FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+    ASSERT_NE(out, nullptr);
+    ASSERT_NE(err, nullptr);
+
+    MutableArgv argv(r.tokens);
+    const int rc = odin_cli_main(argv.argc(), argv.argv(), out, err);
+    static_cast<void>(std::fclose(out));
+    static_cast<void>(std::fclose(err));
+
+    EXPECT_EQ(rc, r.expected_return);
+    EXPECT_STREQ(out_buf, "");
+    EXPECT_STREQ(err_buf, r.expected_err.c_str());
+  }
+}
+
+// T8 — optind / opterr restored on the new BAD_LISTEN_PORT return path.
+TEST(OdinCliListenPortTest, T8GetoptGlobalsRestoredOnBadListenPort) {
+  const int snap_optind = optind;
+  const int snap_opterr = opterr;
+
+  const std::vector<std::vector<std::string>> sequence = {
+      {"odin-server", "-l", "99999"},
+      {"odin-client", "-l", "abc", "-s", "S"},
+  };
+  for (const auto &tokens : sequence) {
+    MutableArgv argv(tokens);
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_BAD_LISTEN_PORT);
+    EXPECT_EQ(optind, snap_optind);
+    EXPECT_EQ(opterr, snap_opterr);
+  }
 }
 
 int main(int argc, char **argv) {
