@@ -49,12 +49,10 @@ Apply every check below; report each failure as `[§X] {one-line reason with evi
 
 ### Section shape and caps
 
-- Total ≤4,000 words.
-- §1: one paragraph ≤150 words; states the proposal and core idea, no backstory.
-- §2: ≤200 words (problem + value combined).
+- §1: one paragraph; states the proposal and core idea, no backstory.
 - §3: 1–5 Goals numbered `G#`; 0–5 Non-Goals (empty → `None`); 0–1 Goals tagged `non-testable: {one-sentence reason}` (default 0; reserved for genuine subjective outcomes, never test infrastructure or build-graph integration). Goals name outcomes, not implementations.
 - §4.1: includes a diagram or the exact `N/A — textual description above is sufficient` fallback.
-- §4.2: 1–5 subsections with descriptive aspect names, each ≤300 words; each pins **contract surface**, **unstated contract**, **mechanism** in order and closes with `Satisfies: G# via {one phrase}` (use `;` for multiple goals).
+- §4.2: 1–5 subsections with descriptive aspect names; each pins **contract surface**, **unstated contract**, **mechanism** in order and closes with `Satisfies: G# via {one phrase}` (use `;` for multiple goals).
 - §4.3: 0–3 decisions (or the literal `None`), each as `Chosen` / `Reason` / `Ruled out` (`N/A — no viable alternative considered` when none).
 - §5: numbered, 1–5 break entries (or Skip fallback), each as `Breaks` / `Symptom on un-migrated caller` / `Migration`, each citing the §4.2 subsection that pins the new contract.
 - §6: numbered, 1–4 concern entries (or Skip fallback), each as `Threat` / `Mitigation` / `Enforcement`; no padding with generic threats the code path does not actually expose.
