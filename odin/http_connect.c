@@ -7,6 +7,14 @@
 #include <stdint.h>
 #include <string.h>
 
+const char kOdinHttpConnectEstablished[] =
+    "HTTP/1.1 200 Connection Established\r\n\r\n";
+const size_t kOdinHttpConnectEstablishedLen =
+    sizeof(kOdinHttpConnectEstablished) - 1;
+
+const char kOdinHttpBadGateway[] = "HTTP/1.1 502 Bad Gateway\r\n\r\n";
+const size_t kOdinHttpBadGatewayLen = sizeof(kOdinHttpBadGateway) - 1;
+
 /* Returns the index of the '\r' in the first CRLF in buf[start..end), or
  * SIZE_MAX if none. */
 static size_t find_crlf(const uint8_t *buf, size_t start, size_t end) {

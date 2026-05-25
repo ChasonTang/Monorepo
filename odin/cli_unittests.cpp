@@ -442,8 +442,8 @@ TEST(OdinCliListenPortTest, T3ValidDigitStringParsesToExactPort) {
     uint16_t expected;
   };
   const Case cases[] = {
-      {"0", 0},         {"1", 1},         {"80", 80},      {"8080", 8080},
-      {"8443", 8443},   {"65535", 65535}, {"00080", 80},
+      {"0", 0},       {"1", 1},         {"80", 80},    {"8080", 8080},
+      {"8443", 8443}, {"65535", 65535}, {"00080", 80},
   };
   for (const auto &c : cases) {
     MutableArgv argv({"odin-server", "-l", c.port});
@@ -474,7 +474,7 @@ TEST(OdinCliListenPortTest, T4OutOfRangeOrOversizedReturnsBadListenPort) {
 // T5 — Non-digit content returns ERR_BAD_LISTEN_PORT.
 TEST(OdinCliListenPortTest, T5NonDigitContentReturnsBadListenPort) {
   const char *const ports[] = {
-      "abc", "8080abc", "abc8080", "-1",  "+80",   "0x50",
+      "abc", "8080abc", "abc8080", "-1",   "+80",   "0x50",
       "8 0", " 80",     "80 ",     "80.0", "8_080",
   };
   for (const char *port : ports) {

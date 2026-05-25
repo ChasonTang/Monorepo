@@ -61,6 +61,15 @@ odin_http_status_t odin_http_parse_connect(const uint8_t *buf, size_t n,
                                            size_t *out_consumed,
                                            odin_http_connect_t *out);
 
+/* Fixed CONNECT response lines the client writes back to the socket after
+ * tunnel establishment succeeds or fails. Both strings include the trailing
+ * CRLFCRLF and exclude the null terminator from the advertised length. */
+extern const char kOdinHttpConnectEstablished[];
+extern const size_t kOdinHttpConnectEstablishedLen;
+
+extern const char kOdinHttpBadGateway[];
+extern const size_t kOdinHttpBadGatewayLen;
+
 #ifdef __cplusplus
 }
 #endif
