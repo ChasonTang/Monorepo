@@ -30,8 +30,11 @@
 #include "odin/cli.h"
 
 #include <getopt.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "odin/host_addr.h"
 
 typedef enum {
   OK_PARSED,
@@ -92,7 +95,9 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
                                  odin_cli_args_t *out) {
   out->mode = ODIN_CLI_MODE_UNKNOWN;
   out->listen_port = 0;
-  out->server_addr = NULL;
+  out->server_host = NULL;
+  out->server_host_len = 0;
+  out->server_port = 0;
 
   if (argc < 1 || argv[0] == NULL) {
     return ODIN_CLI_ERR_UNKNOWN_MODE;
@@ -199,6 +204,12 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
 
   const parse_listen_port_result_t pr = parse_listen_port(listen_arg);
 
+  odin_host_addr_t sr = {NULL, 0, 0};
+  const odin_host_addr_status_t sr_status =
+      (mode == ODIN_CLI_MODE_CLIENT && server_arg != NULL)
+          ? odin_host_addr_parse(server_arg, &sr)
+          : ODIN_HOST_ADDR_OK;
+
   odin_cli_status_t status;
   if (help_seen) {
     status = ODIN_CLI_HELP;
@@ -206,6 +217,8 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     status = ODIN_CLI_ERR_UNKNOWN_FLAG;
   } else if (pr.status == BAD_PORT) {
     status = ODIN_CLI_ERR_BAD_LISTEN_PORT;
+  } else if (sr_status != ODIN_HOST_ADDR_OK) {
+    status = ODIN_CLI_ERR_BAD_SERVER;
   } else if (mode == ODIN_CLI_MODE_CLIENT && server_arg == NULL) {
     status = ODIN_CLI_ERR_MISSING_REQUIRED;
   } else {
@@ -216,7 +229,9 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
                              ? ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT
                              : ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
     if (mode == ODIN_CLI_MODE_CLIENT) {
-      out->server_addr = server_arg;
+      out->server_host = sr.host;
+      out->server_host_len = sr.host_len;
+      out->server_port = sr.port;
     }
     status = ODIN_CLI_OK;
   }
@@ -247,9 +262,15 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   switch (status) {
   case ODIN_CLI_OK:
     if (args.mode == ODIN_CLI_MODE_CLIENT) {
+      const int host_has_colon =
+          memchr(args.server_host, ':', args.server_host_len) != NULL;
+      const char *fmt = host_has_colon
+                            ? "odin: mode=client listen=%u server=[%.*s]:%u\n"
+                            : "odin: mode=client listen=%u server=%.*s:%u\n";
       // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-      (void)fprintf(err, "odin: mode=client listen=%u server=%s\n",
-                    (unsigned)args.listen_port, args.server_addr);
+      (void)fprintf(err, fmt, (unsigned)args.listen_port,
+                    (int)args.server_host_len, args.server_host,
+                    (unsigned)args.server_port);
     } else {
       // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
       (void)fprintf(err, "odin: mode=server listen=%u\n",
@@ -282,6 +303,12 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
     break;
   case ODIN_CLI_ERR_BAD_LISTEN_PORT:
     (void)fputs("odin: invalid --listen port\n", err);
+    (void)fputs(um, err);
+    (void)fputc('\n', err);
+    rc = 2;
+    break;
+  case ODIN_CLI_ERR_BAD_SERVER:
+    (void)fputs("odin: invalid --server\n", err);
     (void)fputs(um, err);
     (void)fputc('\n', err);
     rc = 2;

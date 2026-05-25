@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "odin/parse_util.h"
+
 const char kOdinHttpConnectEstablished[] =
     "HTTP/1.1 200 Connection Established\r\n\r\n";
 const size_t kOdinHttpConnectEstablishedLen =
@@ -94,43 +96,24 @@ odin_http_status_t odin_http_parse_connect(const uint8_t *buf, size_t n,
   size_t target_start = 8;
   size_t target_end = sp;
 
-  size_t host_off, host_len, port_start;
-
-  if (buf[target_start] == '[') {
-    /* IPv6 bracketed form: "[v6-token]:port" */
-    size_t rb = find_byte(buf, target_start + 1, target_end, ']');
-    if (rb == SIZE_MAX || rb + 1 >= target_end || buf[rb + 1] != ':') {
-      return ODIN_HTTP_ERR_BAD_REQUEST_TARGET;
-    }
-    host_off = target_start + 1;
-    host_len = rb - (target_start + 1);
-    port_start = rb + 2;
-  } else {
-    /* reg-name / IPv4-literal form: "host-token:port" */
-    size_t cl = find_byte(buf, target_start, target_end, ':');
-    if (cl == SIZE_MAX) {
-      return ODIN_HTTP_ERR_BAD_REQUEST_TARGET;
-    }
-    host_off = target_start;
-    host_len = cl - target_start;
-    port_start = cl + 1;
+  odin_parse_util_hostport_t hp;
+  const odin_parse_util_hostport_status_t hp_status =
+      odin_parse_util_split_hostport(buf + target_start,
+                                     target_end - target_start, &hp);
+  if (hp_status != ODIN_PARSE_UTIL_HOSTPORT_OK || hp.port_present == 0) {
+    return ODIN_HTTP_ERR_BAD_REQUEST_TARGET;
   }
+  const size_t host_off = target_start + hp.host_off;
+  const size_t host_len = hp.host_len;
+  const size_t port_start = target_start + hp.port_off;
 
   /* Validate port: 1-to-5 digits, value <= 65535. */
-  size_t port_len = target_end - port_start;
-  if (port_len < 1 || port_len > 5) {
+  const odin_parse_util_port_result_t pr =
+      odin_parse_util_port(buf + port_start, hp.port_len);
+  if (pr.status != ODIN_PARSE_UTIL_PORT_OK) {
     return ODIN_HTTP_ERR_PORT_INVALID;
   }
-  uint32_t port_value = 0;
-  for (size_t i = port_start; i < target_end; ++i) {
-    if (buf[i] < '0' || buf[i] > '9') {
-      return ODIN_HTTP_ERR_PORT_INVALID;
-    }
-    port_value = port_value * 10 + (uint32_t)(buf[i] - '0');
-  }
-  if (port_value > 65535) {
-    return ODIN_HTTP_ERR_PORT_INVALID;
-  }
+  const uint16_t port_value = pr.port;
 
   /* Validate host length. */
   if (host_len < 1 || host_len > ODIN_HTTP_HOST_MAX) {
@@ -150,6 +133,6 @@ odin_http_status_t odin_http_parse_connect(const uint8_t *buf, size_t n,
   *out_consumed = end;
   out->host_off = host_off;
   out->host_len = host_len;
-  out->port = (uint16_t)port_value;
+  out->port = port_value;
   return ODIN_HTTP_OK;
 }
