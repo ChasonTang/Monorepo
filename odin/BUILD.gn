@@ -25,6 +25,8 @@ source_set("odin") {
   sources = [
     "cli.c",
     "cli.h",
+    "client_listen.c",
+    "client_listen.h",
     "host_addr.c",
     "host_addr.h",
     "http_connect.c",
@@ -74,6 +76,7 @@ executable("odin_unittests") {
 
   sources = [
     "cli_unittests.cpp",
+    "client_listen_unittests.cpp",
     "host_addr_unittests.cpp",
     "http_connect_unittests.cpp",
     "parse_util_unittests.cpp",
