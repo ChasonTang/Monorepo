@@ -7,7 +7,7 @@
 
 ## Writing Instructions (delete before submitting)
 
-These rules override the instinct to "fill every section." Treat them as hard constraints.
+These rules override the instinct to "fill every section." Treat anti-fabrication, scaffolding stripping, metadata format, language discipline, and cross-section consistency as hard constraints. Section shape and length figures (word counts, item counts, subsection counts, phase counts) are recommended targets — exceed them only when the proposal genuinely warrants it; do not bend them to dodge cross-section consistency.
 
 **Anti-fabrication:**
 - **No invented data.** No fake metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or commit SHAs. If quantitative or supporting data is unavailable, include `No data available at this time`; still describe observable behavior and concrete value without inventing evidence.
@@ -24,19 +24,19 @@ These rules override the instinct to "fill every section." Treat them as hard co
 
 **Scope discipline:**
 - **Match scope to change.** Simple proposals use minimum counts (1 Goal, 1 §4.2.1 subsection, 3 §7 scenarios, 2 §8 phases).
-- **Length:** most RFCs fit in 800–2,500 words; shorter is fine for simple changes. Total length must stay ≤4,000 words; exceeding that usually means padding or over-scope, so split the proposal.
+- **Length (recommended):** most RFCs fit in 800–2,500 words; shorter is fine for simple changes. Aim to stay ≤4,000 words; exceeding that usually means padding or over-scope, so consider splitting the proposal.
 - **Sections §5 and §6 stay numbered.** Never delete or renumber them; when content does not apply or evidence is unavailable, use the template's exact fallback text (`Not applicable — {one-sentence reason}`) instead of filler or speculation.
 
 **Cross-section consistency:**
 - Every `G#` in §3 must appear in at least one §4.2 subsection's `Satisfies:` line, at least one §7 row's `Covers` cell, **and** at least one §8 phase's "Done when" clause.
 - Every `T#` in §7 must transition red→green across §8 phases — at least one earlier phase's "Done when" lists the row as red (committed but skipped/`xfail`/flag-gated so the project's local test suite stays green), a later phase's "Done when" lists it as green (un-marked, asserting for real).
-- Untestable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §3 only for genuinely subjective/qualitative outcomes (DX gain, readability, judgment-based observability) that cannot be expressed as a §7 row. Test infrastructure and build-graph integration are §8 phase deliverables, not non-testable Goals. Hard cap: 1 per RFC. Such goals may be omitted from §7 but must still appear in §4.2 `Satisfies:` and §8 "Done when".
+- Untestable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §3 only for genuinely subjective/qualitative outcomes (DX gain, readability, judgment-based observability) that cannot be expressed as a §7 row. Test infrastructure and build-graph integration are §8 phase deliverables, not non-testable Goals. Recommended cap: 1 per RFC. Such goals may be omitted from §7 but must still appear in §4.2 `Satisfies:` and §8 "Done when".
 
 **Avoid vague phrases.** Do not use broad claims as a substitute for specific behavior, metrics, or actions. Rewrite phrases such as "comprehensively improve", "significantly enhance", "robust and scalable", "works correctly", "behaves as expected", "best practices", and "industry standard" into concrete acceptance criteria. "We will monitor" and "we will document" are not valid mitigations unless they name the exact signal, threshold, owner, artifact, or enforcement point.
 
 ## 1. Summary
 
-{**Hard cap: 150 words.** One paragraph. State the proposal and core idea — not the backstory (that's §2). A reader should understand the full picture in 30 seconds.}
+{**Recommended: ~150 words.** One paragraph. State the proposal and core idea — not the backstory (that's §2). A reader should understand the full picture in 30 seconds.}
 
 **TEMPLATE EXAMPLE BEGIN**
 
@@ -44,7 +44,7 @@ These rules override the instinct to "fill every section." Treat them as hard co
 
 > Add a new empty project `numkit` to the Monorepo, exposing `uint32_t gcd(uint32_t a, uint32_t b)` that computes the greatest common divisor using the iterative Euclidean algorithm. Defines `gcd(0, 0) = 0` and `gcd(0, n) = n` so all callers share one zero-input contract. Pure function, no I/O, no external dependencies.
 
-Why it works: one paragraph; names the proposal concretely (new project + signature + algorithm + zero-input contract) without backstory; a reader understands scope in 30 seconds; ~50 words, well under the 150-word cap.
+Why it works: one paragraph; names the proposal concretely (new project + signature + algorithm + zero-input contract) without backstory; a reader understands scope in 30 seconds; ~50 words, well under the recommended ~150 words.
 
 **Bad:**
 
@@ -56,7 +56,7 @@ Why it fails: opens with backstory that belongs in §2; vague claims (`comprehen
 
 ## 2. Motivation
 
-{**Hard cap: 200 words (problem + value combined).**
+{**Recommended: ~200 words (problem + value combined).**
 
 What problem exists today? Reference real behavior, error messages, or available data. If quantitative or supporting data is unavailable, include `No data available at this time`; still describe the observable problem and concrete value without speculation, generic claims, or fabricated numbers.
 
@@ -68,7 +68,7 @@ What value does solving this bring? Concrete benefits — improved DX, performan
 
 > No shared numeric utility exists in the Monorepo today, so each module that needs GCD writes its own. Two concrete pains follow: (1) zero-input semantics drift between copies — some return `0` for `gcd(0, 0)`, others abnormal termination, and there is no canonical reference to point reviewers at; (2) follow-on numeric helpers (`lcm`, fraction reduction) cannot land until GCD has a home. Standing up a new empty `numkit` project with `gcd` as its first export resolves both at minimal cost: pure function, zero dependencies, no caller migration required because the project starts empty. No data available at this time.
 
-Why it works: names specific, observable problems instead of generic complaints; uses the prescribed fallback wording for missing quantitative/supporting data rather than fabricating numbers; ties each value claim (`removes divergence`, `unblocks follow-ups`) back to a listed problem; ~110 words, under the 200-word cap.
+Why it works: names specific, observable problems instead of generic complaints; uses the prescribed fallback wording for missing quantitative/supporting data rather than fabricating numbers; ties each value claim (`removes divergence`, `unblocks follow-ups`) back to a listed problem; ~110 words, under the recommended ~200 words.
 
 **Bad:**
 
@@ -80,13 +80,13 @@ Why it fails: fabricates a metric (`200 hours per year`) and an incident ID (`#4
 
 ## 3. Goals and Non-Goals
 
-{**Hard cap: 1–5 Goals, 0–5 Non-Goals, 0–1 non-testable Goals (default 0).**
+{**Recommended: 1–5 Goals, 0–5 Non-Goals, 0–1 non-testable Goals (default 0).**
 
 **Goals:** numbered `G1`, `G2`, ... so §7 and §8 can cite them by ID. Each must be concrete and verifiable.
 
 **Means vs Goals.** Goals describe outcomes (e.g., "P95 < 50 ms"), not implementations (e.g., "use Redis"). If swapping implementations invalidates the goal, rewrite it. Test infrastructure ("ships with a unit-test binary") and build-graph integration ("registers the project in the GN `tests` group") are means, not outcomes — they belong in §8 phase Done-when clauses, never as Goals.
 
-**Non-testable Goals (fallback, default 0):** reserved for genuinely subjective/qualitative outcomes — e.g., DX gain, readability, judgment-based observability — that cannot be expressed as a §7 row. If a Goal is testable in principle, write a §7 row for it; do not hide it behind this annotation. Test-binary scaffolding and build-graph integration are §8 deliverables verified by Done-when clauses, never non-testable Goals. Append `non-testable: {one-sentence reason}` only when no §7 expression is possible. Hard cap: 1 per RFC; needing 2+ means Goals are vague — rewrite as testable outcomes.}
+**Non-testable Goals (fallback, default 0):** reserved for genuinely subjective/qualitative outcomes — e.g., DX gain, readability, judgment-based observability — that cannot be expressed as a §7 row. If a Goal is testable in principle, write a §7 row for it; do not hide it behind this annotation. Test-binary scaffolding and build-graph integration are §8 deliverables verified by Done-when clauses, never non-testable Goals. Append `non-testable: {one-sentence reason}` only when no §7 expression is possible. Recommended: at most 1 per RFC; needing 2+ usually means Goals are vague — rewrite as testable outcomes.}
 
 - **G1.** {Concrete, measurable outcome}
 
@@ -160,7 +160,7 @@ Why it fails: leaks §4.2 content into §4.1 — both the signature and the mech
 
 ### 4.2 Detailed Design
 
-{**Use 1–5 subsections, one aspect per subsection (≤300 words each).** Most §4.2 sections have only `#### 4.2.1` — add 4.2.2 and beyond only when the change genuinely spans multiple distinct aspects, each with its own contract worth documenting separately. Distinct aspects include: data model, public API, internal algorithm, state machine, wire/serialization format, concurrency/locking model, storage layout, failure/retry policy. Two aspects that share one contract (e.g., a new endpoint and its trivial DTO) stay in one subsection, not two.
+{**Recommended: 1–5 subsections, one aspect per subsection (~300 words each).** Most §4.2 sections have only `#### 4.2.1` — add 4.2.2 and beyond only when the change genuinely spans multiple distinct aspects, each with its own contract worth documenting separately. Distinct aspects include: data model, public API, internal algorithm, state machine, wire/serialization format, concurrency/locking model, storage layout, failure/retry policy. Two aspects that share one contract (e.g., a new endpoint and its trivial DTO) stay in one subsection, not two.
 
 **Each subsection pins, in this order:**
 
@@ -173,8 +173,8 @@ Each subsection ends with `Satisfies: G# via {one phrase}` so every Goal in §3 
 **Boundary rules:**
 
 - **One aspect per subsection.** Do not split one aspect across `4.2.1` and `4.2.2`.
-- **If 300 words is not enough,** the aspect is not actually one aspect — split it into finer sub-aspects (contract / algorithm / state / wire format), or scope the RFC down.
-- **>5 subsections → the RFC is too large; split it.**
+- **If a subsection runs much past ~300 words,** the aspect is probably not actually one aspect — consider splitting it into finer sub-aspects (contract / algorithm / state / wire format), or scoping the RFC down.
+- **>5 subsections usually means the RFC is too large;** consider splitting it.
 - **Use descriptive aspect names** — `#### 4.2.1 Wire Format`, not `#### 4.2.1 Details`.
 
 **Content rules:**
@@ -221,7 +221,7 @@ Each subsection ends with `Satisfies: G# via {one phrase}` so every Goal in §3 
 >
 > Satisfies: G1 via the exported signature; G2 via the zero-input contract pinned in the header doc-comment; G3 via the pure, allocation-free design that lets each §7 edge-case row assert on a single return value.
 
-Why it works: one subsection because signature, unstated contract, and mechanism share one aspect (the public function), as the rules direct; the contract surface uses C — the codebase's notation — and shows only the signature, deferring the body to pseudocode; the **Unstated contract** paragraph names the four things a reader could miss from the signature alone (zero-input semantics, purity, no error path, thread-safety); the pseudocode is one level above the implementation with every variable named; the termination paragraph confirms the zero-input contract falls out of the same loop, so no special-case branch is needed (a subtlety the Bad example below gets wrong); leaves algorithm-choice rationale (e.g., why not binary GCD?) for §4.3 rather than muddling it into the Mechanism paragraph; closes with a `Satisfies:` line that traces back to all three goals from §3; well under the 300-word cap.
+Why it works: one subsection because signature, unstated contract, and mechanism share one aspect (the public function), as the rules direct; the contract surface uses C — the codebase's notation — and shows only the signature, deferring the body to pseudocode; the **Unstated contract** paragraph names the four things a reader could miss from the signature alone (zero-input semantics, purity, no error path, thread-safety); the pseudocode is one level above the implementation with every variable named; the termination paragraph confirms the zero-input contract falls out of the same loop, so no special-case branch is needed (a subtlety the Bad example below gets wrong); leaves algorithm-choice rationale (e.g., why not binary GCD?) for §4.3 rather than muddling it into the Mechanism paragraph; closes with a `Satisfies:` line that traces back to all three goals from §3; well under the recommended ~300 words per subsection.
 
 **Bad:**
 
@@ -260,7 +260,7 @@ Why it fails: aspect name `Function` is generic — the rule requires descriptiv
 
 ### 4.3 Design Rationale
 
-{**Hard cap: 0–3 decisions.** Document only decisions a future reader would actually question — concretely, an entry is worth recording only if (a) swapping the choice would invalidate at least one `G#`, or (b) a reviewer would predictably ask "why not X". Neither passes → micro-choice, do not record.
+{**Recommended: 0–3 decisions.** Document only decisions a future reader would actually question — concretely, an entry is worth recording only if (a) swapping the choice would invalidate at least one `G#`, or (b) a reviewer would predictably ask "why not X". Neither passes → micro-choice, do not record.
 
 Distinct from §3 Non-Goals: Non-Goals exclude scope ("we won't build X"); §4.3 explains within-scope choices ("we chose A over B"). When §4.2's Mechanism, contract surface, or notation silently carries a "we picked X over Y", lift the comparison to §4.3 and leave only the chosen artifact in §4.2.
 
@@ -297,7 +297,7 @@ Why it works: one decision is enough — signature, zero-input contract, and fil
 > - **Reason:** Short and conventional.
 > - **Ruled out:** `greatest_common_divisor`, `compute_gcd`.
 
-Why it fails: `Reason` uses every vague phrase the writing instructions ban ("clean, elegant, robust", "optimal performance", "works correctly") with no numbers or named platform — a future reader cannot tell *why* this algorithm beats the alternatives; `Ruled out` invents strawmen (recursive Euclidean is not a stack-overflow risk at the few-dozen-frame depth `uint32_t` inputs allow, trial division is so absurd no reviewer would ask about it) and skips the one alternative a real reviewer would actually raise — binary GCD; pads with two micro-choices (return type matching the input, function naming) that no future reader would re-litigate — they belong in §4.2's contract surface, not §4.3, and exist here only to fill the slot; the 0–3 cap exists to prevent exactly this kind of noise — burying the one real decision (binary GCD) inside a list of cosmetic ones.
+Why it fails: `Reason` uses every vague phrase the writing instructions ban ("clean, elegant, robust", "optimal performance", "works correctly") with no numbers or named platform — a future reader cannot tell *why* this algorithm beats the alternatives; `Ruled out` invents strawmen (recursive Euclidean is not a stack-overflow risk at the few-dozen-frame depth `uint32_t` inputs allow, trial division is so absurd no reviewer would ask about it) and skips the one alternative a real reviewer would actually raise — binary GCD; pads with two micro-choices (return type matching the input, function naming) that no future reader would re-litigate — they belong in §4.2's contract surface, not §4.3, and exist here only to fill the slot; the 0–3 recommendation exists to prevent exactly this kind of noise — burying the one real decision (binary GCD) inside a list of cosmetic ones.
 
 **TEMPLATE EXAMPLE END**
 
@@ -305,7 +305,7 @@ Why it fails: `Reason` uses every vague phrase the writing instructions ban ("cl
 
 {**Skip when** previously-working callers see no new failure (additive APIs, brand-new exports, or refactors invisible at the public boundary) → write `Not applicable — {one-sentence reason}` and stop.
 
-**Hard cap: 1–5 entries.** Each entry pins one observable way a previously-working caller stops working; fan-out from one root change collapses into one entry, independent breaks split. >5 means the RFC bundles too much — split it.
+**Recommended: 1–5 entries.** Each entry pins one observable way a previously-working caller stops working; fan-out from one root change collapses into one entry, independent breaks split. >5 usually means the RFC bundles too much — consider splitting it.
 
 **Per-break structure (3 lines):**
 
@@ -343,7 +343,7 @@ Why it fails: the GCD RFC adds a new file to a project that previously had no GC
 
 {**Skip if** the code path does not cross a trust boundary — no external or attacker-controlled input, no credentials/keys, no headers/URLs derived from input, no upstream responses, no authentication or authorization, no persisted data → write `Not applicable — {one-sentence reason}` and stop.
 
-**Hard cap: 1–4 concerns.** Each entry pins one specific attack or failure mode plus its mitigation; variants of the same attack (e.g., several malformed-input shapes the same parser rejects) collapse into one entry, distinct attacks split. >4 means the RFC bundles a security-sensitive surface large enough to split.
+**Recommended: 1–4 concerns.** Each entry pins one specific attack or failure mode plus its mitigation; variants of the same attack (e.g., several malformed-input shapes the same parser rejects) collapse into one entry, distinct attacks split. >4 usually means the RFC bundles a security-sensitive surface large enough to consider splitting.
 
 **Per-concern structure (3 lines):**
 
@@ -387,7 +387,7 @@ Why it fails: `gcd` takes two `uint32_t` arguments by value with no array access
 
 ## 7. Testing Strategy
 
-{**Hard cap: 3–10 scenarios.** Each row is one executable test case tied to a §3 Goal (and, when applicable, a §5 entry or §6 concern). >10 means rows conflate sibling scenarios — collapse inputs that share one Goal and one setup pattern into one row.
+{**Recommended: 3–10 scenarios.** Each row is one executable test case tied to a §3 Goal (and, when applicable, a §5 entry or §6 concern). >10 usually means rows conflate sibling scenarios — collapse inputs that share one Goal and one setup pattern into one row.
 
 **Per-row structure.** One markdown table, columns in this order:
 
@@ -442,7 +442,7 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 
 ## 8. Implementation Plan
 
-{**Hard cap: 2–5 phases.** Each phase is a mergeable unit that leaves the project's local test suite green on its own — not a calendar week, not a sprint, not an OKR milestone. Add a phase only when the prior one must land and be verified before the next can start (public API before the tests that import it, flag-off deploy before flag-on default, schema migration before code that depends on the new columns). >5 phases means the RFC bundles too much — split it.
+{**Recommended: 2–5 phases.** Each phase is a mergeable unit that leaves the project's local test suite green on its own — not a calendar week, not a sprint, not an OKR milestone. Add a phase only when the prior one must land and be verified before the next can start (public API before the tests that import it, flag-off deploy before flag-on default, schema migration before code that depends on the new columns). >5 phases usually means the RFC bundles too much — consider splitting it.
 
 **TDD red→green is the default phase ordering.** Each §7 row lands first in a "red" phase (test committed in failing state, but kept off the project's local test suite via `xfail`/`expected-fail` markers, `skip`/`pending` markers, a feature flag that gates the test, or a separate test target not yet wired into the local test runner) before a later "green" phase that implements the behavior and removes the marker so the test asserts for real when the local test suite is run. Name the chosen red-phase mechanism in the red phase's `Scope` so a reviewer can verify the gate from the diff. This guarantees ≥2 phases for any RFC that adds behavior — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
 
