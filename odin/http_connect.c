@@ -9,13 +9,34 @@
 
 #include "odin/parse_util.h"
 
-const char kOdinHttpConnectEstablished[] =
-    "HTTP/1.1 200 Connection Established\r\n\r\n";
-const size_t kOdinHttpConnectEstablishedLen =
-    sizeof(kOdinHttpConnectEstablished) - 1;
+static const char kRespOk[] = "HTTP/1.1 200 Connection Established\r\n\r\n";
+static const char kResp400[] = "HTTP/1.1 400 Bad Request\r\n\r\n";
+static const char kResp405[] =
+    "HTTP/1.1 405 Method Not Allowed\r\nAllow: CONNECT\r\n\r\n";
+static const char kResp414[] = "HTTP/1.1 414 URI Too Long\r\n\r\n";
+static const char kResp505[] =
+    "HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n";
 
-const char kOdinHttpBadGateway[] = "HTTP/1.1 502 Bad Gateway\r\n\r\n";
-const size_t kOdinHttpBadGatewayLen = sizeof(kOdinHttpBadGateway) - 1;
+odin_http_response_t odin_http_response_for_status(odin_http_status_t status) {
+  switch (status) {
+    case ODIN_HTTP_OK:
+      return (odin_http_response_t){kRespOk, sizeof(kRespOk) - 1};
+    case ODIN_HTTP_ERR_BAD_METHOD:
+      return (odin_http_response_t){kResp405, sizeof(kResp405) - 1};
+    case ODIN_HTTP_ERR_BAD_REQUEST_TARGET:
+    case ODIN_HTTP_ERR_HOST_LEN_INVALID:
+    case ODIN_HTTP_ERR_PORT_INVALID:
+      return (odin_http_response_t){kResp400, sizeof(kResp400) - 1};
+    case ODIN_HTTP_ERR_BAD_VERSION:
+      return (odin_http_response_t){kResp505, sizeof(kResp505) - 1};
+    case ODIN_HTTP_ERR_REQUEST_TOO_LARGE:
+      return (odin_http_response_t){kResp414, sizeof(kResp414) - 1};
+    case ODIN_HTTP_NEED_MORE:
+    default:
+      assert(0 && "odin_http_response_for_status: non-terminal or unknown status");
+      return (odin_http_response_t){kResp400, sizeof(kResp400) - 1};
+  }
+}
 
 /* Returns the index of the '\r' in the first CRLF in buf[start..end), or
  * SIZE_MAX if none. */

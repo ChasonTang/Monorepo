@@ -396,3 +396,116 @@ TEST(OdinHttpConnectTest, T10RequestTooLarge) {
     EXPECT_EQ(out.port, kSentinelPort);
   }
 }
+
+// Tests T1-T6 from §7 of odin/docs/rfc_008_http_connect_response_mapper.md.
+
+// T1 — ODIN_HTTP_OK returns exact "200 Connection Established" bytes.
+TEST(OdinHttpResponseTest, T1OkExactBytes) {
+  const odin_http_response_t r = odin_http_response_for_status(ODIN_HTTP_OK);
+  ASSERT_NE(r.bytes, nullptr);
+  EXPECT_EQ(r.len, static_cast<size_t>(39));
+  EXPECT_EQ(std::memcmp(r.bytes, "HTTP/1.1 200 Connection Established\r\n\r\n",
+                        39),
+            0);
+}
+
+// T2 — The three 400-mapped errors share one byte sequence.
+TEST(OdinHttpResponseTest, T2BadRequestSharedBytes) {
+  const odin_http_status_t kCases[] = {
+      ODIN_HTTP_ERR_BAD_REQUEST_TARGET,
+      ODIN_HTTP_ERR_HOST_LEN_INVALID,
+      ODIN_HTTP_ERR_PORT_INVALID,
+  };
+  for (const odin_http_status_t s : kCases) {
+    const odin_http_response_t r = odin_http_response_for_status(s);
+    EXPECT_EQ(r.len, static_cast<size_t>(28)) << "status=" << s;
+    EXPECT_EQ(std::memcmp(r.bytes, "HTTP/1.1 400 Bad Request\r\n\r\n", 28), 0)
+        << "status=" << s;
+  }
+}
+
+// T3 — Non-400 error mappings return their exact response bytes.
+TEST(OdinHttpResponseTest, T3NonBadRequestExactBytes) {
+  {
+    const odin_http_response_t r =
+        odin_http_response_for_status(ODIN_HTTP_ERR_BAD_METHOD);
+    EXPECT_EQ(r.len, static_cast<size_t>(51));
+    EXPECT_EQ(std::memcmp(
+                  r.bytes,
+                  "HTTP/1.1 405 Method Not Allowed\r\nAllow: CONNECT\r\n\r\n",
+                  51),
+              0);
+  }
+  {
+    const odin_http_response_t r =
+        odin_http_response_for_status(ODIN_HTTP_ERR_BAD_VERSION);
+    EXPECT_EQ(r.len, static_cast<size_t>(43));
+    EXPECT_EQ(std::memcmp(r.bytes,
+                          "HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n", 43),
+              0);
+  }
+  {
+    const odin_http_response_t r =
+        odin_http_response_for_status(ODIN_HTTP_ERR_REQUEST_TOO_LARGE);
+    EXPECT_EQ(r.len, static_cast<size_t>(29));
+    EXPECT_EQ(std::memcmp(r.bytes, "HTTP/1.1 414 URI Too Long\r\n\r\n", 29), 0);
+  }
+}
+
+// T4 — Every mapped response ends with CRLFCRLF and contains no embedded NUL.
+TEST(OdinHttpResponseTest, T4FramingTerminatorAndNoNul) {
+  const odin_http_status_t kCases[] = {
+      ODIN_HTTP_OK,
+      ODIN_HTTP_ERR_BAD_METHOD,
+      ODIN_HTTP_ERR_BAD_REQUEST_TARGET,
+      ODIN_HTTP_ERR_BAD_VERSION,
+      ODIN_HTTP_ERR_HOST_LEN_INVALID,
+      ODIN_HTTP_ERR_PORT_INVALID,
+      ODIN_HTTP_ERR_REQUEST_TOO_LARGE,
+  };
+  for (const odin_http_status_t s : kCases) {
+    const odin_http_response_t r = odin_http_response_for_status(s);
+    ASSERT_GE(r.len, static_cast<size_t>(4)) << "status=" << s;
+    EXPECT_EQ(std::memcmp(&r.bytes[r.len - 4], "\r\n\r\n", 4), 0)
+        << "status=" << s;
+    EXPECT_EQ(std::memchr(r.bytes, '\0', r.len), nullptr) << "status=" << s;
+  }
+}
+
+// T5 — The 502 byte sequence is no longer reachable through any defined status.
+TEST(OdinHttpResponseTest, T5No502InAnyMapping) {
+  const odin_http_status_t kCases[] = {
+      ODIN_HTTP_OK,
+      ODIN_HTTP_ERR_BAD_METHOD,
+      ODIN_HTTP_ERR_BAD_REQUEST_TARGET,
+      ODIN_HTTP_ERR_BAD_VERSION,
+      ODIN_HTTP_ERR_HOST_LEN_INVALID,
+      ODIN_HTTP_ERR_PORT_INVALID,
+      ODIN_HTTP_ERR_REQUEST_TOO_LARGE,
+  };
+  for (const odin_http_status_t s : kCases) {
+    const odin_http_response_t r = odin_http_response_for_status(s);
+    const std::string slice(r.bytes, r.len);
+    EXPECT_EQ(slice.find("502"), std::string::npos) << "status=" << s;
+  }
+}
+
+// T6 — ODIN_HTTP_NEED_MORE and out-of-enum integer cast both abort in debug
+// and return the 400 fallback in release.
+TEST(OdinHttpResponseTest, T6NonTerminalAndUnknown) {
+  const odin_http_status_t kCases[] = {
+      ODIN_HTTP_NEED_MORE,
+      // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+      static_cast<odin_http_status_t>(999),
+  };
+  for (const odin_http_status_t input : kCases) {
+    // NOLINTNEXTLINE(misc-const-correctness)
+    EXPECT_DEBUG_DEATH(odin_http_response_for_status(input), "non-terminal");
+#ifdef NDEBUG
+    const odin_http_response_t r = odin_http_response_for_status(input);
+    EXPECT_EQ(r.len, static_cast<size_t>(28)) << "input=" << input;
+    EXPECT_EQ(std::memcmp(r.bytes, "HTTP/1.1 400 Bad Request\r\n\r\n", 28), 0)
+        << "input=" << input;
+#endif
+  }
+}
