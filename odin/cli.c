@@ -35,6 +35,7 @@
 #include <string.h>
 
 #include "odin/host_addr.h"
+#include "odin/parse_util.h"
 
 typedef enum {
   OK_PARSED,
@@ -52,19 +53,13 @@ static parse_listen_port_result_t parse_listen_port(const char *s) {
     parse_listen_port_result_t r = {BAD_PORT_USE_DEFAULT, 0};
     return r;
   }
-  uint32_t v = 0;
-  for (const char *p = s; *p != '\0'; ++p) {
-    if (*p < '0' || *p > '9') {
-      parse_listen_port_result_t r = {BAD_PORT, 0};
-      return r;
-    }
-    v = v * 10u + (uint32_t)(*p - '0');
-    if (v > 65535u) {
-      parse_listen_port_result_t r = {BAD_PORT, 0};
-      return r;
-    }
+  const odin_parse_util_port_result_t pr =
+      odin_parse_util_port((const uint8_t *)s, strlen(s));
+  if (pr.status != ODIN_PARSE_UTIL_PORT_OK) {
+    parse_listen_port_result_t r = {BAD_PORT, 0};
+    return r;
   }
-  parse_listen_port_result_t r = {OK_PARSED, (uint16_t)v};
+  parse_listen_port_result_t r = {OK_PARSED, pr.port};
   return r;
 }
 
