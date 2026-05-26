@@ -1,6 +1,5 @@
 # RFC-{NNN}: {Feature Title}
 
-**Version:** 1.0  
 **Author:** Chason Tang  
 **Date:** {YYYY-MM-DD}  
 **Status:** Proposed
@@ -20,7 +19,7 @@ These rules override the instinct to "fill every section." Treat anti-fabricatio
 - Delete sample table rows in §7 (marked `TEMPLATE SAMPLE ROW - delete before submitting`).
 - **Delete this Writing Instructions section** — the final RFC ends after §8 Implementation Plan.
 
-**Preserve metadata trailing spaces.** The two trailing spaces (`  `) after `**Version:**`, `**Author:**`, and `**Date:**` are an intentional Markdown line break — without them those fields collapse into a single rendered line. `**Status:**` does not need them (the blank line before `## 1. Summary` ends the paragraph).
+**Preserve metadata trailing spaces.** The two trailing spaces (`  `) after `**Author:**` and `**Date:**` are an intentional Markdown line break — without them those fields collapse into a single rendered line. `**Status:**` does not need them (the blank line before `## 1. Summary` ends the paragraph).
 
 **Scope discipline:**
 - **Match scope to change.** Simple proposals use minimum counts (1 Goal, 1 §4.2.1 subsection, 3 §7 scenarios, 2 §8 phases).
