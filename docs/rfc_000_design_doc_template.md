@@ -53,9 +53,9 @@ Why it fails: opens with unverifiable backstory; vague claims (`comprehensive`, 
 
 **TEMPLATE EXAMPLE END**
 
-## 2. Goals and Non-Goals
+## 2. Goals
 
-{**Recommended: 1–5 Goals, 0–5 Non-Goals, 0–1 non-testable Goals (default 0).**
+{**Recommended: 1–5 Goals, 0–1 non-testable Goals (default 0).**
 
 **Goals:** numbered `G1`, `G2`, ... so §6 and §7 can cite them by ID. Each must be concrete and verifiable.
 
@@ -67,12 +67,6 @@ Why it fails: opens with unverifiable backstory; vague claims (`comprehensive`, 
 
 {Add G2 through G5 only when each names a genuinely distinct outcome.}
 
-{**Non-Goals:** list only items a reader might mistake for a goal — not the negation of a Goal. Empty → `None`.}
-
-- {Non-Goal with one-sentence reason}
-
-{List up to 5 in total only when each names a separate confusion worth ruling out.}
-
 **TEMPLATE EXAMPLE BEGIN**
 
 **Good:**
@@ -80,13 +74,8 @@ Why it fails: opens with unverifiable backstory; vague claims (`comprehensive`, 
 > - **G1.** Expose `uint32_t gcd(uint32_t a, uint32_t b)` from a new empty `numkit` project, returning the greatest common divisor for every input pair.
 > - **G2.** The public header documents the zero-input contract `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n`; the implementation honors it.
 > - **G3.** Unit tests cover the zero-input contract, equal inputs, coprime pairs, one-side-multiple-of-the-other, and the largest `uint32_t` Fibonacci pair `(F47, F46) = (2971215073, 1836311903)`; all pass when the project's local test suite is run.
->
-> **Non-Goals:**
->
-> - Signed-integer (`int32_t`/`int64_t`) overloads — defer until a caller needs them; locking in overflow semantics now would commit to a contract we cannot test against demand.
-> - Other numeric helpers (`lcm`, modular inverse, prime sieve) — they ship as separate exports once `gcd` lands.
 
-Why it works: each `G#` names a verifiable outcome that a §6 scenario can assert (signature exists, header documents the contract, named edge cases pass); G2 pins behavior, not algorithm — swapping iterative Euclidean for binary GCD does not invalidate it; Non-Goals call out the two confusions a reader is most likely to bring (signed inputs, broader math library) with a one-sentence reason each.
+Why it works: each `G#` names a verifiable outcome that a §6 scenario can assert (signature exists, header documents the contract, named edge cases pass); G2 pins behavior, not algorithm — swapping iterative Euclidean for binary GCD does not invalidate it.
 
 **Bad:**
 
@@ -94,10 +83,8 @@ Why it works: each `G#` names a verifiable outcome that a §6 scenario can asser
 > - **G2.** Implement `gcd` using the iterative Euclidean algorithm in C for optimal performance.
 > - **G3.** Add tests.
 > - **G4.** Lay the groundwork for future `lcm`, fraction reduction, FFT, and ML primitives.
->
-> **Non-Goals:** None.
 
-Why it fails: G1 is vague (`comprehensive`, `scalable`, `significantly improves`) with nothing to verify; G2 prescribes an implementation, not an outcome — swapping to binary GCD should not invalidate the goal, so the algorithm choice belongs in the design section, not §2; G3 is unmeasurable (which tests? what coverage?); G4 lists out-of-scope future work that belongs in Non-Goals, not as a goal of this RFC; declaring `Non-Goals: None` here skips the two confusions (signed inputs, broader math library) a reader actually needs ruled out.
+Why it fails: G1 is vague (`comprehensive`, `scalable`, `significantly improves`) with nothing to verify; G2 prescribes an implementation, not an outcome — swapping to binary GCD should not invalidate the goal, so the algorithm choice belongs in the design section, not §2; G3 is unmeasurable (which tests? what coverage?); G4 lists out-of-scope future work that does not belong as a goal of this RFC.
 
 **TEMPLATE EXAMPLE END**
 
@@ -237,7 +224,7 @@ Why it fails: aspect name `Function` is generic — the rule requires descriptiv
 
 {**Recommended: 0–3 decisions.** Document only decisions a future reader would actually question — concretely, an entry is worth recording only if (a) swapping the choice would invalidate at least one `G#`, or (b) a reviewer would predictably ask "why not X". Neither passes → micro-choice, do not record.
 
-Distinct from §2 Non-Goals: Non-Goals exclude scope ("we won't build X"); §3.3 explains within-scope choices ("we chose A over B"). When §3.2's Mechanism, contract surface, or notation silently carries a "we picked X over Y", lift the comparison to §3.3 and leave only the chosen artifact in §3.2.
+When §3.2's Mechanism, contract surface, or notation silently carries a "we picked X over Y", lift the comparison to §3.3 and leave only the chosen artifact in §3.2.
 
 For each, use a 3-line structure:
 - **Chosen:** ...
