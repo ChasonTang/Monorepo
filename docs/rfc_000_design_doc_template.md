@@ -1,35 +1,28 @@
 # RFC-{NNN}: {Feature Title}
 
-**Author:** Chason Tang  
-**Date:** {YYYY-MM-DD}  
-**Status:** Proposed
-
 ## Writing Instructions (delete before submitting)
 
-These rules override the instinct to "fill every section." Treat anti-fabrication, scaffolding stripping, metadata format, language discipline, and cross-section consistency as hard constraints. Section shape and length figures (word counts, item counts, subsection counts, phase counts) are recommended targets — exceed them only when the proposal genuinely warrants it; do not bend them to dodge cross-section consistency.
+These rules override the instinct to "fill every section." Everything below is a hard constraint except the recommended counts and lengths — exceed them only when the proposal genuinely warrants it.
 
-**Anti-fabrication:**
-- **No invented data.** No fake metrics, user quotes, bug IDs, incident dates, benchmark numbers, error messages, or commit SHAs. If quantitative or supporting data is unavailable, include `No data available at this time`; still describe observable behavior and concrete value without inventing evidence.
-- **References must be real** — when citing paths in this repo, URLs, or prior RFCs anywhere in the document, verify they exist. Verify any commit SHA with `git cat-file -e <sha>^{commit}` before citing.
-- **Code is authoritative; prior RFCs are not.** RFCs capture the design at write-time, but later changes routinely skip RFC review, so the docs drift from the implementation. Before citing a prior RFC's signature, path, schema, flag, or behavior, verify against the current code (read the file, grep the symbol, run the test). When the code disagrees with the RFC, trust the code — either skip the citation or note the divergence in this RFC. Never copy a contract surface from a prior RFC without re-reading the file it documents.
+**Do not fabricate.** Do not invent facts, code paths, APIs, behavior, data, test results, citations, or rationale. If evidence is missing, state that it is unknown or needs verification, then name the source that must be checked.
+
+**Code is authoritative; prior RFCs are not.** RFCs capture the design at write-time, but later changes routinely skip RFC review, so the docs drift from the implementation. Before citing a prior RFC's signature, path, schema, flag, or behavior, verify against the current code (read the file, grep the symbol, run the test). When the code disagrees with the RFC, trust the code — either skip the citation or note the divergence in this RFC. Never copy a contract surface from a prior RFC without re-reading the file it documents.
 
 **Strip template artifacts before submitting:**
-- Every `{...}` token is a hint, not content — replace or delete the surrounding line. Zero `{YYYY-MM-DD}`, `{Name}`, `{Input}`, etc. should remain. Date is absolute (e.g., `2026-04-23`), never relative ("today").
+- Every `{...}` token is a hint, not content — replace or delete the surrounding line. Zero `{Name}`, `{Input}`, etc. should remain.
 - Delete every block from `**TEMPLATE EXAMPLE BEGIN**` through `**TEMPLATE EXAMPLE END**` — they are author guidance, not document content.
 - Delete sample table rows in §6 (marked `TEMPLATE SAMPLE ROW - delete before submitting`).
 - **Delete this Writing Instructions section** — the final RFC ends after §7 Implementation Plan.
 
-**Preserve metadata trailing spaces.** The two trailing spaces (`  `) after `**Author:**` and `**Date:**` are an intentional Markdown line break — without them those fields collapse into a single rendered line. `**Status:**` does not need them (the blank line before `## 1. Summary` ends the paragraph).
-
 **Scope discipline:**
 - **Match scope to change.** Simple proposals use minimum counts (1 Goal, 1 §3.2.1 subsection, 3 §6 scenarios, 2 §7 phases).
 - **Length (recommended):** most RFCs fit in 800–2,500 words; shorter is fine for simple changes. Aim to stay ≤4,000 words; exceeding that usually means padding or over-scope, so consider splitting the proposal.
-- **Sections §4 and §5 stay numbered.** Never delete or renumber them; when content does not apply or evidence is unavailable, use the template's exact fallback text (`Not applicable — {one-sentence reason}`) instead of filler or speculation.
+- **Sections §4 and §5 stay numbered.** Never delete or renumber them; when content does not apply, use the template's exact fallback text (`Not applicable — {one-sentence reason}`) instead of filler or speculation. When evidence is unavailable, state what is unknown and what source must be verified.
 
 **Cross-section consistency:**
-- Every `G#` in §2 must appear in at least one §3.2 subsection's `Satisfies:` line, at least one §6 row's `Covers` cell, **and** at least one §7 phase's "Done when" clause.
-- Every `T#` in §6 must transition red→green across §7 phases — at least one earlier phase's "Done when" lists the row as red (committed but skipped/`xfail`/flag-gated so the project's local test suite stays green), a later phase's "Done when" lists it as green (un-marked, asserting for real).
-- Untestable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §2 only for genuinely subjective/qualitative outcomes (DX gain, readability, judgment-based observability) that cannot be expressed as a §6 row. Test infrastructure and build-graph integration are §7 phase deliverables, not non-testable Goals. Recommended cap: 1 per RFC. Such goals may be omitted from §6 but must still appear in §3.2 `Satisfies:` and §7 "Done when".
+- Every `G#` in §2 must appear in at least one §3.2 subsection's `Satisfies:` line, at least one §6 row's `Covers` cell (except §2 non-testable Goals), **and** at least one §7 phase's "Done when" clause.
+- Every `T#` in §6 must transition red→green across §7 phases — at least one earlier phase's "Done when" lists the row as red (present but skipped/`xfail`/flag-gated so the project's local test suite stays green), a later phase's "Done when" lists it as green (un-marked, asserting for real).
+- Untestable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §2 only for genuinely subjective/qualitative outcomes (DX gain, readability, judgment-based observability) that cannot be expressed as a §6 row. Test infrastructure and build-graph integration are §7 phase deliverables, not non-testable Goals. Such goals may be omitted from §6 but must still appear in §3.2 `Satisfies:` and §7 "Done when".
 
 **Avoid vague phrases.** Do not use broad claims as a substitute for specific behavior, metrics, or actions. Rewrite phrases such as "comprehensively improve", "significantly enhance", "robust and scalable", "works correctly", "behaves as expected", "best practices", and "industry standard" into concrete acceptance criteria. "We will monitor" and "we will document" are not valid mitigations unless they name the exact signal, threshold, owner, artifact, or enforcement point.
 
@@ -41,9 +34,9 @@ These rules override the instinct to "fill every section." Treat anti-fabricatio
 
 **Good:**
 
-> Add a new empty project `numkit` to the Monorepo, exposing `uint32_t gcd(uint32_t a, uint32_t b)` that computes the greatest common divisor using the iterative Euclidean algorithm. Defines `gcd(0, 0) = 0` and `gcd(0, n) = n` so all callers share one zero-input contract. Pure function, no I/O, no external dependencies.
+> Add `numkit`, a new project exposing `uint32_t gcd(uint32_t a, uint32_t b)`, which computes the greatest common divisor using the iterative Euclidean algorithm with `gcd(0, 0) = 0` and `gcd(0, n) = n`.
 
-Why it works: one paragraph; names the proposal concretely (new project + signature + algorithm + zero-input contract) without backstory; a reader understands scope in 30 seconds; ~50 words, well under the recommended ~150 words.
+Why it works: a single sentence names the proposal concretely — project, signature, algorithm, and zero-input contract — with no backstory, so a reader grasps the core in well under 30 seconds; ~30 words, far under the recommended ~150. The algorithm (iterative Euclidean) belongs here precisely because §1's job is to convey the RFC's core idea fast — and that same means must *not* resurface as a §2 Goal, where only the outcome lives.
 
 **Bad:**
 
@@ -71,11 +64,9 @@ Why it fails: opens with unverifiable backstory; vague claims (`comprehensive`, 
 
 **Good:**
 
-> - **G1.** Expose `uint32_t gcd(uint32_t a, uint32_t b)` from a new empty `numkit` project, returning the greatest common divisor for every input pair.
-> - **G2.** The public header documents the zero-input contract `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n`; the implementation honors it.
-> - **G3.** Unit tests cover the zero-input contract, equal inputs, coprime pairs, one-side-multiple-of-the-other, and the largest `uint32_t` Fibonacci pair `(F47, F46) = (2971215073, 1836311903)`; all pass when the project's local test suite is run.
+> - **G1.** Provide a public `numkit` function that returns the greatest common divisor for every pair of `uint32_t` inputs, including zero inputs.
 
-Why it works: each `G#` names a verifiable outcome that a §6 scenario can assert (signature exists, header documents the contract, named edge cases pass); G2 pins behavior, not algorithm — swapping iterative Euclidean for binary GCD does not invalidate it.
+Why it works: one Goal fits a proposal this simple (the "simple proposals use minimum counts" rule), and `G1` captures the *outcome* a caller wants — a correct GCD for every input pair — while saying nothing about *how*. The algorithm (iterative Euclidean) appears in §1 Summary, whose job is to convey the core idea fast; keeping it out of §2 means swapping to binary GCD never invalidates the Goal. What is deliberately *not* a Goal matters just as much: the header file and unit tests are §7 phase deliverables, and the exact zero-input values (`gcd(0, 0) = 0`) are a §3.2 contract detail — promoting any of them here would dress up a means or a deliverable as a purpose. `G1` stays verifiable because a §6 row can assert the returned value directly.
 
 **Bad:**
 
@@ -84,7 +75,7 @@ Why it works: each `G#` names a verifiable outcome that a §6 scenario can asser
 > - **G3.** Add tests.
 > - **G4.** Lay the groundwork for future `lcm`, fraction reduction, FFT, and ML primitives.
 
-Why it fails: G1 is vague (`comprehensive`, `scalable`, `significantly improves`) with nothing to verify; G2 prescribes an implementation, not an outcome — swapping to binary GCD should not invalidate the goal, so the algorithm choice belongs in the design section, not §2; G3 is unmeasurable (which tests? what coverage?); G4 lists out-of-scope future work that does not belong as a goal of this RFC.
+Why it fails: G1 is vague (`comprehensive`, `scalable`, `significantly improves`) with nothing to verify; G2 prescribes an implementation, not an outcome — swapping to binary GCD should not invalidate the goal, so the algorithm choice belongs in §1 Summary or §3 Design, not §2; G3 is both unmeasurable (which tests? what coverage?) and miscategorized — test work is a §7 phase deliverable, never a Goal, so no rewording rescues it; G4 lists out-of-scope future work that does not belong as a goal of this RFC.
 
 **TEMPLATE EXAMPLE END**
 
@@ -100,11 +91,11 @@ Why it fails: G1 is vague (`comprehensive`, `scalable`, `significantly improves`
 
 **Good:**
 
-> A new project `numkit/` is added at the Monorepo root with one public header (`numkit/include/numkit/gcd.h`) and one translation unit (`numkit/src/gcd.c`). The header is the only public surface and brings in `<stdint.h>` and nothing else; the implementation has no other dependencies. No existing module is modified — `numkit` is registered as a new leaf in the top-level project list, and callers opt in by including the header. Control flow is a single synchronous call with no I/O, allocations, or global state.
+> `numkit` is a new leaf component. Callers depend on it only through the public header and issue an in-process call into the implementation. Data flows in as the two integer arguments and back as the return value; control returns synchronously to the caller. `numkit` does not call other Monorepo components, perform I/O, allocate memory, or touch shared state.
 >
 > N/A — textual description above is sufficient.
 
-Why it works: names the concrete files added and the single build-graph change a reviewer needs to inspect; pins the public dependency surface (`<stdint.h>` only) so `numkit` stays a leaf; defers the signature and mechanism to §3.2 as the template directs; invokes the prescribed `N/A` fallback because a single pure function has no flow worth diagramming.
+Why it works: names the touched component and caller boundary; describes the data entering and leaving the component plus the synchronous control flow; records the absent outbound calls and side effects that matter at overview level; defers the signature and mechanism to §3.2 as the template directs; invokes the prescribed `N/A` fallback because prose covers this single-function flow.
 
 **Bad:**
 
@@ -116,7 +107,7 @@ Why it works: names the concrete files added and the single build-graph change a
 > +--------+      +-----+      +--------+
 > ```
 
-Why it fails: leaks §3.2 content into §3.1 — both the signature and the mechanism belong one section down; substitutes vague filler (`layered architecture`, `foundation`, `comprehensive`, `robust, scalable`) for the actual files added and the build-graph change a reviewer needs to see; invents a three-box "Caller → gcd → Result" diagram for a single pure function, the exact case the template tells you to skip with the `N/A` fallback.
+Why it fails: leaks §3.2 content into §3.1 — both the signature and the mechanism belong one section down; substitutes vague filler (`layered architecture`, `foundation`, `comprehensive`, `robust, scalable`) for the concrete components and flow a reviewer needs to see; invents a three-box "Caller → gcd → Result" diagram for a single pure function, the exact case the template tells you to skip with the `N/A` fallback.
 
 **TEMPLATE EXAMPLE END**
 
@@ -181,9 +172,9 @@ Each subsection ends with `Satisfies: G# via {one phrase}` so every Goal in §2 
 >
 > Termination: `a mod b < b`, so the second argument strictly decreases until it reaches 0. The `(0, 0)` and `(n, 0)` cases skip the loop entirely and return `a` directly, which gives the contract above with no special-case branch. Worst case is `O(log(min(a, b)))` iterations on Fibonacci-pair input.
 >
-> Satisfies: G1 via the exported signature; G2 via the zero-input contract pinned in the header doc-comment; G3 via the pure, allocation-free design that lets each §6 edge-case row assert on a single return value.
+> Satisfies: G1 via the exported signature, the zero-input contract pinned in the header doc-comment, and the pure, allocation-free design that lets each §6 edge-case row assert on a single return value.
 
-Why it works: one subsection because signature, unstated contract, and mechanism share one aspect (the public function), as the rules direct; the contract surface uses C — the codebase's notation — and shows only the signature, deferring the body to pseudocode; the **Unstated contract** paragraph names the four things a reader could miss from the signature alone (zero-input semantics, purity, no error path, thread-safety); the pseudocode is one level above the implementation with every variable named; the termination paragraph confirms the zero-input contract falls out of the same loop, so no special-case branch is needed (a subtlety the Bad example below gets wrong); leaves algorithm-choice rationale (e.g., why not binary GCD?) for §3.3 rather than muddling it into the Mechanism paragraph; closes with a `Satisfies:` line that traces back to all three goals from §2; well under the recommended ~300 words per subsection.
+Why it works: one subsection because signature, unstated contract, and mechanism share one aspect (the public function), as the rules direct; the contract surface uses C — the codebase's notation — and shows only the signature, deferring the body to pseudocode; the **Unstated contract** paragraph names the four things a reader could miss from the signature alone (zero-input semantics, purity, no error path, thread-safety); the pseudocode is one level above the implementation with every variable named; the termination paragraph confirms the zero-input contract falls out of the same loop, so no special-case branch is needed (a subtlety the Bad example below gets wrong); leaves algorithm-choice rationale (e.g., why not binary GCD?) for §3.3 rather than muddling it into the Mechanism paragraph; closes with a `Satisfies:` line that traces back to the single Goal `G1` from §2; well under the recommended ~300 words per subsection.
 
 **Bad:**
 
@@ -311,7 +302,7 @@ Why it fails: the GCD RFC adds a new file to a project that previously had no GC
 
 - **Threat:** the specific attack/failure mode plus the trigger (input shape, operation, or caller) that exposes it. "Possible vulnerability" / "may be unsafe" / "input must be validated" are placeholders, not threats.
 - **Mitigation:** the code-level check, library call, schema constraint, or config flag that prevents it — cite the §3.2 subsection (or §3.1 component) that pins the enforcement point. "Validate input" / "sanitize before use" without naming the validator are placeholders.
-- **Enforcement:** the concrete mechanism that proves the mitigation is in place — the §6 row that fires the trigger input, the static-analysis lint that fails the build, the config value committed to the repo. "We will harden" / "code review will catch it" / "monitoring will alert" are placeholders, not enforcement.
+- **Enforcement:** the concrete mechanism that proves the mitigation is in place — the §6 row that fires the trigger input, the static-analysis lint that fails the build, the config value stored in the repo. "We will harden" / "code review will catch it" / "monitoring will alert" are placeholders, not enforcement.
 
 **Don't:**
 
@@ -382,13 +373,13 @@ Why it fails: `gcd` takes two `uint32_t` arguments by value with no array access
 
 > | # | Scenario | Input / Setup | Expected Result | Covers | Level |
 > |---|----------|---------------|-----------------|--------|-------|
-> | T1 | Zero-input contract | `gcd(0, 0)`, `gcd(0, 7)`, `gcd(11, 0)` | Returns `0`, `7`, `11` respectively | G2 | unit |
+> | T1 | Zero-input contract | `gcd(0, 0)`, `gcd(0, 7)`, `gcd(11, 0)` | Returns `0`, `7`, `11` respectively | G1 | unit |
 > | T2 | Equal inputs | `gcd(42, 42)` | Returns `42` | G1 | unit |
 > | T3 | Coprime pair | `gcd(17, 31)` | Returns `1` | G1 | unit |
 > | T4 | One side multiple of the other | `gcd(12, 36)`, `gcd(100, 25)` | Returns `12`, `25` respectively | G1 | unit |
-> | T5 | Worst-case Fibonacci pair (F47, F46) | `gcd(2971215073u, 1836311903u)` | Returns `1` | G1, G3 | unit |
+> | T5 | Worst-case Fibonacci pair (F47, F46) | `gcd(2971215073u, 1836311903u)` | Returns `1` | G1 | unit |
 
-Why it works: five rows line up one-to-one with the five edge cases G3 enumerates (zero-input, equal, coprime, one-side-multiple, worst-case), each with exact inputs and exact return values a future author can port straight into a test function; T1 folds the three zero-input sub-cases the header pins into one row because they share Goal (G2) and setup pattern — splitting them into three rows only to pad `Covers` is exactly what the "Don't inflate" rule forbids; T5 picks the actual Fibonacci-pair worst case named in §3.2.1's Mechanism paragraph (consecutive `UINT32_MAX` values would be coprime and finish in 2 steps, missing the bound entirely), so G3's "passes when the project's local test suite is run" clause gets a concrete hook on the worst-case input and G1 rides along for free; every `G#` from §2 appears in at least one `Covers` cell (G1 in T2/T3/T4/T5, G2 in T1, G3 in T5), clearing the cross-section consistency rule; Level stays `unit` throughout because a pure function has no integration boundary — escalating to `integration` or `e2e` would be ceremony the "pick the cheapest level" rule forbids.
+Why it works: five rows cover the distinct edge classes of a GCD function (zero-input, equal, coprime, one-side-multiple, worst-case), all tracing to the one Goal `G1`, each with exact inputs and exact return values a future author can port straight into a test function; T1 folds the three zero-input sub-cases the header pins into one row because they share `G1` and one setup pattern — splitting them into three rows only to pad `Covers` is exactly what the "Don't inflate" rule forbids; T5 picks the actual Fibonacci-pair worst case named in §3.2.1's Mechanism paragraph (consecutive `UINT32_MAX` values would be coprime and finish in 2 steps, missing the bound entirely), giving the worst-case input a concrete hook instead of a vague "large numbers" row; the single Goal `G1` appears in every `Covers` cell (T1–T5), clearing the cross-section consistency rule that each §2 Goal be exercised by a test; Level stays `unit` throughout because a pure function has no integration boundary — escalating to `integration` or `e2e` would be ceremony the "pick the cheapest level" rule forbids.
 
 **Bad:**
 
@@ -406,7 +397,7 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 
 {**Recommended: 2–5 phases.** Each phase is a mergeable unit that leaves the project's local test suite green on its own — not a calendar week, not a sprint, not an OKR milestone. Add a phase only when the prior one must land and be verified before the next can start (public API before the tests that import it, flag-off deploy before flag-on default, schema migration before code that depends on the new columns). >5 phases usually means the RFC bundles too much — consider splitting it.
 
-**TDD red→green is the default phase ordering.** Each §6 row lands first in a "red" phase (test committed in failing state, but kept off the project's local test suite via `xfail`/`expected-fail` markers, `skip`/`pending` markers, a feature flag that gates the test, or a separate test target not yet wired into the local test runner) before a later "green" phase that implements the behavior and removes the marker so the test asserts for real when the local test suite is run. Name the chosen red-phase mechanism in the red phase's `Scope` so a reviewer can verify the gate from the diff. This guarantees ≥2 phases for any RFC that adds behavior — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
+**TDD red→green is the default phase ordering.** Each §6 row lands first in a "red" phase (the test is added in failing form, but kept off the project's local test suite via `xfail`/`expected-fail` markers, `skip`/`pending` markers, a feature flag that gates the test, or a separate test target not yet wired into the local test runner) before a later "green" phase that implements the behavior and removes the marker so the test asserts for real when the local test suite is run. Name the chosen red-phase mechanism in the red phase's `Scope` so a reviewer can verify the gate from the diff. This guarantees ≥2 phases for any RFC that adds behavior — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
 
 **Per-phase structure (3 lines):**
 
@@ -419,10 +410,10 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 - List dates or owners — an RFC reviews the plan, not the calendar or staffing, and both drift the moment schedules slip; phase IDs (`P1`, `P2`) survive re-ordering but "Week 3" does not.
 - Open with a "planning" phase or close with a "monitoring" phase — this RFC *is* the planning artifact, and a monitoring-only phase has no mergeable deliverable to close on.
 - Fold a real ordering constraint into one phase — if tests need the header to exist first, that is two phases with a `Depends on` edge, not one "implement + test" blob that erases the merge gate.
-- Ship a §6 row alongside its own implementation in one phase — that collapses TDD red→green into one commit, the project's local test suite never observes the row in red state, and the cross-section rule that each `T#` traces through both a red and a green phase fails.
+- Ship a §6 row alongside its own implementation in one phase — that collapses TDD red→green into one phase, the project's local test suite never observes the row in red state, and the cross-section rule that each `T#` traces through both a red and a green phase fails.
 - Defer the hard part with a bare placeholder — "P3: handle edge cases later" without a concrete `Scope` and `Done when` is the future-tense "we will document" pattern the writing instructions ban.
 
-**Cross-section consistency:** every `G#` from §2 appears in at least one phase's `Done when` clause (non-testable Goals per §2 included). Every `T#` from §6 transitions red→green across phases — an earlier phase's `Done when` names the row as red (committed but skipped/`xfail`/flag-gated, so the local test suite stays green), a later phase's `Done when` names it as green (un-marked, asserting for real). Every §4 migration entry lands in the phase that introduces the contract break — never later, so un-migrated callers never see the new symptom without the migration shipping in the same phase. Every §5 security concern lands in the phase that exposes the trigger surface, so the mitigation merges no later than the code it protects.}
+**Cross-section consistency:** every `G#` from §2 appears in at least one phase's `Done when` clause (non-testable Goals per §2 included). Every `T#` from §6 transitions red→green across phases — an earlier phase's `Done when` names the row as red (present but skipped/`xfail`/flag-gated, so the local test suite stays green), a later phase's `Done when` names it as green (un-marked, asserting for real). Every §4 migration entry lands in the phase that introduces the contract break — never later, so un-migrated callers never see the new symptom without the migration shipping in the same phase. Every §5 security concern lands in the phase that exposes the trigger surface, so the mitigation merges no later than the code it protects.}
 
 - **P1. {Phase name — one phrase naming the deliverable}.**
   - **Scope:** {concrete files, migrations, flags this phase ships}
@@ -438,14 +429,14 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 > - **P1. Land `numkit` skeleton with red `T1`–`T5`.**
 >   - **Scope:** add `numkit/include/numkit/gcd.h` per §3.2.1 (signature + zero-input doc-comment pinned in the **Unstated contract** paragraph); add `numkit/src/gcd.c` with a stub body `return 0;` so the project links; add `numkit/test/gcd_test.c` containing the five rows from §6 as separate test cases, each wrapped in the harness's `TEST_SKIP("pending RFC-NNN P2")` macro so the binary builds, runs, and reports the rows as skipped — the local test suite stays green; register `numkit` as a new leaf in the top-level project list per §3.1; register the test binary in the project's local test runner so it runs whenever the local test suite is invoked.
 >   - **Depends on:** None.
->   - **Done when:** the `uint32_t gcd(uint32_t, uint32_t)` signature from §3.2.1 exports from the header (G1); the header doc-comment pins `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n` verbatim (G2); `T1`–`T5` are committed in skipped (red) state and the local test suite passes after the test binary registers (G3 staged red).
+>   - **Done when:** the `uint32_t gcd(uint32_t, uint32_t)` signature from §3.2.1 exports from the header and its doc-comment pins `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n` verbatim — both halves of `G1`'s contract; `T1`–`T5` are present in skipped (red) state and the local test suite passes after the test binary registers (`G1` staged red, turned green in P2).
 >
 > - **P2. Implement `gcd` and turn `T1`–`T5` green.**
 >   - **Scope:** replace the stub body in `numkit/src/gcd.c` with the iterative Euclidean loop pinned in §3.2.1's Mechanism paragraph; remove the `TEST_SKIP` wrappers from `T1`–`T5` so they assert for real on every local test run.
 >   - **Depends on:** P1.
->   - **Done when:** `T1`–`T5` all pass un-skipped on the first clean local test run after the wrappers come off (G3 green).
+>   - **Done when:** `T1`–`T5` all pass un-skipped on the first clean local test run after the wrappers come off (`G1` green).
 
-Why it works: two phases — matching the TDD red→green default and the simple-proposal minimum — because P1 lands the contract surface (header + linkable stub + test rows) with every §6 row committed but skipped (red), and P2 turns the rows green by replacing the stub with the real loop and removing the skip wrappers; P1 ships the header alongside a stub `.c` so the project still builds and links, satisfying the "phase leaves the local test suite green" rule even though no real implementation has landed yet; the red phase keeps the local test suite green via the `TEST_SKIP` macro the rule requires, and the wrapper is named in P1's `Scope` so a reviewer can verify the gate from the diff alone; P2 names P1 as a `Depends on` because the skip wrappers can only come off once the implementation exists, so the edge is a real merge gate instead of ceremony; each `T#` traces through both phases — red in P1's `Done when`, green in P2's — satisfying the §6 → §7 red→green cross-section rule; `Done when` clauses cite the exact §6 row IDs (`T1`–`T5`) and §2 Goal IDs (`G1`, `G2`, `G3`) so every Goal has a traceable completion hook a reviewer can verify by grepping the §6 table and the header doc-comment; P1's `Done when` references §3.2.1's **Unstated contract** paragraph by name, so the zero-input contract cannot get dropped between design and merge; no dates, no owners, no "phase 0: design review", no "phase N: monitor" — matches every item on the Don't list.
+Why it works: two phases — matching the TDD red→green default and the simple-proposal minimum — because P1 lands the contract surface (header + linkable stub + test rows) with every §6 row present but skipped (red), and P2 turns the rows green by replacing the stub with the real loop and removing the skip wrappers; P1 ships the header alongside a stub `.c` so the project still builds and links, satisfying the "phase leaves the local test suite green" rule even though no real implementation has landed yet; the red phase keeps the local test suite green via the `TEST_SKIP` macro the rule requires, and the wrapper is named in P1's `Scope` so a reviewer can verify the gate from the diff alone; P2 names P1 as a `Depends on` because the skip wrappers can only come off once the implementation exists, so the edge is a real merge gate instead of ceremony; each `T#` traces through both phases — red in P1's `Done when`, green in P2's — satisfying the §6 → §7 red→green cross-section rule; `Done when` clauses cite the exact §6 row IDs (`T1`–`T5`) and the single §2 Goal ID (`G1`) so the Goal has a traceable completion hook a reviewer can verify by grepping the §6 table and the header doc-comment; P1's `Done when` references §3.2.1's **Unstated contract** paragraph by name, so the zero-input contract cannot get dropped between design and merge; no dates, no owners, no "phase 0: design review", no "phase N: monitor" — matches every item on the Don't list.
 
 **Bad:**
 
@@ -454,6 +445,6 @@ Why it works: two phases — matching the TDD red→green default and the simple
 > - **Phase 3 (Week 4):** Code review and address review feedback. Owner: TBD.
 > - **Phase 4 (Week 5+):** Monitor production and iterate on edge cases as they surface.
 
-Why it fails: every phase is a calendar week (`Week 1`, `Week 2–3`, …) — the "a phase is a mergeable unit, not a timebox" rule forbids this directly, and any slip on Phase 1 cascades into a meaningless "Phase 2 is late" status with no merge gate a reviewer can point at; lists owners (`Alice`, `Bob`, `TBD`) — the Don't list bans staffing because it drifts and an RFC reviews the plan, not who holds the pager; "Phase 1: Design and kickoff" is the banned open-with-planning pattern — this RFC *is* the design artifact, so Phase 1 cannot also be design; "Implement `gcd` and write comprehensive tests" collapses two phases with a real ordering edge (tests cannot compile before the header merges) into one, erasing the verification point a reviewer needs to grant or refuse Phase 2 — and worse, ships every §6 row alongside its own implementation, so the local test suite never observes any `T#` in red state and the TDD red→green transition the rule requires never occurs; "comprehensive tests" is the banned vague phrase with no `T#` row to cite and no `G#` to prove complete; Phase 3 ("code review and address review feedback") is not a deliverable — every phase ships through code review, so promoting it to a phase pads the count without adding a merge gate; Phase 4 ("monitor production and iterate") has no `Scope`, no `Depends on`, no `Done when`, and no end state — a monitoring-only phase has no mergeable deliverable to close on; no phase declares a `Done when` line, so none of `G1`–`G3` has a traceable completion hook and the cross-section consistency rule fails on every Goal.
+Why it fails: every phase is a calendar week (`Week 1`, `Week 2–3`, …) — the "a phase is a mergeable unit, not a timebox" rule forbids this directly, and any slip on Phase 1 cascades into a meaningless "Phase 2 is late" status with no merge gate a reviewer can point at; lists owners (`Alice`, `Bob`, `TBD`) — the Don't list bans staffing because it drifts and an RFC reviews the plan, not who holds the pager; "Phase 1: Design and kickoff" is the banned open-with-planning pattern — this RFC *is* the design artifact, so Phase 1 cannot also be design; "Implement `gcd` and write comprehensive tests" collapses two phases with a real ordering edge (tests cannot compile before the header merges) into one, erasing the verification point a reviewer needs to grant or refuse Phase 2 — and worse, ships every §6 row alongside its own implementation, so the local test suite never observes any `T#` in red state and the TDD red→green transition the rule requires never occurs; "comprehensive tests" is the banned vague phrase with no `T#` row to cite and no `G#` to prove complete; Phase 3 ("code review and address review feedback") is not a deliverable — every phase ships through code review, so promoting it to a phase pads the count without adding a merge gate; Phase 4 ("monitor production and iterate") has no `Scope`, no `Depends on`, no `Done when`, and no end state — a monitoring-only phase has no mergeable deliverable to close on; no phase declares a `Done when` line, so `G1` has no traceable completion hook and the cross-section consistency rule fails.
 
 **TEMPLATE EXAMPLE END**

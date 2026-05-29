@@ -12,7 +12,7 @@ You are the author of the staged code change. Revise it to pass the next CR roun
 ## Revision Discipline
 
 1. Resolve every `Blocker` and `Major` finding; `Minor` is at your discretion.
-2. The revised diff must still satisfy the RFC — every `G#`, `T#`, §4.2 contract surface, §5 migration, §6 mitigation, §4.3 ruled-out alternative.
+2. The revised diff must still satisfy the RFC — every `G#`, `T#`, §3.2 contract surface, §4 migration, §5 security mitigation, §3.3 ruled-out alternative.
 3. A finding may be rejected only if it conflicts with the RFC or verifiable project / codebase facts, or if its evidence does not hold against the current diff.
 4. Do not make changes outside the scope of the review — no "while I'm here" cleanups, refactors, comment polish, or file moves.
 5. Findings with `Origin: Upheld` or `Origin: Reopened` are binding — address them or flag for human review. For `Upheld`, do not re-reject on the listed prior Basis. For `Reopened`, do not repeat the prior Change that the reviewer judged inadequate.
