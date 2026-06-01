@@ -23,7 +23,7 @@ For each `P#` in §7, in declared order:
 
 1. Read the phase's `Scope`, `Depends on`, and `Done when` verbatim. Verify all `Depends on` phases have been completed.
 2. Implement only what `Scope` lists. Lift §3.2 contract surfaces into the implementation exactly; lift the §3.2 Mechanism paragraph into runnable code.
-3. For `T#` rows this phase introduces **red**, apply the gate named in `Scope` (`xfail` / `skip` / feature flag / separate test target) and confirm the project's local test suite stays green.
+3. For `T#` rows this phase introduces **red**, apply the gate named in `Scope` (`xfail` / `skip` / feature flag / separate test target) and confirm the project's local test suite stays green. `xfail` runs the test and stays green only if it actually fails against the stub — under a constant stub, a row whose expected value the stub matches will XPASS and break green, so prefer `skip`/flag-gate unless the stub fails every marked row.
 4. For `T#` rows this phase turns **green**, remove the gate and run the local test suite — every named row must assert for real and pass.
 5. Verify each `Done when` clause against the artifact it cites: grep the §6 row, run the local test suite, read the header doc-comment, inspect the schema change artifact. Do not declare the phase done until every clause holds.
 6. Treat the phase as complete only after every `Done when` clause is verified. Keep the work in the working tree and continue to the next phase; do not stage or present a Code Review diff for an intermediate phase unless the user explicitly asks.

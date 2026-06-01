@@ -2,7 +2,7 @@
 
 ## Writing Instructions (delete before submitting)
 
-These rules override the instinct to "fill every section." Everything below is a hard constraint. The one exception is the per-section counts and lengths, and only upward: the lower bound of every stated range (e.g. `Recommended: 3–10`) is a hard minimum — a section with a Skip/None clause may invoke that instead — while the upper figure is a recommendation you may exceed when the proposal genuinely warrants it. Lengths have no hard floor; shorter is fine for simple changes.
+These rules override the instinct to "fill every section." Except for the counts and lengths marked *Recommended*, everything below is a hard constraint; those ranges bind only upward: the lower bound of every stated range (e.g. `Recommended: 3–10`) is a hard minimum — a section with a Skip/None clause may invoke that instead — while the upper figure is a recommendation you may exceed when the proposal genuinely warrants it. Lengths have no hard floor; shorter is fine for simple changes.
 
 **Do not fabricate.** Do not invent facts, code paths, APIs, behavior, data, test results, citations, or rationale. If evidence is missing, state that it is unknown or needs verification, then name the source that must be checked.
 
@@ -262,12 +262,13 @@ Why it fails: `Reason` uses every vague phrase the writing instructions ban ("cl
 
 **Recommended: 1–5 entries.** Each entry pins one observable way a previously-working caller stops working; fan-out from one root change collapses into one entry, independent breaks split. >5 usually means the RFC bundles too much — consider splitting it.
 
-**Per-break structure.** Number each entry `B1`, `B2`, … so §6 `Covers` and §7 "Done when" can cite it by ID; each entry is one labeled block of 3 lines:
+**Per-break structure.** Number each entry `B1`, `B2`, … so §6 `Covers` and §7 "Done when" can cite it by ID; each entry is one labeled block of 4 lines:
 
 - **B1.**
   - **Breaks:** the exact signature, schema, wire format, or semantic that changes — cite the §3.2 subsection that pins the new contract.
   - **Symptom on un-migrated caller:** the exact compile error, runtime exception, log line, wire mismatch, or wrong-but-silent output the caller observes. "It will fail" / "callers must update" / "behavior changes" are placeholders, not symptoms.
   - **Migration:** the concrete command, codemod, version bump, or config flip that resolves the symptom. If non-mechanical, say so and cite the existing runbook — never "we will document".
+  - **Regression coverage:** the §6 row (`T#`) that exercises the new behavior on previously-succeeding input and asserts the changed outcome — every B# must have one (the row's `Covers` cell cites the `B#` back), and it transitions red→green through §7 like any other test. "We will add a test" is a placeholder, not coverage.
 
 **Don't:**
 
@@ -291,8 +292,9 @@ Why it works: invokes the Skip clause for the genuine reason — a newly added e
 >   - **Breaks:** Existing math code may need updates.
 >   - **Symptom on un-migrated caller:** Build errors or unexpected results.
 >   - **Migration:** We will document the upgrade path before release.
+>   - **Regression coverage:** Tests will be added to cover the changes.
 
-Why it fails: the GCD RFC adds a new file to a project that previously had no GCD function — there is *nothing* to break, so the right answer is the Skip clause, not invented rows; "Existing math code may need updates" names no signature, no §3.2 hook, and no observable change — the vague placeholder the rule forbids; "Build errors or unexpected results" wraps a vague second clause around an over-broad first ("build errors") and joins them by `or`, so a caller cannot tell which to grep for — a real Symptom names one observable per entry, e.g., `error: too few arguments to function 'gcd'`; "We will document the upgrade path before release" is the banned `we will document` pattern, with the future-tense framing making the §4 entry depend on an artifact that does not yet exist when the RFC is reviewed.
+Why it fails: the GCD RFC adds a new file to a project that previously had no GCD function — there is *nothing* to break, so the right answer is the Skip clause, not invented rows; "Existing math code may need updates" names no signature, no §3.2 hook, and no observable change — the vague placeholder the rule forbids; "Build errors or unexpected results" wraps a vague second clause around an over-broad first ("build errors") and joins them by `or`, so a caller cannot tell which to grep for — a real Symptom names one observable per entry, e.g., `error: too few arguments to function 'gcd'`; "We will document the upgrade path before release" is the banned `we will document` pattern, with the future-tense framing making the §4 entry depend on an artifact that does not yet exist when the RFC is reviewed; "Tests will be added to cover the changes" is that same future-tense placeholder one line down — a real Regression coverage line cites the exact §6 `T#` that exercises the new behavior on previously-succeeding input.
 
 **TEMPLATE EXAMPLE END**
 
@@ -360,7 +362,7 @@ Why it fails: `gcd` takes two `uint32_t` arguments by value with no array access
 - **Input / Setup** — concrete input values or fixture state. "Valid input" / "typical case" are placeholders, not setups.
 - **Expected Result** — the observable outcome the test asserts (exact return value, exact error variant, exact wire bytes, log line). "Works correctly" / "behaves as expected" are banned.
 - **Covers** — the `G#` / `B#` / `S#` the row exercises — at least one ID, but not necessarily a `G#`; a row may cover only a §4 break or §5 concern. One row may cover multiple items; use `,` to separate.
-- **Level** — `unit`, `integration`, or `e2e`, matching the codebase's harness vocabulary. Pick the cheapest level that still exercises the contract; escalate only when the contract crosses a boundary the cheaper level cannot reach.
+- **Level** — `unit`, `integration`, or `e2e`, mapped to your harness's equivalent tier if it names them differently (e.g. small/medium/large). Pick the cheapest level that still exercises the contract; escalate only when the contract crosses a boundary the cheaper level cannot reach.
 
 **Don't:**
 
@@ -405,7 +407,7 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 
 {**Recommended: 2–5 phases.** Each phase is an independently shippable increment that leaves the project's local test suite green on its own — not a calendar week, not a sprint, not an OKR milestone. Add a phase only when the prior one must land and be verified before the next can start (public API before the tests that import it, flag-off deploy before flag-on default, schema migration before code that depends on the new columns). >5 phases usually means the RFC bundles too much — consider splitting it.
 
-**TDD red→green is the required phase ordering.** Each §6 row lands first in a "red" phase (the test is added in failing form, but the local test suite stays green — `xfail`/`expected-fail` markers run it and tolerate the failure, while `skip`/`pending` markers, a feature flag that gates the test, or a separate test target not yet wired into the local test runner keep it from running at all) before a later "green" phase that implements the behavior and clears the gate so the test asserts for real when the local test suite is run. Name the chosen red-phase mechanism in the red phase's `Scope` so a reviewer can verify the gate from the diff. This guarantees ≥2 phases for any RFC — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
+**TDD red→green is the required phase ordering.** Each §6 row lands first in a "red" phase (the test is added in failing form, but the local test suite stays green — `xfail`/`expected-fail` markers run it and tolerate the failure, while `skip`/`pending` markers, a feature flag that gates the test, or a separate test target not yet wired into the local test runner keep it from running at all) before a later "green" phase that implements the behavior and clears the gate so the test asserts for real when the local test suite is run. Name the chosen red-phase mechanism in the red phase's `Scope` so a reviewer can verify the gate from the diff. The mechanisms are not interchangeable on one axis: `skip`/flag-gate/separate-target never run the test, so the suite stays green whatever the stub returns; `xfail` runs it and stays green only if the test actually fails against the stub — under a constant stub (e.g. `return 0;`), any row whose expected value the stub happens to match will XPASS, which strict-`xfail` frameworks report as a failure. Default to `skip`/flag-gate; reach for `xfail` only when the stub makes every marked row fail. This guarantees ≥2 phases for any RFC — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
 
 **Per-phase structure (3 lines):**
 
