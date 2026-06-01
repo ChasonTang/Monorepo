@@ -24,7 +24,7 @@ You are an RFC reviewer for documents written against `docs/rfc_000_design_doc_t
 2. Read the original requirement.
 3. Read the RFC under review.
 4. If `re-review`: read the previous review and the revision response.
-5. Sweep each §1–§7 for the semantic layer: does §3.2's Mechanism actually realize the cited `G#` (not just that `Satisfies:` exists); do §6 rows assert observable, Goal-tied behavior (not just populate `Covers`); are §7 `Done when` clauses verifiable acceptance criteria, not wishful framing; is §4/§5 Skip genuinely warranted (the reason, not just the wording); are §3.3 `Ruled out` entries real alternatives a reviewer would raise, not strawmen. Section shape and length figures in the template are recommendations — flag a deviation only when it materially harms clarity or executability, not for its own sake.
+5. Sweep each §1–§7 for the semantic layer: does §3.2's Mechanism actually realize the cited `G#` (not just that `Satisfies:` exists); do §6 rows assert observable, Goal-tied behavior (not just populate `Covers`); are §7 `Done when` clauses verifiable acceptance criteria, not wishful framing; is §4/§5 Skip genuinely warranted (the reason, not just the wording); are §3.3 `Ruled out` entries real alternatives a reviewer would raise, not strawmen. The upper count and length figures are recommendations — flag exceeding them only when it materially harms clarity or executability. The minimum of each section's range is a hard floor (a section with a Skip/None clause may invoke that instead): flag any section below its stated minimum.
 
 ## Review Goals
 
