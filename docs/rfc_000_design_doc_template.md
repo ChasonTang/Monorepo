@@ -85,7 +85,7 @@ Why it fails: G1 is vague (`comprehensive`, `scalable`, `significantly improves`
 
 ### 3.1 Overview
 
-{**Describe the components touched and how data/control flows between them.** Contract surfaces (signatures, schemas, transition tables, wire formats) and mechanism sketches belong in §3.2 — keep this section above that level. Include an inline ASCII or Mermaid diagram when the component/flow structure is easier to read as a picture than as prose.
+{**Describe the components touched and how data/control flows between them.** Contract surfaces (signatures, schemas, transition tables, wire formats) and mechanism sketches belong in §3.2 — keep this section above that level. Which files are added or modified is a §7 Scope detail — keep §3.1 at the component/module level (the boxes that change and the control/data flow between them), never a file inventory. Include an inline ASCII or Mermaid diagram when the component/flow structure is easier to read as a picture than as prose.
 
 *Skip the diagram* (write `N/A — textual description above is sufficient`) when (a) the change is a single-function, algorithm, or data-structure change whose structure is already conveyed by §1 Summary and the §3.2 description; or (b) the structure cannot be expressed cleanly in ASCII/Mermaid (e.g., dense graphs). Don't invent hierarchy to fill the slot.}
 
@@ -138,7 +138,7 @@ Each subsection ends with `Satisfies: G# via {the design hook(s)}` so every Goal
 - *Mechanism is pseudocode, one level above implementation.* For Proposed code that does not yet exist, write near-pseudocode in the language of the affected codebase — no error-handling boilerplate, no language-specific sugar. Name every input, every output, and every observable side effect; `// handle the error` and `// process input` are placeholders, not pseudocode.
 - *Source and length.* For code that already exists in the repo, replace the snippet with a `path/to/file.ext:line` reference instead of pasting it. ≤30 lines per code block.
 - *Notation matches the affected codebase.* SQL DDL for relational schema changes; JSON Schema / Protobuf / OpenAPI for wire formats; BNF for grammars; transition tables when the machine has >2 states or >3 transitions. Pick what the rest of the project uses; do not introduce a new notation for one RFC.
-- *Stay inside the component.* §3.1 says which boxes change; §3.2 says what happens inside one box. Do not redraw component diagrams or list which files are added — that belongs to §3.1.
+- *Stay inside the component.* §3.1 says which boxes change; §3.2 says what happens inside one box. Do not redraw component diagrams (that belongs to §3.1) or enumerate which files are added (that belongs to §7 Scope).
 - *Cite, don't paste, large artifacts.* Full schema files, full state diagrams, and 100-line algorithms belong in the diff or a linked file — quote only the smallest fragment that pins the contract.}
 
 #### 3.2.1 {Aspect: see distinct-aspects list above}
@@ -209,7 +209,7 @@ Why it works: one subsection because signature, unstated contract, and mechanism
 >
 > Runs in O(log n) time, which is fast enough.
 
-Why it fails: aspect name `Function` is generic — the rule requires descriptive names like `Public API and Algorithm`; the opening paragraph lists which files are added and where the project sits, but that is §3.1's job — §3.2 stays inside the box; pastes the full `.c` instead of pseudocode, so the snippet ships with an `if (a == 0 && b == 0) return 0;` early return that is dead code (when `b == 0` the `while` loop is skipped and `return a` already yields `0` for the `(0, 0)` input) — pseudocode would have surfaced that the loop alone covers the zero-input contract; splits one aspect across `3.2.1`/`3.2.2`/`3.2.3` for no reason — `Edge Cases` and `Performance` are notes about the same function, not distinct aspects with their own contracts; "works correctly", "fast enough", and "optimal performance" are exactly the vague phrases the writing instructions ban; no `Unstated contract` paragraph, so the zero-input semantics live only in the (redundant) code; missing the closing `Satisfies: G# via …` line on every subsection, so §2 goals have no traceable design hook.
+Why it fails: aspect name `Function` is generic — the rule requires descriptive names like `Public API and Algorithm`; the opening paragraph enumerates the files added (`gcd.h`, `gcd.c`), which belong in §7 Scope — §3.2 stays inside the box, and the only overview-level fact (that `numkit` is a new leaf component) already lives in §3.1; pastes the full `.c` instead of pseudocode, so the snippet ships with an `if (a == 0 && b == 0) return 0;` early return that is dead code (when `b == 0` the `while` loop is skipped and `return a` already yields `0` for the `(0, 0)` input) — pseudocode would have surfaced that the loop alone covers the zero-input contract; splits one aspect across `3.2.1`/`3.2.2`/`3.2.3` for no reason — `Edge Cases` and `Performance` are notes about the same function, not distinct aspects with their own contracts; "works correctly", "fast enough", and "optimal performance" are exactly the vague phrases the writing instructions ban; no `Unstated contract` paragraph, so the zero-input semantics live only in the (redundant) code; missing the closing `Satisfies: G# via …` line on every subsection, so §2 goals have no traceable design hook.
 
 **TEMPLATE EXAMPLE END**
 
@@ -307,7 +307,7 @@ Why it fails: the GCD RFC adds a new file to a project that previously had no GC
 - **S1.**
   - **Threat:** the specific attack/failure mode plus the trigger (input shape, operation, or caller) that exposes it. "Possible vulnerability" / "may be unsafe" / "input must be validated" are placeholders, not threats.
   - **Mitigation:** the code-level check, library call, schema constraint, or config flag that prevents it — cite the §3.2 subsection (or §3.1 component) that pins the enforcement point. "Validate input" / "sanitize before use" without naming the validator are placeholders.
-  - **Enforcement:** the concrete mechanism that proves the mitigation is in place — the §6 row that fires the trigger input, the static-analysis lint that fails the build, the config value stored in the repo. "We will harden" / "code review will catch it" / "monitoring will alert" are placeholders, not enforcement.
+  - **Enforcement:** the §6 row (`T#`) that fires the trigger input and asserts the rejection/sanitization/safe outcome — every S# must have one, and it transitions red→green through §7 like any other test (its mitigation lands in the phase that exposes the trigger surface, per the cross-section rule). A build-time guard (static-analysis lint, repo config value) may *back up* that row but never replaces it. "We will harden" / "code review will catch it" / "monitoring will alert" are placeholders, not enforcement.
 
 **Don't:**
 
