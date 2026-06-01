@@ -2,7 +2,7 @@
 
 ## Writing Instructions (delete before submitting)
 
-These rules override the instinct to "fill every section." Except for the counts and lengths marked *Recommended*, everything below is a hard constraint; those ranges bind only upward: the lower bound of every stated range (e.g. `Recommended: 3–10`) is a hard minimum — a section with a Skip/None clause may invoke that instead — while the upper figure is a recommendation you may exceed when the proposal genuinely warrants it. Lengths have no hard floor; shorter is fine for simple changes.
+These rules override the instinct to "fill every section." Except for the counts and lengths marked *Recommended*, everything below is a hard constraint; those ranges bind only upward: the lower bound of every stated range (e.g. `Recommended: 1–10`) is a hard minimum — a section with a Skip/None clause may invoke that instead — while the upper figure is a recommendation you may exceed when the proposal genuinely warrants it. Lengths have no hard floor; shorter is fine for simple changes.
 
 **Do not fabricate.** Do not invent facts, code paths, APIs, behavior, data, test results, citations, or rationale. If evidence is missing, state that it is unknown or needs verification, then name the source that must be checked.
 
@@ -15,22 +15,22 @@ These rules override the instinct to "fill every section." Except for the counts
 - **Delete this Writing Instructions section** — the final RFC ends after §7 Implementation Plan.
 
 **Scope discipline:**
-- **Match scope to change.** Simple proposals use the minimum counts (1 Goal, 1 §3.2.1 subsection, 3 §6 scenarios, 2 §7 phases) — these are floors, not targets; exceed any one when the change has genuinely distinct content to cover (e.g., a function with five real edge-case classes needs five §6 rows, as the GCD example below does).
+- **Match scope to change.** Simple proposals use the minimum counts (1 testable Goal, 1 §3.2.1 subsection, 1 §6 happy-path scenario, 2 §7 phases) — these are floors, not targets; exceed any one when the change has genuinely distinct content to cover (e.g., a function with edge/error classes needs extra §6 rows for those classes, as the GCD example below does).
 - **Length (recommended):** most RFCs fit in 800–2,500 words; shorter is fine for simple changes. Aim to stay ≤4,000 words; exceeding that usually means padding or over-scope, so consider splitting the proposal.
 - **Sections §4 and §5 stay numbered.** Never delete or renumber them; when content does not apply, use the template's exact fallback text (`Not applicable — {one-sentence reason}`) instead of filler or speculation. When evidence is unavailable, state what is unknown and what source must be verified.
 
 **Cross-section consistency:**
-- Every `G#` in §2 must appear in at least one §3.2 subsection's `Satisfies:` line; except for §2 non-testable Goals, it must also appear in at least one §6 row's `Covers` cell **and** at least one §7 phase's "Done when" clause.
-- Every `T#` in §6 must transition red→green across §7 phases — at least one earlier phase's "Done when" lists the row as red (present but skipped/`xfail`/flag-gated so the project's local test suite stays green), a later phase's "Done when" lists it as green (un-marked, asserting for real).
-- Every `B#` in §4 (when not Skipped) must cite the §3.2 subsection that pins the new contract, appear in at least one §6 row's `Covers` cell, **and** land in the §7 phase that introduces the break.
-- Every `S#` in §5 (when not Skipped) must cite the §3.2 subsection (or §3.1 component) that pins the enforcement point, appear in at least one §6 row's `Covers` cell, **and** land in the §7 phase that exposes the trigger surface.
-- Non-testable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §2 only for genuinely subjective/qualitative outcomes (DX gain, readability, judgment-based observability) that cannot be expressed as a §6 row. Such goals may be omitted from §6 and from §7 "Done when" but must still appear in §3.2 `Satisfies:`.
+- Every `G#` in §2 must appear in at least one §3.2 subsection's `Satisfies:` line; except for §2 non-testable Goals, it must also appear in at least one §6 row's `Covers` cell.
+- Every `T#` in §6 must transition red→green across §7 phases — at least one earlier phase's "Done when" lists the row as red with executable failure evidence (strict `xfail`, or a named red-verification command/mode that runs the assertion and fails) while the project's default local test suite stays green, and a later phase's "Done when" lists it as green (un-marked, asserting for real).
+- Every `B#` in §4 (when not Skipped) must cite the §3.2 subsection that pins the new contract, appear in at least one §6 row's `Covers` cell, and have its migration land and paired §6 regression row turn green no later than the §7 phase that introduces the changed documented contract.
+- Every `S#` in §5 (when not Skipped) must cite the §3.2 subsection (or §3.1 component) that pins the enforcement point, appear in at least one §6 row's `Covers` cell, and have its mitigation land and paired §6 enforcement row turn green no later than the §7 phase that exposes the trigger surface.
+- Non-testable Goals: default is 0 — append `non-testable: {one-sentence reason}` in §2 only when the original requirement explicitly asks for a concrete RFC outcome that cannot be expressed as a §6 row (e.g., a rendering test suite whose value is the testing capability itself). Such goals may be omitted from §6 but must still appear in §3.2 `Satisfies:`.
 
 **Avoid vague phrases.** Do not use broad claims as a substitute for specific behavior, metrics, or actions. Rewrite phrases such as "comprehensively improve", "significantly enhance", "robust and scalable", "works correctly", "behaves as expected", "best practices", and "industry standard" into concrete acceptance criteria. "We will monitor" and "we will document" are not valid mitigations unless they name the exact signal, threshold, owner, artifact, or enforcement point.
 
 ## 1. Summary
 
-{**At most ~150 words; shorter is better.** One paragraph. State the proposal and core idea; omit speculative backstory. A reader should understand the full picture in 30 seconds.}
+{**One sentence; at most ~150 words, shorter is better.** State the proposal and core idea; omit speculative backstory. This sentence may name the means when that is central to understanding the change (e.g., the algorithm), but §2 Goals must still describe outcomes, not means.}
 
 **TEMPLATE EXAMPLE BEGIN**
 
@@ -50,13 +50,13 @@ Why it fails: opens with unverifiable backstory; vague claims (`comprehensive`, 
 
 ## 2. Goals
 
-{**Recommended: 1–5 Goals, 0–1 non-testable Goals (default 0).** At least one Goal must be testable — every RFC's purpose is proven through the §6 → §7 red→green flow, which validates Goals via their `T#` rows; an all-non-testable §2 leaves the RFC's own outcomes unverified, regardless of whether §4/§5 supply `B#`/`S#` anchors. (When §4/§5 are also Skipped, §6 would additionally have no legal `Covers` anchor at all.)
+{**Recommended: 1–5 Goals, 0–1 non-testable Goals (default 0).** At least one Goal must be testable — every RFC's purpose is proven through the §6 → §7 red→green flow, which validates testable Goals via their `T#` rows; an all-non-testable §2 leaves the RFC's own outcomes unverified, regardless of whether §4/§5 supply `B#`/`S#` anchors. (When §4/§5 are also Skipped, §6 would additionally have no legal `Covers` anchor at all.)
 
-**Goals:** numbered `G1`, `G2`, ... so §6 and §7 can cite them by ID. Each must be concrete and verifiable.
+**Goals:** numbered `G1`, `G2`, ... so §3.2 and §6 can cite them by ID. Each must name a concrete output or observable outcome.
 
-**Means vs Goals.** Goals describe outcomes (e.g., "P95 < 50 ms"), not implementations (e.g., "use Redis"). If swapping implementations invalidates the goal, rewrite it. Test infrastructure ("ships with a unit-test binary") and build-graph integration ("registers the project in the GN `tests` group") are means, not outcomes — they belong in §7 phase Scope, verified by Done-when clauses, never as Goals.
+**Means vs Goals.** Goals describe concrete outputs/outcomes (e.g., "provide a greatest-common-divisor utility function", "P95 < 50 ms"), not implementations (e.g., "use Euclidean division", "use Redis"). If swapping implementations invalidates the goal, rewrite it. Test infrastructure and build-graph integration are usually §7 phase deliverables, not Goals. Mark one as non-testable only when the original requirement explicitly names it as a concrete outcome and no meaningful §6 row can test it without circularity; in that rare case, still connect it to a §3.2 design subsection.
 
-**Non-testable Goals (fallback, default 0):** reserved for genuinely subjective/qualitative outcomes — e.g., DX gain, readability, judgment-based observability — that cannot be expressed as a §6 row. If a Goal is testable in principle, write a §6 row for it; do not hide it behind this annotation. Test-binary scaffolding and build-graph integration are §7 deliverables verified by Done-when clauses, never non-testable Goals. Append `non-testable: {one-sentence reason}` only when no §6 expression is possible. Recommended: at most 1 per RFC; needing 2+ usually means Goals are vague — rewrite as testable outcomes.}
+**Non-testable Goals (fallback, default 0):** reserved for rare, concrete RFC outcomes that the original requirement explicitly asks for and that cannot be expressed as a §6 row — e.g., building a rendering test suite whose value is the testing capability itself. If a Goal is testable in principle, write a §6 row for it; do not hide it behind this annotation. Append `non-testable: {one-sentence reason}` only when the requirement explicitly calls for the outcome and no §6 expression is possible. Recommended: at most 1 per RFC; needing 2+ usually means Goals are vague — rewrite as testable outcomes or move phase deliverables to §7.}
 
 - **G1.** {Concrete, measurable outcome}
 
@@ -176,7 +176,7 @@ Each subsection ends with `Satisfies: G# via {the design hook(s)}` so every Goal
 >
 > Satisfies: G1 via the exported signature, the zero-input contract pinned in the header doc-comment, and the pure, allocation-free design that lets each §6 edge-case row assert on a single return value.
 
-Why it works: one subsection because signature, unstated contract, and mechanism share one aspect (the public function), as the rules direct; the contract surface uses C — the codebase's notation — and shows only the signature, deferring the body to pseudocode; the **Unstated contract** paragraph names the four things a reader could miss from the signature alone (zero-input semantics, purity, no error path, thread-safety); the pseudocode is one level above the implementation with every variable named; the termination paragraph confirms the zero-input contract falls out of the same loop, so no special-case branch is needed (a subtlety the Bad example below gets wrong); leaves algorithm-choice rationale (e.g., why not binary GCD?) for §3.3 rather than muddling it into the Mechanism paragraph; closes with a `Satisfies:` line that traces back to the single Goal `G1` from §2; well under the recommended ~300 words per subsection.
+Why it works: one subsection because signature, unstated contract, and mechanism share one aspect (the public function), as the rules direct; the contract surface uses C — the codebase's notation — and shows only the signature, deferring the body to pseudocode; the **Unstated contract** paragraph names the four things a reader could miss from the signature alone (zero-input semantics, purity, no error path, thread-safety); the pseudocode is one level above the implementation with every variable named; the termination paragraph confirms the zero-input contract falls out of the same loop, so no special-case branch is needed (a subtlety the Bad example below gets wrong); does not discuss alternatives like binary GCD because this simple RFC only needs the chosen contract and mechanism; closes with a `Satisfies:` line that traces back to the single Goal `G1` from §2; well under the recommended ~300 words per subsection.
 
 **Bad:**
 
@@ -213,70 +213,29 @@ Why it fails: aspect name `Function` is generic — the rule requires descriptiv
 
 **TEMPLATE EXAMPLE END**
 
-### 3.3 Design Rationale
-
-{**Recommended: 0–3 decisions.** Document only decisions a future reader would actually question — concretely, an entry is worth recording only if (a) swapping the choice would invalidate at least one `G#`, or (b) a reviewer would predictably ask "why not X". Neither passes → micro-choice, do not record.
-
-When §3.2's Mechanism, contract surface, or notation silently carries a "we picked X over Y", lift the comparison to §3.3 and leave only the chosen artifact in §3.2.
-
-For each, use a 3-line structure:
-- **Chosen:** ...
-- **Reason:** ...
-- **Ruled out:** ...
-
-`None` is a common legitimate state, not a failure signal — when §2 Goals and §3.2 contract surface have already locked every within-scope choice, write `None` and stop. Do not invent decisions to fill the slot. If an entry passes the worth-recording test above but no real alternative was considered, write `Ruled out: N/A — no viable alternative considered` rather than inventing a strawman.
-
-§3.3 entries do not need to trace to §2 Goals, §6 rows, or §7 phases — decisions stand independently.}
-
-**TEMPLATE EXAMPLE BEGIN**
-
-**Good:**
-
-> - **Chosen:** Iterative Euclidean (the loop pinned in §3.2.1).
-> - **Reason:** Worst case is `O(log(min(a, b)))` — under 50 iterations for any `uint32_t` input pair (Fibonacci-pair worst case bounded by `~1.44 · log₂(n)`), well under any caller's budget. The `%` operator compiles to a single hardware-divide instruction on every platform this Monorepo targets, so the loop body is already at the noise floor; trading it for shifts and subtractions would not measurably help.
-> - **Ruled out:** Binary GCD (Stein's algorithm) replaces `%` with shifts and subtractions; the speedup matters only on targets without a hardware divider (older microcontrollers). Revisit when such a target lands in the Monorepo — until then the simpler algorithm with the easier termination proof is the safer default.
-
-Why it works: one decision is enough — signature, zero-input contract, and file layout are pinned by §2 and §3.2 with no real alternative, so they do not belong here; **Reason** quantifies the budget (under 50 iterations on `uint32_t`, single hardware-divide instruction) instead of hand-waving about "good performance"; **Ruled out** names the real alternative *and* the specific condition (no hardware divide) that would flip the decision, so the next author has a checklist to revisit against — not a strawman; lifts the binary-GCD verdict out of §3.2.1's Mechanism paragraph (where it conflated "how the loop works" with "why we picked this loop") and lands it where within-scope alternatives belong.
-
-**Bad:**
-
-> - **Chosen:** Iterative Euclidean — the classic, well-known, battle-tested GCD algorithm.
-> - **Reason:** Clean, elegant, robust algorithm with optimal performance that works correctly for every input.
-> - **Ruled out:** Recursive Euclidean (stack overflow risk), trial division (way too slow), and other less suitable approaches.
->
-> - **Chosen:** Return type `uint32_t`.
-> - **Reason:** Matches the input type.
-> - **Ruled out:** Out-parameter, struct return.
->
-> - **Chosen:** Function name `gcd`.
-> - **Reason:** Short and conventional.
-> - **Ruled out:** `greatest_common_divisor`, `compute_gcd`.
-
-Why it fails: `Reason` uses every vague phrase the writing instructions ban ("clean, elegant, robust", "optimal performance", "works correctly") with no numbers or named platform — a future reader cannot tell *why* this algorithm beats the alternatives; `Ruled out` invents strawmen (recursive Euclidean is not a stack-overflow risk at the few-dozen-frame depth `uint32_t` inputs allow, trial division is so absurd no reviewer would ask about it) and skips the one alternative a real reviewer would actually raise — binary GCD; pads with two micro-choices (return type matching the input, function naming) that no future reader would re-litigate — they belong in §3.2's contract surface, not §3.3, and exist here only to fill the slot; the 0–3 recommendation exists to prevent exactly this kind of noise — burying the one real decision (binary GCD) inside a list of cosmetic ones.
-
-**TEMPLATE EXAMPLE END**
-
 ## 4. Backward Compatibility & Migration
 
-{**Skip when** previously-working callers see no new failure (additive APIs, brand-new exports, or refactors invisible at the public boundary) → write `Not applicable — {one-sentence reason}` and stop.
+{**Skip when** this RFC does not change any existing interface-documentation contract under an unchanged interface shape (additive APIs, brand-new exports, unchanged documented contracts, or refactors that leave documented contracts unchanged) → write `Not applicable — {one-sentence reason}` and stop.
 
-**Recommended: 1–5 entries.** Each entry pins one observable way a previously-working caller stops working; fan-out from one root change collapses into one entry, independent breaks split. >5 usually means the RFC bundles too much — consider splitting it.
+**TDD migration model.** Direct interface-shape breaks (signature/schema/wire removals or incompatible replacements) should be avoided in the RFC that introduces new behavior: keep the old interface stable, use TDD to drive the new interface, migrate production callers to the new interface, then deprecate/delete the old interface and its tests only after it has no callers. In this section, focus on compatibility risk from an unchanged interface whose documented/interface-doc contract changes. Internal refactors belong here only when they intentionally change that documented contract; observable but undocumented behavior is not a `B#` unless this RFC updates the contract.
 
-**Per-break structure.** Number each entry `B1`, `B2`, … so §6 `Covers` and §7 "Done when" can cite it by ID; each entry is one labeled block of 4 lines:
+**Recommended: 1–5 entries.** Each entry pins one observable way a previously-working caller stops working or observes a changed result under the unchanged interface/documented surface; fan-out from one root change collapses into one entry, independent breaks split. >5 usually means the RFC bundles too much — consider splitting it.
+
+**Per-contract-change structure.** Number each entry `B1`, `B2`, … so §6 `Covers` can cite it by ID; each entry is one labeled block of 4 lines:
 
 - **B1.**
-  - **Breaks:** the exact signature, schema, wire format, or semantic that changes — cite the §3.2 subsection that pins the new contract.
-  - **Symptom on un-migrated caller:** the exact compile error, runtime exception, log line, wire mismatch, or wrong-but-silent output the caller observes. "It will fail" / "callers must update" / "behavior changes" are placeholders, not symptoms.
-  - **Migration:** the concrete command, codemod, version bump, or config flip that resolves the symptom. If non-mechanical, say so and cite the existing runbook — never "we will document".
-  - **Regression coverage:** the §6 row (`T#`) that exercises the new behavior on previously-succeeding input and asserts the changed outcome — every B# must have one (the row's `Covers` cell cites the `B#` back), and it transitions red→green through §7 like any other test. "We will add a test" is a placeholder, not coverage.
+  - **Contract change:** the exact documented semantic, schema interpretation, wire meaning, or interface-doc contract that changes while the interface shape remains available — cite the §3.2 subsection that pins the new contract.
+  - **Symptom on un-migrated caller:** the exact runtime exception, log line, wire mismatch, or wrong-but-silent output the caller observes. "It will fail" / "callers must update" / "behavior changes" are placeholders, not symptoms.
+  - **Migration:** the concrete command, codemod, version bump, or config flip that resolves the symptom. It must land no later than the §7 phase that introduces the contract change. If non-mechanical, say so and cite the existing runbook — never "we will document".
+  - **Regression coverage:** the §6 row (`T#`) that exercises the new behavior on previously-succeeding input and asserts the changed outcome — every B# must have one (the row's `Covers` cell cites the `B#` back), and it transitions red→green through §7 like any other test, turning green no later than the phase that introduces the contract change. "We will add a test" is a placeholder, not coverage.
 
 **Don't:**
 
 - Invent a break to fill the slot — if the RFC is additive, Skip.
-- List breaks still hidden behind a deprecation alias — record them the cycle the alias is removed.
-- List internal refactors or cosmetic renames invisible at the public boundary.
+- List direct interface-shape breaks for new behavior — use the additive TDD migration model instead, and treat final removal of an unused old interface as separate cleanup.
+- List internal refactors or cosmetic renames that do not change a documented/interface-doc contract.
 
-**Cross-section consistency:** every `B#` entry pairs with at least one §6 row that cites it in `Covers` and exercises the new behavior on previously-succeeding input.}
+**Cross-section consistency:** every `B#` entry pairs with at least one §6 row that cites it in `Covers`, exercises the new behavior on previously-succeeding input, and turns green no later than the §7 phase that introduces the contract change.}
 
 **TEMPLATE EXAMPLE BEGIN**
 
@@ -289,12 +248,12 @@ Why it works: invokes the Skip clause for the genuine reason — a newly added e
 **Bad:**
 
 > - **B1.**
->   - **Breaks:** Existing math code may need updates.
->   - **Symptom on un-migrated caller:** Build errors or unexpected results.
+>   - **Contract change:** Existing math code may need updates.
+>   - **Symptom on un-migrated caller:** Runtime errors or unexpected results.
 >   - **Migration:** We will document the upgrade path before release.
 >   - **Regression coverage:** Tests will be added to cover the changes.
 
-Why it fails: the GCD RFC adds a new file to a project that previously had no GCD function — there is *nothing* to break, so the right answer is the Skip clause, not invented rows; "Existing math code may need updates" names no signature, no §3.2 hook, and no observable change — the vague placeholder the rule forbids; "Build errors or unexpected results" wraps a vague second clause around an over-broad first ("build errors") and joins them by `or`, so a caller cannot tell which to grep for — a real Symptom names one observable per entry, e.g., `error: too few arguments to function 'gcd'`; "We will document the upgrade path before release" is the banned `we will document` pattern, with the future-tense framing making the §4 entry depend on an artifact that does not yet exist when the RFC is reviewed; "Tests will be added to cover the changes" is that same future-tense placeholder one line down — a real Regression coverage line cites the exact §6 `T#` that exercises the new behavior on previously-succeeding input.
+Why it fails: the GCD RFC adds a new file to a project that previously had no GCD function — there is *nothing* to break, so the right answer is the Skip clause, not invented rows; "Existing math code may need updates" names no documented contract, no §3.2 hook, and no observable change — the vague placeholder the rule forbids; "Runtime errors or unexpected results" wraps two vague outcomes together and joins them by `or`, so a caller cannot tell which signal to grep for — a real Symptom names one observable per entry, e.g., `gcd(0, 0)` now returns `0` where the prior documented contract required an exception; "We will document the upgrade path before release" is the banned `we will document` pattern, with the future-tense framing making the §4 entry depend on an artifact that does not yet exist when the RFC is reviewed; "Tests will be added to cover the changes" is that same future-tense placeholder one line down — a real Regression coverage line cites the exact §6 `T#` that exercises the new behavior on previously-succeeding input.
 
 **TEMPLATE EXAMPLE END**
 
@@ -304,20 +263,20 @@ Why it fails: the GCD RFC adds a new file to a project that previously had no GC
 
 **Recommended: 1–4 concerns.** Each entry pins one specific attack or failure mode plus its mitigation; variants of the same attack (e.g., several malformed-input shapes the same parser rejects) collapse into one entry, distinct attacks split. >4 usually means the RFC bundles a security-sensitive surface large enough to consider splitting.
 
-**Per-concern structure.** Number each entry `S1`, `S2`, … so §6 `Covers` and §7 "Done when" can cite it by ID; each entry is one labeled block of 3 lines:
+**Per-concern structure.** Number each entry `S1`, `S2`, … so §6 `Covers` can cite it by ID; each entry is one labeled block of 3 lines:
 
 - **S1.**
   - **Threat:** the specific attack/failure mode plus the trigger (input shape, operation, or caller) that exposes it. "Possible vulnerability" / "may be unsafe" / "input must be validated" are placeholders, not threats.
-  - **Mitigation:** the code-level check, library call, schema constraint, or config flag that prevents it — cite the §3.2 subsection (or §3.1 component) that pins the enforcement point. "Validate input" / "sanitize before use" without naming the validator are placeholders.
-  - **Enforcement:** the §6 row (`T#`) that fires the trigger input and asserts the rejection/sanitization/safe outcome — every S# must have one, and it transitions red→green through §7 like any other test (its mitigation lands in the phase that exposes the trigger surface, per the cross-section rule). A build-time guard (static-analysis lint, repo config value) may *back up* that row but never replaces it. "We will harden" / "code review will catch it" / "monitoring will alert" are placeholders, not enforcement.
+  - **Mitigation:** the code-level check, library call, schema constraint, or config flag that prevents it — cite the §3.2 subsection (or §3.1 component) that pins the enforcement point, and land it no later than the §7 phase that exposes the trigger surface. "Validate input" / "sanitize before use" without naming the validator are placeholders.
+  - **Enforcement:** the §6 row (`T#`) that fires the trigger input and asserts the rejection/sanitization/safe outcome — every S# must have one, and it transitions red→green through §7 like any other test, turning green no later than the phase that exposes the trigger surface. A build-time guard (static-analysis lint, repo config value) may *back up* that row but never replaces it. "We will harden" / "code review will catch it" / "monitoring will alert" are placeholders, not enforcement.
 
 **Don't:**
 
 - Pad with generic threats (XSS, SQLi, CSRF, buffer overflow, path traversal, ...) the code path does not actually expose — every "N/A" row a reviewer reads to dismiss steals attention from the real concern. If every entry would be non-applicable, invoke the Skip clause instead.
 - List threats already neutralized upstream (framework escaping, platform sandbox, transport TLS) unless this RFC introduces a new path that bypasses them — record the bypass, not the upstream defense.
-- Cite a Mitigation that does not yet exist in code — "we will add a sanitizer", "we plan to enforce ..." — the enforcement point must be in this RFC's diff or already in the repo before §5 cites it.
+- Cite a Mitigation that is not pinned in §3.1/§3.2 or already-existing code — "we will add a sanitizer", "we plan to enforce ..." without naming the validator/enforcement point is a placeholder.
 
-**Cross-section consistency:** every `S#` entry pairs with at least one §6 row that cites it in `Covers` and exercises the trigger input, asserting the rejection, sanitization, or safe outcome.}
+**Cross-section consistency:** every `S#` entry pairs with at least one §6 row that cites it in `Covers`, exercises the trigger input, asserts the rejection, sanitization, or safe outcome, and turns green no later than the §7 phase that exposes the trigger surface.}
 
 **TEMPLATE EXAMPLE BEGIN**
 
@@ -350,7 +309,7 @@ Why it fails: `gcd` takes two `uint32_t` arguments by value with no array access
 
 ## 6. Testing Strategy
 
-{**Recommended: 3–10 scenarios.** Each row is one executable test case tied to at least one of a §2 Goal `G#`, a §4 break `B#`, or a §5 concern `S#` — a row may cover only a `B#` or `S#` with no `G#` (e.g., a malformed-input rejection that serves a §5 concern but no functional Goal). >10 usually means rows conflate sibling scenarios — collapse inputs that share one Goal and one setup pattern into one row.
+{**Recommended: 1–10 scenarios.** At least one row must exercise the normal/happy path for a testable Goal. Add edge-path, error-path, migration, and security rows only when the contract or risk warrants them; a documented edge outcome (e.g., `gcd(0, 0) = 0`) is an edge path, not an error path. Each row is one executable test case tied to at least one of a §2 Goal `G#`, a §4 break `B#`, or a §5 concern `S#` — a row may cover only a `B#` or `S#` with no `G#` (e.g., a malformed-input rejection that serves a §5 concern but no functional Goal). >10 usually means rows conflate sibling scenarios — collapse inputs that share one Goal and one setup pattern into one row.
 
 **Per-row structure.** One markdown table, columns in this order:
 
@@ -383,13 +342,14 @@ Why it fails: `gcd` takes two `uint32_t` arguments by value with no array access
 
 > | # | Scenario | Input / Setup | Expected Result | Covers | Level |
 > |---|----------|---------------|-----------------|--------|-------|
-> | T1 | Zero-input contract | `gcd(0, 0)`, `gcd(0, 7)`, `gcd(11, 0)` | Returns `0`, `7`, `11` respectively | G1 | unit |
-> | T2 | Equal inputs | `gcd(42, 42)` | Returns `42` | G1 | unit |
-> | T3 | Coprime pair | `gcd(17, 31)` | Returns `1` | G1 | unit |
-> | T4 | One side multiple of the other | `gcd(12, 36)`, `gcd(100, 25)` | Returns `12`, `25` respectively | G1 | unit |
-> | T5 | Worst-case Fibonacci pair (F47, F46) | `gcd(2971215073u, 1836311903u)` | Returns `1` | G1 | unit |
+> | T1 | Non-zero common divisor | `gcd(54, 24)` | Returns `6` | G1 | unit |
+> | T2 | Zero-input contract | `gcd(0, 0)`, `gcd(0, 7)`, `gcd(11, 0)` | Returns `0`, `7`, `11` respectively | G1 | unit |
+> | T3 | Equal inputs | `gcd(42, 42)` | Returns `42` | G1 | unit |
+> | T4 | Coprime pair | `gcd(17, 31)` | Returns `1` | G1 | unit |
+> | T5 | One side multiple of the other | `gcd(12, 36)`, `gcd(100, 25)` | Returns `12`, `25` respectively | G1 | unit |
+> | T6 | Worst-case Fibonacci pair (F47, F46) | `gcd(2971215073u, 1836311903u)` | Returns `1` | G1 | unit |
 
-Why it works: five rows cover the distinct edge classes of a GCD function (zero-input, equal, coprime, one-side-multiple, worst-case) — five rather than the 3-scenario floor because the function genuinely has five distinct edge classes, not because a simple proposal targets five — all tracing to the one Goal `G1`, each with exact inputs and exact return values a future author can port straight into a test function; T1 folds the three zero-input sub-cases the header pins into one row because they share `G1` and one setup pattern — splitting them into three rows only to pad `Covers` is exactly what the "Don't inflate" rule forbids; T5 picks the actual Fibonacci-pair worst case named in §3.2.1's Mechanism paragraph (two consecutive integers near `UINT32_MAX` would be coprime and finish in 2 steps, missing the bound entirely), giving the worst-case input a concrete hook instead of a vague "large numbers" row; the single Goal `G1` appears in every `Covers` cell (T1–T5), clearing the cross-section consistency rule that each §2 Goal be exercised by a test; Level stays `unit` throughout because a pure function has no integration boundary — escalating to `integration` or `e2e` would be ceremony the "pick the cheapest level" rule forbids.
+Why it works: T1 covers the required normal path for a non-zero pair; the remaining rows cover distinct edge classes of a GCD function (zero-input, equal, coprime, one-side-multiple, worst-case) — six rather than the 1-scenario floor because the function genuinely has those edge classes, not because a simple proposal targets six — all tracing to the one Goal `G1`, each with exact inputs and exact return values a future author can port straight into a test function; T2 folds the three zero-input sub-cases the header pins into one row because they share `G1` and one setup pattern — splitting them into three rows only to pad `Covers` is exactly what the "Don't inflate" rule forbids; T6 picks the actual Fibonacci-pair worst case named in §3.2.1's Mechanism paragraph (two consecutive integers near `UINT32_MAX` would be coprime and finish in 2 steps, missing the bound entirely), giving the worst-case input a concrete hook instead of a vague "large numbers" row; the single Goal `G1` appears in every `Covers` cell (T1–T6), clearing the cross-section consistency rule that each §2 Goal be exercised by a test; Level stays `unit` throughout because a pure function has no integration boundary — escalating to `integration` or `e2e` would be ceremony the "pick the cheapest level" rule forbids.
 
 **Bad:**
 
@@ -405,35 +365,35 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 
 ## 7. Implementation Plan
 
-{**Recommended: 2–5 phases.** Each phase is an independently shippable increment that leaves the project's local test suite green on its own — not a calendar week, not a sprint, not an OKR milestone. Add a phase only when the prior one must land and be verified before the next can start (public API before the tests that import it, flag-off deploy before flag-on default, schema migration before code that depends on the new columns). >5 phases usually means the RFC bundles too much — consider splitting it.
+{**Recommended: 2–5 phases.** Each phase is an independently shippable increment that leaves the project's local test suite green on its own — not a calendar week, not a sprint, not an OKR milestone. Add a phase only when the prior one must land and be verified before the next can start (flag-off deploy before flag-on default, schema migration before code that depends on the new columns, compatibility shim before caller migration). >5 phases usually means the RFC bundles too much — consider splitting it.
 
-**TDD red→green is the required phase ordering.** Each §6 row lands first in a "red" phase (the test is added in failing form, but the local test suite stays green — `xfail`/`expected-fail` markers run it and tolerate the failure, while `skip`/`pending` markers, a feature flag that gates the test, or a separate test target not yet wired into the local test runner keep it from running at all) before a later "green" phase that implements the behavior and clears the gate so the test asserts for real when the local test suite is run. Name the chosen red-phase mechanism in the red phase's `Scope` so a reviewer can verify the gate from the diff. The mechanisms are not interchangeable on one axis: `skip`/flag-gate/separate-target never run the test, so the suite stays green whatever the stub returns; `xfail` runs it and stays green only if the test actually fails against the stub — under a constant stub (e.g. `return 0;`), any row whose expected value the stub happens to match will XPASS, which strict-`xfail` frameworks report as a failure. Default to `skip`/flag-gate; reach for `xfail` only when the stub makes every marked row fail. This guarantees ≥2 phases for any RFC — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
+**TDD red→green is the required phase ordering.** Each §6 row lands first in a "red" phase before a later "green" phase implements the behavior and clears the gate so the test asserts for real in the local test suite. A red phase may include the minimum contract surface and stub needed to compile or execute the red tests; the forbidden collapse is landing the behavior that turns those rows green in the same phase as the rows themselves. A red phase has two observable properties: (1) the row's assertion is executable and has a named red-verification command or mode that fails against the current stub/behavior, or it is marked strict `xfail`/`expected-fail` and demonstrably fails; and (2) the project's default local test suite still stays green, either because strict `xfail` tolerates the expected failure or because `skip`/`pending`, a feature flag, or a separate test target gates the row out of the default run. `skip`/flag-gate/separate-target by themselves are not red evidence because they never execute the assertion; when using one, name the red-verification command or mode in the red phase's `Scope` and `Done when` so a reviewer can verify both the failing assertion and the green default suite from the diff and phase output. Default to `skip`/flag-gate for keeping the default suite green, but pair it with a red-verification command; reach for strict `xfail` only when the stub makes every marked row fail. This guarantees ≥2 phases for any RFC — a single phase shipping a `T#` row alongside its own implementation erases the verifiable transition the workflow exists to enforce.
 
 **Per-phase structure (3 lines):**
 
-- **Scope:** the concrete deliverables this phase alone ships — files added or modified, migrations run, flags flipped, test binaries registered. "Implement the feature" / "add tests" / "polish" are placeholders, not scope.
+- **Scope:** the concrete deliverables this phase alone ships — files added or modified, migrations run, flags flipped, test binaries registered, and any `B#` contract change or `S#` trigger surface exposed by this phase. "Implement the feature" / "add tests" / "polish" are placeholders, not scope.
 - **Depends on:** the prior phase IDs (`P#`) this phase requires to land first, or `None` for the first phase. Name phases by ID, never by week or date.
-- **Done when:** the observable acceptance criteria that close the phase — cite §6 rows by `T#`, §2 Goals by `G#`, and any §4 break (`B#`) or §5 concern (`S#`) this phase lands, so a reader can verify completion by grepping the referenced artifacts. "Code review passes" / "tests green" without naming which rows are placeholders.
+- **Done when:** the observable acceptance criteria that close the phase — cite §6 rows by `T#` and name whether they are red (the red-verification command/mode fails while the default suite stays green through the named gate) or green (un-marked, asserting for real). Do not cite `G#`, `B#`, or `S#` here merely to prove coverage; those trace through §6 `Covers`. "Code review passes" / "tests green" without naming which rows are placeholders.
 
 **Don't:**
 
 - List dates or owners — an RFC reviews the plan, not the calendar or staffing, and both drift the moment schedules slip; phase IDs (`P1`, `P2`) survive re-ordering but "Week 3" does not.
 - Open with a "planning" phase or close with a "monitoring" phase — this RFC *is* the planning artifact, and a monitoring-only phase has no mergeable deliverable to close on.
-- Fold a real ordering constraint into one phase — if tests need the header to exist first, that is two phases with a `Depends on` edge, not one "implement + test" blob that erases the merge gate.
-- Ship a §6 row alongside its own implementation in one phase — that collapses TDD red→green into one phase, the project's local test suite never observes the row in red state, and the cross-section rule that each `T#` traces through both a red and a green phase fails.
+- Fold a real ordering constraint into one phase — if a migration, flag flip, or compatibility shim must be verified before dependent behavior can safely land, that is two phases with a `Depends on` edge, not one "do everything" blob that erases the merge gate.
+- Ship a §6 row alongside its own implementation in one phase — that collapses TDD red→green into one phase, the project never observes the row fail under a red-verification command/mode, and the cross-section rule that each `T#` traces through both a red and a green phase fails.
 - Defer the hard part with a bare placeholder — "P3: handle edge cases later" without a concrete `Scope` and `Done when` is the future-tense "we will document" pattern the writing instructions ban.
 
-**Cross-section consistency:** every `G#` from §2 appears in at least one phase's `Done when` clause (§2 non-testable Goals excepted). Every `T#` from §6 transitions red→green across phases — an earlier phase's `Done when` names the row as red (present but skipped/`xfail`/flag-gated, so the local test suite stays green), a later phase's `Done when` names it as green (un-marked, asserting for real). Every `B#` migration entry from §4 lands in the phase that introduces the contract break — never later, so un-migrated callers never see the new symptom without the migration shipping in the same phase. Every `S#` security concern from §5 lands in the phase that exposes the trigger surface, so the mitigation merges no later than the code it protects.}
+**Cross-section consistency:** every `T#` from §6 transitions red→green across phases — an earlier phase's `Done when` names the row as red with failing red-verification evidence and a green default local suite, and a later phase's `Done when` names it as green (un-marked, asserting for real). Coverage for Goals, compatibility changes, and security concerns is proven in §6 `Covers`, not by repeating `G#`/`B#`/`S#` in §7. However, when a phase introduces a §4 `B#` contract change or exposes a §5 `S#` trigger surface, the paired §6 `T#` rows must be named as green in that phase's `Done when` or in an earlier phase.}
 
-- **P1. {Red phase — lands the contract surface with the §6 rows present but skipped}.**
-  - **Scope:** {files this phase ships; name the red-phase marker (`xfail`/`skip`/flag-gate) that keeps the local test suite green}
+- **P1. {Red phase — lands the contract surface with the §6 rows executable-red and gated}.**
+  - **Scope:** {files this phase ships; name the red-verification command/mode that fails and the gate (`strict xfail`/`skip`/flag-gate/separate target) that keeps the default local test suite green}
   - **Depends on:** None
-  - **Done when:** {`T#` rows present in red (skipped) state with the local suite still green; cite the `G#` staged red}
+  - **Done when:** {`T#` rows fail under the named red-verification command/mode, and the default local suite stays green with the named gate}
 
 - **P2. {Green phase — implements the behavior and turns the §6 rows green}.**
   - **Scope:** {the implementation that replaces the stub; remove the red-phase markers so the `T#` rows assert for real}
   - **Depends on:** P1
-  - **Done when:** {`T#` rows pass un-skipped (`G#` green)}
+  - **Done when:** {`T#` rows pass un-gated}
 
 {Add P3 through P5 only when the prior phase is a genuine merge gate the next phase cannot cross.}
 
@@ -441,17 +401,17 @@ Why it fails: prose instead of the required table — no `#`, no `Covers`, no ro
 
 **Good:**
 
-> - **P1. Land `numkit` skeleton with red `T1`–`T5`.**
->   - **Scope:** add `numkit/include/numkit/gcd.h` per §3.2.1 (signature + zero-input doc-comment pinned in the **Unstated contract** paragraph); add `numkit/src/gcd.c` with a stub body `return 0;` so the project links; add `numkit/test/gcd_test.c` containing the five rows from §6 as separate test cases, each wrapped in the harness's `TEST_SKIP("pending RFC-NNN P2")` macro so the binary builds, runs, and reports the rows as skipped — the local test suite stays green; register `numkit` as a new leaf in the top-level project list per §3.1; register the test binary in the project's local test runner so it runs whenever the local test suite is invoked.
+> - **P1. Land `numkit` skeleton with red-verifiable `T1`–`T6`.**
+>   - **Scope:** add `numkit/include/numkit/gcd.h` per §3.2.1 (signature + zero-input doc-comment pinned in the **Unstated contract** paragraph); add `numkit/src/gcd.c` with a stub body `return 0;` so the project links; add `numkit/test/gcd_test.c` containing the six rows from §6 as separate test cases. Each test case bypasses its `TEST_SKIP("pending RFC-NNN P2")` wrapper only when `NUMKIT_GCD_RED=1` is set, so `NUMKIT_GCD_RED=1 numkit_gcd_test` runs the assertions and fails against the stub while the default local test suite builds, runs, reports the rows as skipped, and stays green; register `numkit` as a new leaf in the top-level project list per §3.1; register the test binary in the project's local test runner so it runs whenever the local test suite is invoked.
 >   - **Depends on:** None.
->   - **Done when:** the `uint32_t gcd(uint32_t, uint32_t)` signature from §3.2.1 exports from the header and its doc-comment pins `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n` verbatim — both halves of `G1`'s contract; `T1`–`T5` are present in skipped (red) state and the local test suite passes after the test binary registers (`G1` staged red, turned green in P2).
+>   - **Done when:** the `uint32_t gcd(uint32_t, uint32_t)` signature from §3.2.1 exports from the header and its doc-comment pins `gcd(0, 0) = 0` and `gcd(0, n) = gcd(n, 0) = n` verbatim; `NUMKIT_GCD_RED=1 numkit_gcd_test` reports `T1`–`T6` failing against the stub, and the default local test suite reports `T1`–`T6` skipped and passes after the test binary registers.
 >
-> - **P2. Implement `gcd` and turn `T1`–`T5` green.**
->   - **Scope:** replace the stub body in `numkit/src/gcd.c` with the iterative Euclidean loop pinned in §3.2.1's Mechanism paragraph; remove the `TEST_SKIP` wrappers from `T1`–`T5` so they assert for real on every local test run.
+> - **P2. Implement `gcd` and turn `T1`–`T6` green.**
+>   - **Scope:** replace the stub body in `numkit/src/gcd.c` with the iterative Euclidean loop pinned in §3.2.1's Mechanism paragraph; remove the `TEST_SKIP` wrappers and `NUMKIT_GCD_RED` bypass from `T1`–`T6` so they assert for real on every local test run.
 >   - **Depends on:** P1.
->   - **Done when:** `T1`–`T5` all pass un-skipped on the first clean local test run after the wrappers come off (`G1` green).
+>   - **Done when:** `T1`–`T6` all pass un-gated on the first clean local test run after the wrappers come off.
 
-Why it works: two phases — matching the required TDD red→green ordering and the simple-proposal minimum — because P1 lands the contract surface (header + linkable stub + test rows) with every §6 row present but skipped (red), and P2 turns the rows green by replacing the stub with the real loop and removing the skip wrappers; P1 ships the header alongside a stub `.c` so the project still builds and links, satisfying the "phase leaves the local test suite green" rule even though no real implementation has landed yet; the red phase keeps the local test suite green via the `TEST_SKIP` macro the rule requires, and the wrapper is named in P1's `Scope` so a reviewer can verify the gate from the diff alone; P2 names P1 as a `Depends on` because the skip wrappers can only come off once the implementation exists, so the edge is a real merge gate instead of ceremony; each `T#` traces through both phases — red in P1's `Done when`, green in P2's — satisfying the §6 → §7 red→green cross-section rule; `Done when` clauses cite the exact §6 row IDs (`T1`–`T5`) and the single §2 Goal ID (`G1`) so the Goal has a traceable completion hook a reviewer can verify by grepping the §6 table and the header doc-comment; P1's `Done when` references §3.2.1's **Unstated contract** paragraph by name, so the zero-input contract cannot get dropped between design and merge; no dates, no owners, no "phase 0: design review", no "phase N: monitor" — matches every item on the Don't list.
+Why it works: two phases — matching the required TDD red→green ordering and the simple-proposal minimum — because P1 lands the contract surface (header + linkable stub + test rows) with every §6 row executable under a red-verification mode and gated out of the default suite, and P2 turns the rows green by replacing the stub with the real loop and removing the skip wrappers; P1 ships the header alongside a stub `.c` so the project still builds and links, satisfying the "phase leaves the local test suite green" rule even though no real implementation has landed yet; the red phase proves the assertions are actually red via `NUMKIT_GCD_RED=1 numkit_gcd_test`, then keeps the default local test suite green via the `TEST_SKIP` macro, and both mechanisms are named in P1's `Scope` so a reviewer can verify them from the diff and phase output; P2 names P1 as a `Depends on` because the skip wrappers can only come off once the implementation exists, so the edge is a real merge gate instead of ceremony; each `T#` traces through both phases — red-verification failure in P1's `Done when`, green in P2's — satisfying the §6 → §7 red→green cross-section rule; `Done when` clauses cite the exact §6 row IDs (`T1`–`T6`) and their red/green status, while §6 `Covers` carries the `G1` trace; P1's `Done when` references §3.2.1's **Unstated contract** paragraph by name, so the zero-input contract cannot get dropped between design and merge; no dates, no owners, no "phase 0: design review", no "phase N: monitor" — matches every item on the Don't list.
 
 **Bad:**
 
@@ -460,6 +420,6 @@ Why it works: two phases — matching the required TDD red→green ordering and 
 > - **Phase 3 (Week 4):** Code review and address review feedback. Owner: TBD.
 > - **Phase 4 (Week 5+):** Monitor production and iterate on edge cases as they surface.
 
-Why it fails: every phase is a calendar week (`Week 1`, `Week 2–3`, …) — the "a phase is an independently shippable increment, not a timebox" rule forbids this directly, and any slip on Phase 1 cascades into a meaningless "Phase 2 is late" status with no merge gate a reviewer can point at; lists owners (`Alice`, `Bob`, `TBD`) — the Don't list bans staffing because it drifts and an RFC reviews the plan, not who holds the pager; "Phase 1: Design and kickoff" is the banned open-with-planning pattern — this RFC *is* the design artifact, so Phase 1 cannot also be design; "Implement `gcd` and write comprehensive tests" collapses two phases with a real ordering edge (tests cannot compile before the header merges) into one, erasing the verification point a reviewer needs to grant or refuse Phase 2 — and worse, ships every §6 row alongside its own implementation, so the local test suite never observes any `T#` in red state and the TDD red→green transition the rule requires never occurs; "comprehensive tests" is the banned vague phrase with no `T#` row to cite and no `G#` to prove complete; Phase 3 ("code review and address review feedback") is not a deliverable — every phase ships through code review, so promoting it to a phase pads the count without adding a merge gate; Phase 4 ("monitor production and iterate") has no `Scope`, no `Depends on`, no `Done when`, and no end state — a monitoring-only phase has no mergeable deliverable to close on; no phase declares a `Done when` line, so `G1` has no traceable completion hook and the cross-section consistency rule fails.
+Why it fails: every phase is a calendar week (`Week 1`, `Week 2–3`, …) — the "a phase is an independently shippable increment, not a timebox" rule forbids this directly, and any slip on Phase 1 cascades into a meaningless "Phase 2 is late" status with no merge gate a reviewer can point at; lists owners (`Alice`, `Bob`, `TBD`) — the Don't list bans staffing because it drifts and an RFC reviews the plan, not who holds the pager; "Phase 1: Design and kickoff" is the banned open-with-planning pattern — this RFC *is* the design artifact, so Phase 1 cannot also be design; "Implement `gcd` and write comprehensive tests" collapses two phases with a real ordering edge (tests cannot compile before the header merges) into one, erasing the verification point a reviewer needs to grant or refuse Phase 2 — and worse, ships every §6 row alongside its own implementation, so the local test suite never observes any `T#` in red state and the TDD red→green transition the rule requires never occurs; "comprehensive tests" is the banned vague phrase with no `T#` row to cite; Phase 3 ("code review and address review feedback") is not a deliverable — every phase ships through code review, so promoting it to a phase pads the count without adding a merge gate; Phase 4 ("monitor production and iterate") has no `Scope`, no `Depends on`, no `Done when`, and no end state — a monitoring-only phase has no mergeable deliverable to close on; no phase declares a `Done when` line, so no `T#` row has a traceable red→green path.
 
 **TEMPLATE EXAMPLE END**

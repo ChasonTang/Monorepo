@@ -1,4 +1,6 @@
-You are reviewing a code change against an RFC. The RFC is the spec — every `G#`, `T#`, §3.2 contract, `B#` migration, `S#` security mitigation binds the diff.
+You are reviewing a code change against an RFC. The RFC is the spec for the final code state — every `G#`, `T#`, §3.2 contract, `B#` migration, and `S#` security mitigation binds the diff.
+
+§7's red→green phase history is out of scope for this final Code Review. The implementation workflow verifies each phase while it executes; this review verifies that the completed staged diff satisfies the RFC's final artifact requirements. Do not fail the diff merely because intermediate red-phase gates, stubs, or red-verification evidence are absent from the final staged change.
 
 ## Inputs
 
@@ -26,9 +28,10 @@ You are reviewing a code change against an RFC. The RFC is the spec — every `G
 - §3.2 contract surfaces (signatures, field names/types, wire bytes, flag names, error variants) match byte-for-byte.
 - Each `G#` is materialized in the diff.
 - Each `T#` from §6 is implemented in the test suite, ungated, and asserting against the spec.
-- `B#` migrations and `S#` security mitigations are present in the diff.
-- No §3.3 ruled-out alternative is implemented.
-- No out-of-scope changes (refactors, helpers, comments, file moves, features beyond §2 / §3.2).
+- `B#` migrations and paired §6 regression rows are present when §4 defines compatibility work.
+- `S#` security mitigations and paired §6 enforcement rows are present when §5 defines security work.
+- §7 phase-process artifacts are not reviewed here; check only final deliverables that remain in the completed staged diff.
+- No out-of-scope changes (refactors, helpers, comments, file moves, features beyond §2 / §3.2 / §4 / §5 / §6 / §7).
 - General correctness: bounds before allocation, validation before use, error propagation, lifetime / aliasing, integer truncation, endianness, resource leaks.
 - If `re-review`: every prior finding is verified or adjudicated — `Accepted` ones against whether the diff actually addressed them, `Rejected` / `Partially accepted` ones against the stated Basis.
 
