@@ -2,7 +2,7 @@
 
 ## Writing Instructions (delete before submitting)
 
-These rules override the instinct to "fill every section." Except for the counts and lengths marked *Recommended*, everything below is a hard constraint; those ranges bind only upward: the lower bound of every stated range (e.g. `Recommended: 1–10`) is a hard minimum — a section with a Skip/None clause may invoke that instead — while the upper figure is a recommendation you may exceed when the proposal genuinely warrants it. Lengths have no hard floor; shorter is fine for simple changes.
+These rules override the instinct to "fill every section." Everything below is a hard constraint, except for the counts and lengths marked *Recommended*. For those *Recommended* ranges (e.g. `Recommended: 1–10`): the lower bound is a hard minimum — a section with a Skip/None clause may invoke that instead — and the upper figure is a recommendation you may exceed when the proposal genuinely warrants it. Lengths have no hard floor; shorter is fine for simple changes.
 
 **Do not fabricate.** Do not invent facts, code paths, APIs, behavior, data, test results, citations, or rationale. If evidence is missing, state that it is unknown or needs verification, then name the source that must be checked.
 
