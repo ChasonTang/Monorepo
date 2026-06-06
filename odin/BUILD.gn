@@ -21,7 +21,7 @@
 #                          Linux only — T8's fmemopen is hidden behind that
 #                          feature macro by glibc.
 
-source_set("odin") {
+source_set("odin_core") {
   sources = [
     "cli.c",
     "cli.h",
@@ -38,12 +38,47 @@ source_set("odin") {
   ]
 }
 
+source_set("odin") {
+  deps = [
+    ":odin_core",
+    ":odin_event_loop",
+  ]
+}
+
+source_set("odin_event_loop") {
+  sources = [
+    "event_loop.c",
+    "event_loop.h",
+  ]
+}
+
+config("odin_event_loop_testing_config") {
+  defines = [ "ODIN_EVENT_LOOP_TESTING" ]
+}
+
+source_set("odin_event_loop_testing") {
+  testonly = true
+
+  sources = [
+    "event_loop.h",
+    "event_loop_internal_test.h",
+    "event_loop_testing.c",
+  ]
+
+  configs += [ ":odin_event_loop_testing_config" ]
+}
+
 executable("odin_main") {
   output_name = "odin"
 
   sources = [ "main.c" ]
 
   deps = [ ":odin" ]
+
+  if (target_os == "linux") {
+    configs -= [ "//build:visibility_hidden" ]
+    configs += [ "//build:visibility_default" ]
+  }
 }
 
 action("odin_symlinks") {
@@ -77,6 +112,7 @@ executable("odin_unittests") {
   sources = [
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
+    "event_loop_unittests.cpp",
     "host_addr_unittests.cpp",
     "http_connect_unittests.cpp",
     "parse_util_unittests.cpp",
@@ -84,15 +120,21 @@ executable("odin_unittests") {
   ]
 
   deps = [
-    ":odin",
+    ":odin_core",
+    ":odin_event_loop_testing",
     "//googletest:gtest",
   ]
 
   data_deps = [ ":odin_cli_artifacts" ]
 
-  configs += [ "//build:cxx17" ]
+  configs += [
+    ":odin_event_loop_testing_config",
+    "//build:cxx17",
+  ]
 
   if (target_os == "linux") {
     defines = [ "_GNU_SOURCE" ]
+    configs -= [ "//build:visibility_hidden" ]
+    configs += [ "//build:visibility_default" ]
   }
 }

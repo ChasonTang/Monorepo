@@ -214,7 +214,7 @@ toolchain("clang_linux_x64") {
     # The driver auto-adds --as-needed -lunwind --no-as-needed; pthread/dl are
     # not added by the driver, so we wrap them manually so pure-C targets don't
     # carry spurious DT_NEEDED entries.
-    command = "$ld $link_flags -shared -Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\$ORIGIN {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
+    command = "$ld $link_flags -shared -Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
     rspfile_content = "{{inputs}}"
     default_output_extension = ".so"
     output_prefix = "lib"
@@ -226,7 +226,7 @@ toolchain("clang_linux_x64") {
     rspfile = "$outfile.rsp"
 
     # -Wl,-rpath,$ORIGIN ↔ -Wl,-rpath,@executable_path on macOS.
-    command = "$ld $link_flags -Wl,-rpath,\$ORIGIN {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
+    command = "$ld $link_flags -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
     rspfile_content = "{{inputs}}"
     outputs = [ outfile ]
   }
