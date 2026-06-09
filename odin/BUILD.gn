@@ -42,6 +42,7 @@ source_set("odin") {
   deps = [
     ":odin_core",
     ":odin_event_loop",
+    ":odin_relay",
   ]
 }
 
@@ -50,6 +51,15 @@ source_set("odin_event_loop") {
     "event_loop.c",
     "event_loop.h",
   ]
+}
+
+source_set("odin_relay") {
+  sources = [
+    "relay.c",
+    "relay.h",
+  ]
+
+  public_deps = [ ":odin_event_loop" ]
 }
 
 config("odin_event_loop_testing_config") {
@@ -66,6 +76,10 @@ source_set("odin_event_loop_testing") {
   ]
 
   configs += [ ":odin_event_loop_testing_config" ]
+}
+
+config("odin_relay_testing_config") {
+  defines = [ "ODIN_RELAY_TESTING" ]
 }
 
 executable("odin_main") {
@@ -117,6 +131,10 @@ executable("odin_unittests") {
     "http_connect_unittests.cpp",
     "parse_util_unittests.cpp",
     "protocol_unittests.cpp",
+    "relay.h",
+    "relay_internal_test.h",
+    "relay_testing.c",
+    "relay_unittests.cpp",
   ]
 
   deps = [
@@ -129,6 +147,7 @@ executable("odin_unittests") {
 
   configs += [
     ":odin_event_loop_testing_config",
+    ":odin_relay_testing_config",
     "//build:cxx17",
   ]
 
