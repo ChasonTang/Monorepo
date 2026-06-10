@@ -44,6 +44,8 @@ source_set("odin") {
     ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
+    ":odin_transport",
+    ":odin_transport_fd",
   ]
 }
 
@@ -72,6 +74,25 @@ source_set("odin_dial") {
   public_deps = [ ":odin_event_loop" ]
 }
 
+source_set("odin_transport") {
+  sources = [
+    "transport.c",
+    "transport.h",
+  ]
+}
+
+source_set("odin_transport_fd") {
+  sources = [
+    "transport_fd.c",
+    "transport_fd.h",
+  ]
+
+  public_deps = [
+    ":odin_event_loop",
+    ":odin_transport",
+  ]
+}
+
 config("odin_event_loop_testing_config") {
   defines = [ "ODIN_EVENT_LOOP_TESTING" ]
 }
@@ -94,6 +115,10 @@ config("odin_relay_testing_config") {
 
 config("odin_dial_testing_config") {
   defines = [ "ODIN_DIAL_TESTING" ]
+}
+
+config("odin_transport_fd_testing_config") {
+  defines = [ "ODIN_TRANSPORT_FD_TESTING" ]
 }
 
 executable("odin_main") {
@@ -153,6 +178,13 @@ executable("odin_unittests") {
     "relay_internal_test.h",
     "relay_testing.c",
     "relay_unittests.cpp",
+    "transport.h",
+    "transport_fd.h",
+    "transport_fd_internal_test.h",
+    "transport_fd_testing.c",
+    "transport_fd_unittests.cpp",
+    "transport_testing.c",
+    "transport_unittests.cpp",
   ]
 
   deps = [
@@ -167,6 +199,7 @@ executable("odin_unittests") {
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_relay_testing_config",
+    ":odin_transport_fd_testing_config",
     "//build:cxx17",
   ]
 
