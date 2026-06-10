@@ -41,6 +41,7 @@ source_set("odin_core") {
 source_set("odin") {
   deps = [
     ":odin_core",
+    ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
   ]
@@ -57,6 +58,15 @@ source_set("odin_relay") {
   sources = [
     "relay.c",
     "relay.h",
+  ]
+
+  public_deps = [ ":odin_event_loop" ]
+}
+
+source_set("odin_dial") {
+  sources = [
+    "dial.c",
+    "dial.h",
   ]
 
   public_deps = [ ":odin_event_loop" ]
@@ -80,6 +90,10 @@ source_set("odin_event_loop_testing") {
 
 config("odin_relay_testing_config") {
   defines = [ "ODIN_RELAY_TESTING" ]
+}
+
+config("odin_dial_testing_config") {
+  defines = [ "ODIN_DIAL_TESTING" ]
 }
 
 executable("odin_main") {
@@ -126,6 +140,10 @@ executable("odin_unittests") {
   sources = [
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
+    "dial.h",
+    "dial_internal_test.h",
+    "dial_testing.c",
+    "dial_unittests.cpp",
     "event_loop_unittests.cpp",
     "host_addr_unittests.cpp",
     "http_connect_unittests.cpp",
@@ -146,6 +164,7 @@ executable("odin_unittests") {
   data_deps = [ ":odin_cli_artifacts" ]
 
   configs += [
+    ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_relay_testing_config",
     "//build:cxx17",
