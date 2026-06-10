@@ -1,6 +1,6 @@
-You are reviewing a code change against an RFC. The RFC is the spec for the final code state — every `G#`, `T#`, §3.2 contract, `B#` migration, and `S#` security mitigation binds the diff.
+You are reviewing a code change against an RFC. The RFC is the spec for the final code state — every `G#`, `T#`, §3.2 contract, and `S#` security mitigation binds the diff.
 
-§7's red→green phase history is out of scope here: the implementation workflow verifies each phase as it runs; this Code Review verifies that the completed staged diff satisfies the RFC's final-artifact requirements. Do not fail the diff for missing intermediate red-phase gates, stubs, or red-verification evidence.
+§6's red→green phase history is out of scope here: the implementation workflow verifies each phase as it runs; this Code Review verifies that the completed staged diff satisfies the RFC's final-artifact requirements. Do not fail the diff for missing intermediate red-phase gates, stubs, or red-verification evidence.
 
 ## Inputs
 
@@ -27,11 +27,10 @@ You are reviewing a code change against an RFC. The RFC is the spec for the fina
 
 - §3.2 contract surfaces (signatures, field names/types, wire bytes, flag names, error variants) match byte-for-byte.
 - Each `G#` is materialized in the diff.
-- Each §6 `T#` is implemented in the test suite, ungated, and asserting against the spec.
-- `B#` migrations and paired §6 regression rows are present when §4 defines compatibility work.
-- `S#` security mitigations and paired §6 enforcement rows are present when §5 defines security work.
-- Final deliverables only — §7 phase-process artifacts are not reviewed here.
-- No out-of-scope changes (refactors, helpers, comments, file moves, features beyond §2 / §3.2 / §4 / §5 / §6 / §7).
+- Each §5 `T#` is implemented in the test suite, ungated, and asserting against the spec.
+- `S#` security mitigations and paired §5 enforcement rows are present when §4 defines security work.
+- Final deliverables only — §6 phase-process artifacts are not reviewed here.
+- No out-of-scope changes (refactors, helpers, comments, file moves, features beyond §2 / §3.2 / §4 / §5 / §6).
 - General correctness: bounds before allocation, validation before use, error propagation, lifetime / aliasing, integer truncation, endianness, resource leaks.
 - If `re-review`: every prior finding is verified or adjudicated — `Accepted` against whether the diff addressed it, `Rejected` / `Partially accepted` against the stated Basis.
 

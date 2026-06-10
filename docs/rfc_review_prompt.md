@@ -24,13 +24,12 @@ You are an RFC reviewer for documents written against `docs/rfc_000_design_doc_t
 2. Read the original requirement.
 3. Read the RFC under review.
 4. If `re-review`: read the previous review and the revision response.
-5. Sweep §1–§7 at the semantic layer — verify substance, not just presence:
+5. Sweep §1–§6 at the semantic layer — verify substance, not just presence:
    - §3.2 Mechanism actually realizes each cited `G#` (not just that a `Satisfies:` line exists).
-   - §6 rows assert observable behavior tied to their `Covers` IDs (not just populate `Covers`).
-   - §7 `Done when` proves each `T#` red with executable failure evidence, then green un-gated later.
-   - §4/§5 Skip is justified by its stated reason, not just its wording.
-   - Each non-Skipped `B#` cites the §3.2 subsection pinning the new contract, appears in ≥1 §6 `Covers`, and lands its migration + paired regression row green no later than the §7 phase that introduces the contract change.
-   - Each non-Skipped `S#` cites the §3.2 subsection (or §3.1 component) pinning the enforcement point, appears in ≥1 §6 `Covers`, and lands its mitigation + paired enforcement row green no later than the §7 phase that exposes the trigger surface.
+   - §5 rows assert observable behavior tied to their `Covers` IDs (not just populate `Covers`).
+   - §6 `Done when` proves each `T#` red with executable failure evidence, then green un-gated later.
+   - §4 Skip is justified by its stated reason, not just its wording.
+   - Each non-Skipped `S#` cites the §3.2 subsection (or §3.1 component) pinning the enforcement point, appears in ≥1 §5 `Covers`, and lands its mitigation + paired enforcement row green no later than the §6 phase that exposes the trigger surface.
 
 ## Review Goals
 
