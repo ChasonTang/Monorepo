@@ -1,10 +1,13 @@
 // odin/relay_unittests.cpp
 //
-// Unit tests T1-T11 from §6 of odin/docs/rfc_011_bidirectional_byte_relay.md.
+// Unit tests T1-T16 from §6 of odin/docs/rfc_014_relay_v2_transport.md.
 //
-// Each row runs the event loop, so every row executes under the same fork +
-// waitpid 2 s deadline fixture RFC-010 §6 established (replicated below as
-// RelayRunDeadline) plus a per-row watchdog timer.
+// T1-T7 and T16 drive the relay against a test-local fake transport (no fd, no
+// loop), injecting readiness by calling the exported odin_relay_ready
+// directly. T8-T15 are integration tests over two real odin_fd_transport
+// endpoints plus a live odin_event_loop, reusing the RFC-011 fork + waitpid 2 s
+// deadline harness (replicated below as RelayRunDeadline) plus a per-row
+// watchdog timer.
 
 #include "odin/relay.h"
 
@@ -15,8 +18,8 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -30,8 +33,10 @@
 
 #include "odin/event_loop.h"
 #include "odin/event_loop_internal_test.h"
-#if defined(ODIN_RELAY_TESTING)
-#include "odin/relay_internal_test.h"
+#include "odin/transport.h"
+#include "odin/transport_fd.h"
+#if defined(ODIN_TRANSPORT_FD_TESTING)
+#include "odin/transport_fd_internal_test.h"
 #endif
 
 #include "gtest/gtest.h"
@@ -41,7 +46,7 @@
 namespace {
 
 // The relay's fixed per-direction buffer capacity (§3.2.2 CAP). Mirrored here
-// for T2's saturation gate; the relay does not export it.
+// for T13's saturation gate; the relay does not export it.
 constexpr size_t kCap = 65536;
 
 // Replicated fork + waitpid 2 s deadline fixture (RFC-010 §6). The child runs
@@ -192,7 +197,7 @@ void PinSocketBuf(int fd, int size) {
 }
 
 // Arrival barrier (§6): poll both relay fds for read/error/hangup until both
-// report ready, without read() or getsockopt(SO_ERROR) so the pending RST the
+// report ready, without read() or odin_transport_error so the pending RST the
 // relay later observes survives.
 void PollBothReady(int fd_a, int fd_b) {
   struct pollfd pfds[2];
@@ -262,10 +267,356 @@ std::string DrainToEof(int fd) {
 
 bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
+// --- Fake transport (T1-T7, T16) -------------------------------------------
+//
+// Embeds odin_transport_t as its first member; its vtable slots serve scripted
+// read/write/shutdown_write/error results, record each set_interest mask and
+// each destroy call, and accumulate written bytes. Readiness is injected by
+// calling odin_relay_ready(&fake.base, events, r) directly.
+
+enum ReadKind { kReadData, kReadEof, kReadAgain, kReadFail };
+
+struct ReadStep {
+  ReadKind kind;
+  std::string data;
+  int err;
+};
+
+ReadStep ReadData(const std::string &s) { return ReadStep{kReadData, s, 0}; }
+ReadStep ReadEof() { return ReadStep{kReadEof, std::string(), 0}; }
+ReadStep ReadAgain() { return ReadStep{kReadAgain, std::string(), 0}; }
+ReadStep ReadFail(int e) { return ReadStep{kReadFail, std::string(), e}; }
+
+enum { kWriteAccept = 0, kWriteAgain = 1, kWriteFail = 2 };
+
+struct FakeTransport {
+  odin_transport_t base;
+  std::deque<ReadStep> reads;
+  bool read_infinite = false;       // when deque empty, yield a full-len chunk
+  int write_mode = kWriteAccept;
+  int write_errno = 0;
+  std::string written;              // accepted bytes, in order
+  int shutdown_rc = 0;              // 0 success, -1 fail
+  int shutdown_errno = 0;
+  int shutdown_calls = 0;
+  int error_result = 0;             // odin_transport_error() return
+  std::vector<unsigned int> interests;  // each set_interest mask, in order
+  int destroy_calls = 0;
+};
+
+odin_transport_io_t FakeReadFn(odin_transport_t *t, void *buf, size_t len,
+                               size_t *out_n) {
+  FakeTransport *f = reinterpret_cast<FakeTransport *>(t);
+  if (!f->reads.empty()) {
+    const ReadStep s = f->reads.front();
+    f->reads.pop_front();
+    switch (s.kind) {
+      case kReadData: {
+        size_t n = s.data.size();
+        if (n > len) {
+          n = len;
+        }
+        std::memcpy(buf, s.data.data(), n);
+        *out_n = n;
+        return ODIN_TRANSPORT_OK;
+      }
+      case kReadEof:
+        *out_n = 0;
+        return ODIN_TRANSPORT_EOF;
+      case kReadAgain:
+        return ODIN_TRANSPORT_AGAIN;
+      case kReadFail:
+        errno = s.err;
+        return ODIN_TRANSPORT_IO_ERROR;
+    }
+  }
+  if (f->read_infinite) {
+    std::memset(buf, 0xAB, len);
+    *out_n = len;
+    return ODIN_TRANSPORT_OK;
+  }
+  return ODIN_TRANSPORT_AGAIN;
+}
+
+odin_transport_io_t FakeWriteFn(odin_transport_t *t, const void *buf, size_t len,
+                                size_t *out_n) {
+  FakeTransport *f = reinterpret_cast<FakeTransport *>(t);
+  if (f->write_mode == kWriteAgain) {
+    return ODIN_TRANSPORT_AGAIN;
+  }
+  if (f->write_mode == kWriteFail) {
+    errno = f->write_errno;
+    return ODIN_TRANSPORT_IO_ERROR;
+  }
+  f->written.append(static_cast<const char *>(buf), len);
+  *out_n = len;
+  return ODIN_TRANSPORT_OK;
+}
+
+int FakeShutdownFn(odin_transport_t *t) {
+  FakeTransport *f = reinterpret_cast<FakeTransport *>(t);
+  f->shutdown_calls += 1;
+  if (f->shutdown_rc != 0) {
+    errno = f->shutdown_errno;
+    return -1;
+  }
+  return 0;
+}
+
+int FakeSetInterestFn(odin_transport_t *t, unsigned int events) {
+  FakeTransport *f = reinterpret_cast<FakeTransport *>(t);
+  f->interests.push_back(events);
+  return 0;
+}
+
+int FakeErrorFn(odin_transport_t *t) {
+  FakeTransport *f = reinterpret_cast<FakeTransport *>(t);
+  return f->error_result;
+}
+
+void FakeDestroyFn(odin_transport_t *t) {
+  FakeTransport *f = reinterpret_cast<FakeTransport *>(t);
+  f->destroy_calls += 1;
+}
+
+const odin_transport_vtable_t kFakeVtable = {
+    FakeReadFn,        FakeWriteFn, FakeShutdownFn,
+    FakeSetInterestFn, FakeErrorFn, FakeDestroyFn,
+};
+
+unsigned int LastInterest(const FakeTransport &f) {
+  return f.interests.empty() ? 0u : f.interests.back();
+}
+
 } // namespace
 
-// T1 — Bidirectional in-order delivery, dual graceful half-close.
+// T1 — Bidirectional in-order forwarding; relay destroys no transport.
 TEST(OdinRelayTest, T1) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+  a.reads.push_back(ReadData("hello"));
+  a.reads.push_back(ReadAgain());
+  b.reads.push_back(ReadData("world"));
+  b.reads.push_back(ReadAgain());
+
+  DoneState state;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
+
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_READ, r);
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_WRITE, r);
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_WRITE, r);
+
+  EXPECT_EQ(b.written, std::string("hello"));
+  EXPECT_EQ(a.written, std::string("world"));
+  EXPECT_EQ(a.destroy_calls, 0);
+  EXPECT_EQ(b.destroy_calls, 0);
+  EXPECT_EQ(state.calls, 0);
+
+  odin_relay_destroy(r);
+}
+
+// T2 — Backpressure gates then resumes a source's READ.
+TEST(OdinRelayTest, T2) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+  a.read_infinite = true;     // a.read always yields data
+  b.write_mode = kWriteAgain; // the sink of dir A stalls
+
+  DoneState state;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
+
+  // One infinite read fills dir A's whole free run, saturating the ring to CAP.
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);
+
+  // While dir A's ring is full, the last set_interest recorded for a clears READ
+  // (the backpressure stop). Empty interests means no mask change was recorded
+  // at all -- the P1 stub red.
+  ASSERT_FALSE(a.interests.empty());
+  EXPECT_EQ(LastInterest(a) & ODIN_TRANSPORT_READ, 0u);
+
+  // b accepts; an a WRITE readiness flushes the ring below CAP.
+  b.write_mode = kWriteAccept;
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_WRITE, r);
+
+  // dir A drained below CAP -> a's READ interest re-arms.
+  EXPECT_TRUE(LastInterest(a) & ODIN_TRANSPORT_READ);
+  EXPECT_EQ(state.calls, 0);
+
+  odin_relay_destroy(r);
+}
+
+// T3 — Half-close propagation + dual-EOF completion.
+TEST(OdinRelayTest, T3) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+  a.reads.push_back(ReadData("abc"));
+  a.reads.push_back(ReadEof());
+  b.reads.push_back(ReadData("xyz"));
+  b.reads.push_back(ReadEof());
+
+  DoneState state;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
+
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);  // read "abc"
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_READ, r);  // read "xyz"
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_WRITE, r); // flush "abc" -> b
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_WRITE, r); // flush "xyz" -> a
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);  // a EOF -> shutdown b
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_READ, r);  // b EOF -> shutdown a
+
+  EXPECT_EQ(b.written, std::string("abc"));
+  EXPECT_EQ(a.written, std::string("xyz"));
+  EXPECT_EQ(b.shutdown_calls, 1);
+  EXPECT_EQ(a.shutdown_calls, 1);
+  EXPECT_EQ(state.calls, 1);
+  EXPECT_EQ(state.status, ODIN_RELAY_OK);
+  EXPECT_EQ(state.err, 0);
+
+  odin_relay_destroy(r);
+}
+
+// T4 — Write fault → one ERROR; destroy-in-on_done leaves transports.
+TEST(OdinRelayTest, T4) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+  a.reads.push_back(ReadData("z")); // buffer a byte into dir A
+  b.write_mode = kWriteFail;
+  b.write_errno = EPIPE;
+
+  DoneState state;
+  state.destroy_in_cb = true;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
+
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);  // read "z" into dir A
+  odin_relay_ready(&b.base, ODIN_TRANSPORT_WRITE, r); // write -> b fails EPIPE
+
+  EXPECT_EQ(state.calls, 1);
+  EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
+  EXPECT_EQ(state.err, EPIPE);
+  EXPECT_EQ(a.destroy_calls, 0);
+  EXPECT_EQ(b.destroy_calls, 0);
+  // r was destroyed inside on_done; do not touch it.
+}
+
+// T5 — Read fault → one ERROR with errno.
+TEST(OdinRelayTest, T5) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+  a.reads.push_back(ReadFail(ECONNRESET));
+
+  DoneState state;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
+
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);
+
+  EXPECT_EQ(state.calls, 1);
+  EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
+  EXPECT_EQ(state.err, ECONNRESET);
+
+  odin_relay_destroy(r);
+}
+
+// T6 — ERROR readiness: latched error surfaces; benign ERROR keeps relaying.
+TEST(OdinRelayTest, T6) {
+  // (a) An ERROR readiness with no synchronous failure probes odin_transport_error.
+  {
+    FakeTransport a{};
+    a.base.vt = &kFakeVtable;
+    FakeTransport b{};
+    b.base.vt = &kFakeVtable;
+    a.error_result = ECONNRESET; // a.read defaults to AGAIN
+
+    DoneState state;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0)
+        << std::strerror(errno);
+
+    odin_relay_ready(&a.base, ODIN_TRANSPORT_ERROR, r);
+
+    EXPECT_EQ(state.calls, 1);
+    EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
+    EXPECT_EQ(state.err, ECONNRESET);
+
+    odin_relay_destroy(r);
+  }
+  // (b) A benign ERROR alongside a progressing read latches no error.
+  {
+    FakeTransport a{};
+    a.base.vt = &kFakeVtable;
+    FakeTransport b{};
+    b.base.vt = &kFakeVtable;
+    a.reads.push_back(ReadData("d"));
+    a.error_result = 0;
+
+    DoneState state;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0)
+        << std::strerror(errno);
+
+    odin_relay_ready(&a.base, ODIN_TRANSPORT_READ | ODIN_TRANSPORT_ERROR, r);
+    EXPECT_EQ(state.calls, 0); // outcome stays open
+
+    odin_relay_ready(&b.base, ODIN_TRANSPORT_WRITE, r); // flush "d" -> b
+    EXPECT_EQ(b.written, std::string("d"));
+    EXPECT_EQ(state.calls, 0);
+
+    odin_relay_destroy(r);
+  }
+}
+
+// T7 — destroy on a still-running relay stops both watches.
+TEST(OdinRelayTest, T7) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+
+  DoneState state;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
+
+  // start registered READ on each; destroy must record one set_interest(0) more.
+  const size_t na = a.interests.size();
+  const size_t nb = b.interests.size();
+
+  odin_relay_destroy(r);
+
+  ASSERT_EQ(a.interests.size(), na + 1);
+  EXPECT_EQ(a.interests.back(), 0u);
+  ASSERT_EQ(b.interests.size(), nb + 1);
+  EXPECT_EQ(b.interests.back(), 0u);
+  EXPECT_EQ(a.destroy_calls, 0);
+  EXPECT_EQ(b.destroy_calls, 0);
+}
+
+// T8 — End-to-end OK over two fd transports; caller fds stay open.
+TEST(OdinRelayTest, T8) {
   RelayRunDeadline::Run([] {
     int fd_a = -1;
     int pa = -1;
@@ -283,14 +634,23 @@ TEST(OdinRelayTest, T1) {
 
     DoneState state;
     state.loop = loop;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
     odin_event_timer_t *watchdog = nullptr;
     ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
                                      &watchdog),
               0);
-
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
     EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
 
     ASSERT_EQ(state.calls, 1);
@@ -304,6 +664,8 @@ TEST(OdinRelayTest, T1) {
     EXPECT_TRUE(FdOpen(fd_a));
     EXPECT_TRUE(FdOpen(fd_b));
     odin_relay_destroy(r);
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
     EXPECT_EQ(close(fd_a), 0);
     EXPECT_EQ(close(fd_b), 0);
     EXPECT_EQ(close(pa), 0);
@@ -312,9 +674,8 @@ TEST(OdinRelayTest, T1) {
   });
 }
 
-// T2 — Backpressure: a deferred consumer forces the 64 KiB ring to saturate,
-// then 256 KiB drains complete and in order.
-TEST(OdinRelayTest, T2) {
+// T9 — End-to-end half-close over fd transports.
+TEST(OdinRelayTest, T9) {
   RelayRunDeadline::Run([] {
     int fd_a = -1;
     int pa = -1;
@@ -322,9 +683,272 @@ TEST(OdinRelayTest, T2) {
     int pb = -1;
     MakeUnixPair(&fd_a, &pa, false);
     MakeUnixPair(&fd_b, &pb, false);
-    // Pin all four buffers small (well below CAP and the 256 KiB payload) so
-    // the only way the saturation gate (written >= CAP) opens is the relay's
-    // own ring filling -- impossible without forwarding.
+    odin_event_loop_t *loop = nullptr;
+    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+
+    ASSERT_TRUE(WriteAll(pa, "abc", 3));
+    ASSERT_EQ(shutdown(pa, SHUT_WR), 0) << std::strerror(errno);
+
+    std::string reader_got;
+    std::thread reader([pb, &reader_got] {
+      std::string got;
+      char buf[64];
+      for (;;) {
+        const ssize_t n = read(pb, buf, sizeof(buf));
+        if (n > 0) {
+          got.append(buf, static_cast<size_t>(n));
+          continue;
+        }
+        if (n == 0) {
+          break;
+        }
+        if (errno == EINTR) {
+          continue;
+        }
+        break;
+      }
+      reader_got = got;
+      if (got == "abc") {
+        (void)WriteAll(pb, "xyz", 3);
+        (void)shutdown(pb, SHUT_WR);
+      }
+    });
+
+    DoneState state;
+    state.loop = loop;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
+    odin_event_timer_t *watchdog = nullptr;
+    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
+                                     &watchdog),
+              0);
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
+    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
+
+    // Unblock the reader's read(pb) so the row is assertion-red against the
+    // no-forwarding stub rather than hanging.
+    odin_relay_destroy(r);
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
+    EXPECT_EQ(close(fd_a), 0);
+    EXPECT_EQ(close(fd_b), 0);
+    reader.join();
+
+    ASSERT_EQ(state.calls, 1);
+    EXPECT_EQ(state.status, ODIN_RELAY_OK);
+    EXPECT_FALSE(state.timed_out);
+    EXPECT_EQ(reader_got, std::string("abc"));
+    EXPECT_EQ(DrainToEof(pa), std::string("xyz"));
+
+    EXPECT_EQ(close(pa), 0);
+    EXPECT_EQ(close(pb), 0);
+    odin_event_loop_destroy(loop);
+  });
+}
+
+// T10 — Genuine read fault (RST) over fd transport.
+TEST(OdinRelayTest, T10) {
+  RelayRunDeadline::Run([] {
+    int fd_a = -1;
+    int pa = -1;
+    int fd_b = -1;
+    int pb = -1;
+    MakeTcpPair(&fd_a, &pa);
+    MakeUnixPair(&fd_b, &pb, false);
+    odin_event_loop_t *loop = nullptr;
+    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+
+    CloseWithRst(pa); // RST -> relay read(fd_a) fails ECONNRESET
+
+    DoneState state;
+    state.loop = loop;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
+    odin_event_timer_t *watchdog = nullptr;
+    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
+                                     &watchdog),
+              0);
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
+    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
+
+    ASSERT_EQ(state.calls, 1);
+    EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
+    EXPECT_EQ(state.err, ECONNRESET);
+    EXPECT_FALSE(state.timed_out);
+
+    odin_relay_destroy(r);
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
+    EXPECT_EQ(close(fd_a), 0);
+    EXPECT_EQ(close(fd_b), 0);
+    EXPECT_EQ(close(pb), 0);
+    odin_event_loop_destroy(loop);
+  });
+}
+
+// T11 — Same-batch double error + destroy-in-on_done → exactly one on_done.
+TEST(OdinRelayTest, T11) {
+  RelayRunDeadline::Run([] {
+    int fd_a = -1;
+    int pa = -1;
+    int fd_b = -1;
+    int pb = -1;
+    MakeTcpPair(&fd_a, &pa);
+    MakeTcpPair(&fd_b, &pb);
+    odin_event_loop_t *loop = nullptr;
+    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+
+    CloseWithRst(pa);
+    CloseWithRst(pb);
+
+    DoneState state;
+    state.loop = loop;
+    state.destroy_in_cb = true;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
+    odin_event_timer_t *watchdog = nullptr;
+    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
+                                     &watchdog),
+              0);
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
+
+    odin_event_io_t *io_a = nullptr;
+    odin_event_io_t *io_b = nullptr;
+    ASSERT_EQ(odin_fd_transport_test_io(a, &io_a), 0) << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_test_io(b, &io_b), 0) << std::strerror(errno);
+    PollBothReady(fd_a, fd_b);
+    const odin_event_loop_test_ready_t entries[] = {
+        {io_a, ODIN_EVENT_ERROR},
+        {io_b, ODIN_EVENT_ERROR},
+    };
+    ASSERT_EQ(odin_event_loop_test_queue_backend_events(loop, entries, 2), 0)
+        << std::strerror(errno);
+    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
+
+    EXPECT_EQ(state.calls, 1);
+    EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
+    EXPECT_EQ(state.err, ECONNRESET);
+    EXPECT_FALSE(state.timed_out);
+
+    // r was destroyed inside on_done; reclaim the transports and fds.
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
+    EXPECT_EQ(close(fd_a), 0);
+    EXPECT_EQ(close(fd_b), 0);
+    odin_event_loop_destroy(loop);
+  });
+}
+
+// T12 — start rollback when the second endpoint's interest fails.
+TEST(OdinRelayTest, T12) {
+  RelayRunDeadline::Run([] {
+    int fd_a = -1;
+    int pa = -1;
+    int fd_b = -1;
+    int pb = -1;
+    MakeUnixPair(&fd_a, &pa, false);
+    MakeUnixPair(&fd_b, &pb, false);
+    odin_event_loop_t *loop = nullptr;
+    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+
+    odin_event_io_t *ext = nullptr;
+    ASSERT_EQ(odin_event_io_start(loop, fd_b, ODIN_EVENT_READ, NoopIoCb, nullptr,
+                                  &ext),
+              0)
+        << std::strerror(errno);
+
+    DoneState state;
+    state.loop = loop;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
+    errno = 0;
+    EXPECT_EQ(odin_relay_start(r, a, b), -1);
+    EXPECT_EQ(errno, EEXIST);
+
+    odin_event_io_stop(ext);
+
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
+
+    ASSERT_TRUE(WriteAll(pa, "ping", 4));
+    ASSERT_TRUE(WriteAll(pb, "pong", 4));
+    ASSERT_EQ(shutdown(pa, SHUT_WR), 0) << std::strerror(errno);
+    ASSERT_EQ(shutdown(pb, SHUT_WR), 0) << std::strerror(errno);
+
+    odin_event_timer_t *watchdog = nullptr;
+    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
+                                     &watchdog),
+              0);
+    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
+
+    ASSERT_EQ(state.calls, 1);
+    EXPECT_EQ(state.status, ODIN_RELAY_OK);
+    EXPECT_EQ(state.err, 0);
+    EXPECT_FALSE(state.timed_out);
+
+    odin_relay_destroy(r);
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
+    EXPECT_EQ(close(fd_a), 0);
+    EXPECT_EQ(close(fd_b), 0);
+    EXPECT_EQ(close(pa), 0);
+    EXPECT_EQ(close(pb), 0);
+    odin_event_loop_destroy(loop);
+  });
+}
+
+// T13 — Large payload: ring saturates to CAP, clears then re-arms READ,
+// byte-exact across wrap.
+TEST(OdinRelayTest, T13) {
+  RelayRunDeadline::Run([] {
+    int fd_a = -1;
+    int pa = -1;
+    int fd_b = -1;
+    int pb = -1;
+    MakeUnixPair(&fd_a, &pa, false);
+    MakeUnixPair(&fd_b, &pb, false);
+    // Pin all four buffers small (well below CAP and the 256 KiB payload) so the
+    // saturation gate (written >= CAP) opens only when the relay's own ring
+    // fills -- impossible without forwarding.
     PinSocketBuf(pa, 8192);
     PinSocketBuf(fd_a, 8192);
     PinSocketBuf(fd_b, 8192);
@@ -332,7 +956,7 @@ TEST(OdinRelayTest, T2) {
     odin_event_loop_t *loop = nullptr;
     ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
 
-    ASSERT_EQ(shutdown(pb, SHUT_WR), 0) << std::strerror(errno); // B idle
+    ASSERT_EQ(shutdown(pb, SHUT_WR), 0) << std::strerror(errno); // dir B idle
 
     constexpr size_t kPayload = 262144;
     std::atomic<size_t> written{0};
@@ -395,13 +1019,23 @@ TEST(OdinRelayTest, T2) {
 
     DoneState state;
     state.loop = loop;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
     odin_event_timer_t *watchdog = nullptr;
     ASSERT_EQ(odin_event_timer_start(loop, 1000000, 0, WatchdogCb, &state,
                                      &watchdog),
               0);
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
     EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
     writer.join();
     reader.join();
@@ -421,6 +1055,8 @@ TEST(OdinRelayTest, T2) {
     EXPECT_TRUE(match);
 
     odin_relay_destroy(r);
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
     EXPECT_EQ(close(fd_a), 0);
     EXPECT_EQ(close(fd_b), 0);
     EXPECT_EQ(close(pa), 0);
@@ -429,249 +1065,8 @@ TEST(OdinRelayTest, T2) {
   });
 }
 
-// T3 — Half-close propagation; opposite direction keeps flowing after one side
-// closes.
-TEST(OdinRelayTest, T3) {
-  RelayRunDeadline::Run([] {
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeUnixPair(&fd_a, &pa, false);
-    MakeUnixPair(&fd_b, &pb, false);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-
-    ASSERT_TRUE(WriteAll(pa, "abc", 3));
-    ASSERT_EQ(shutdown(pa, SHUT_WR), 0) << std::strerror(errno);
-
-    std::string reader_got;
-    std::thread reader([pb, &reader_got] {
-      std::string got;
-      char buf[64];
-      for (;;) {
-        const ssize_t n = read(pb, buf, sizeof(buf));
-        if (n > 0) {
-          got.append(buf, static_cast<size_t>(n));
-          continue;
-        }
-        if (n == 0) {
-          break;
-        }
-        if (errno == EINTR) {
-          continue;
-        }
-        break;
-      }
-      reader_got = got;
-      if (got == "abc") {
-        (void)WriteAll(pb, "xyz", 3);
-        (void)shutdown(pb, SHUT_WR);
-      }
-    });
-
-    DoneState state;
-    state.loop = loop;
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    // Unblock the reader's read(pb) (and the child's own read(pa)) so the row
-    // is assertion-red against the no-forwarding stub rather than hanging.
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    reader.join();
-
-    EXPECT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_OK);
-    EXPECT_FALSE(state.timed_out);
-    EXPECT_EQ(reader_got, std::string("abc"));
-    EXPECT_EQ(DrainToEof(pa), std::string("xyz"));
-
-    odin_relay_destroy(r);
-    EXPECT_EQ(close(pa), 0);
-    EXPECT_EQ(close(pb), 0);
-    odin_event_loop_destroy(loop);
-  });
-}
-
-// T4 — Genuine write error aggregates to one ERROR teardown; destroy-in-callback
-// is UAF-safe.
-TEST(OdinRelayTest, T4) {
-  RelayRunDeadline::Run([] {
-    (void)signal(SIGPIPE, SIG_IGN);
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeUnixPair(&fd_a, &pa, false);
-    MakeUnixPair(&fd_b, &pb, false);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-
-    ASSERT_TRUE(WriteAll(pb, "z", 1));
-    EXPECT_EQ(close(pa), 0); // fd_a EOF; relay's later write(fd_a) -> EPIPE
-
-    DoneState state;
-    state.loop = loop;
-    state.destroy_in_cb = true;
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    ASSERT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
-    EXPECT_EQ(state.err, EPIPE);
-    EXPECT_FALSE(state.timed_out);
-
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    EXPECT_EQ(close(pb), 0);
-    odin_event_loop_destroy(loop);
-  });
-}
-
-// T5 — Relay never closes caller fds; destroy frees the relay without closing
-// fds.
-TEST(OdinRelayTest, T5) {
-  RelayRunDeadline::Run([] {
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeUnixPair(&fd_a, &pa, false);
-    MakeUnixPair(&fd_b, &pb, false);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-
-    ASSERT_TRUE(WriteAll(pa, "ping", 4));
-    ASSERT_TRUE(WriteAll(pb, "pong", 4));
-    ASSERT_EQ(shutdown(pa, SHUT_WR), 0) << std::strerror(errno);
-    ASSERT_EQ(shutdown(pb, SHUT_WR), 0) << std::strerror(errno);
-
-    DoneState state;
-    state.loop = loop;
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    ASSERT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_OK);
-    EXPECT_TRUE(FdOpen(fd_a));
-    EXPECT_TRUE(FdOpen(fd_b));
-    odin_relay_destroy(r);
-    EXPECT_TRUE(FdOpen(fd_a));
-    EXPECT_TRUE(FdOpen(fd_b));
-
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    EXPECT_EQ(close(pa), 0);
-    EXPECT_EQ(close(pb), 0);
-    odin_event_loop_destroy(loop);
-  });
-}
-
-// T6 — odin_relay_destroy from inside on_done is safe.
-TEST(OdinRelayTest, T6) {
-  RelayRunDeadline::Run([] {
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeUnixPair(&fd_a, &pa, false);
-    MakeUnixPair(&fd_b, &pb, false);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-
-    ASSERT_TRUE(WriteAll(pa, "ping", 4));
-    ASSERT_TRUE(WriteAll(pb, "pong", 4));
-    ASSERT_EQ(shutdown(pa, SHUT_WR), 0) << std::strerror(errno);
-    ASSERT_EQ(shutdown(pb, SHUT_WR), 0) << std::strerror(errno);
-
-    DoneState state;
-    state.loop = loop;
-    state.destroy_in_cb = true;
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    ASSERT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_OK);
-    EXPECT_FALSE(state.timed_out);
-    EXPECT_TRUE(FdOpen(fd_a));
-    EXPECT_TRUE(FdOpen(fd_b));
-
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    EXPECT_EQ(close(pa), 0);
-    EXPECT_EQ(close(pb), 0);
-    odin_event_loop_destroy(loop);
-  });
-}
-
-// T7 — Genuine read fault (ECONNRESET) aggregates to one ERROR teardown.
-TEST(OdinRelayTest, T7) {
-  RelayRunDeadline::Run([] {
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeTcpPair(&fd_a, &pa);
-    MakeUnixPair(&fd_b, &pb, false);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-
-    CloseWithRst(pa); // RST -> relay read(fd_a) fails ECONNRESET
-
-    DoneState state;
-    state.loop = loop;
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    odin_relay_t *r = nullptr;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    ASSERT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
-    EXPECT_EQ(state.err, ECONNRESET);
-    EXPECT_FALSE(state.timed_out);
-
-    odin_relay_destroy(r);
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    EXPECT_EQ(close(pb), 0);
-    odin_event_loop_destroy(loop);
-  });
-}
-
-#if defined(ODIN_RELAY_TESTING)
-
-// T8 — Same-batch double-error with destroy-in-callback: exactly one on_done,
-// UAF-safe (joint same-batch invariant).
-TEST(OdinRelayTest, T8) {
+// T14 — Same-batch double error, no destroy-in-on_done → exactly one on_done.
+TEST(OdinRelayTest, T14) {
   RelayRunDeadline::Run([] {
     int fd_a = -1;
     int pa = -1;
@@ -687,69 +1082,28 @@ TEST(OdinRelayTest, T8) {
 
     DoneState state;
     state.loop = loop;
-    state.destroy_in_cb = true;
+    odin_relay_t *r = nullptr;
+    ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
+        << std::strerror(errno);
+
     odin_event_timer_t *watchdog = nullptr;
     ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
                                      &watchdog),
               0);
-    odin_relay_t *r = nullptr;
-    ASSERT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
 
     odin_event_io_t *io_a = nullptr;
     odin_event_io_t *io_b = nullptr;
-    ASSERT_EQ(odin_relay_test_io_handles(r, &io_a, &io_b), 0)
-        << std::strerror(errno);
-    PollBothReady(fd_a, fd_b);
-    const odin_event_loop_test_ready_t entries[] = {
-        {io_a, ODIN_EVENT_ERROR},
-        {io_b, ODIN_EVENT_ERROR},
-    };
-    ASSERT_EQ(odin_event_loop_test_queue_backend_events(loop, entries, 2), 0)
-        << std::strerror(errno);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    EXPECT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
-    EXPECT_EQ(state.err, ECONNRESET);
-    EXPECT_FALSE(state.timed_out);
-
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    odin_event_loop_destroy(loop);
-  });
-}
-
-// T9 — Same-batch double-error without destroy; stop-both-watches + the
-// torn_down guard jointly yield one on_done.
-TEST(OdinRelayTest, T9) {
-  RelayRunDeadline::Run([] {
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeTcpPair(&fd_a, &pa);
-    MakeTcpPair(&fd_b, &pb);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-
-    CloseWithRst(pa);
-    CloseWithRst(pb);
-
-    DoneState state;
-    state.loop = loop;
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    odin_relay_t *r = nullptr;
-    ASSERT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), 0)
-        << std::strerror(errno);
-
-    odin_event_io_t *io_a = nullptr;
-    odin_event_io_t *io_b = nullptr;
-    ASSERT_EQ(odin_relay_test_io_handles(r, &io_a, &io_b), 0)
-        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_test_io(a, &io_a), 0) << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_test_io(b, &io_b), 0) << std::strerror(errno);
     PollBothReady(fd_a, fd_b);
     const odin_event_loop_test_ready_t entries[] = {
         {io_a, ODIN_EVENT_ERROR},
@@ -765,16 +1119,16 @@ TEST(OdinRelayTest, T9) {
     EXPECT_FALSE(state.timed_out);
 
     odin_relay_destroy(r);
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
     EXPECT_EQ(close(fd_a), 0);
     EXPECT_EQ(close(fd_b), 0);
     odin_event_loop_destroy(loop);
   });
 }
-
-#endif // defined(ODIN_RELAY_TESTING)
 
 namespace {
-struct T10State {
+struct T15State {
   DoneState done;
   odin_relay_t *relay = nullptr;
   int pa = -1;
@@ -782,11 +1136,11 @@ struct T10State {
   bool x_ok = false;
 };
 
-void T10TimerCb(odin_event_loop_t *loop, odin_event_timer_t *timer,
+void T15TimerCb(odin_event_loop_t *loop, odin_event_timer_t *timer,
                 void *user_data) {
   (void)loop;
   (void)timer;
-  T10State *s = static_cast<T10State *>(user_data);
+  T15State *s = static_cast<T15State *>(user_data);
   char buf[8];
   const ssize_t n = read(s->pb, buf, sizeof(buf));
   s->x_ok = (n == 1 && buf[0] == 'x');
@@ -796,13 +1150,13 @@ void T10TimerCb(odin_event_loop_t *loop, odin_event_timer_t *timer,
 }
 } // namespace
 
-// T10 — destroy aborts a still-running relay; its still-active watches are
-// stopped, so no later readiness re-enters the freed relay.
-TEST(OdinRelayTest, T10) {
+// T15 — destroy aborts a still-running relay over fd transports; no later
+// readiness re-enters freed state.
+TEST(OdinRelayTest, T15) {
   RelayRunDeadline::Run([] {
     int fd_a = -1;
     int fd_b = -1;
-    T10State s;
+    T15State s;
     MakeUnixPair(&fd_a, &s.pa, true);
     MakeUnixPair(&fd_b, &s.pb, true);
     odin_event_loop_t *loop = nullptr;
@@ -812,12 +1166,22 @@ TEST(OdinRelayTest, T10) {
     ASSERT_TRUE(WriteAll(s.pa, "x", 1));
 
     odin_relay_t *r = nullptr;
-    ASSERT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &s.done, &r), 0)
+    ASSERT_EQ(odin_relay_create(OnDone, &s.done, &r), 0)
+        << std::strerror(errno);
+    odin_transport_t *a = nullptr;
+    odin_transport_t *b = nullptr;
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_a, odin_relay_ready, r, &a),
+              0)
+        << std::strerror(errno);
+    ASSERT_EQ(odin_fd_transport_create(loop, fd_b, odin_relay_ready, r, &b),
+              0)
         << std::strerror(errno);
     s.relay = r;
 
+    ASSERT_EQ(odin_relay_start(r, a, b), 0) << std::strerror(errno);
+
     odin_event_timer_t *t30 = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 30000, 0, T10TimerCb, &s, &t30), 0);
+    ASSERT_EQ(odin_event_timer_start(loop, 30000, 0, T15TimerCb, &s, &t30), 0);
     odin_event_timer_t *watchdog = nullptr;
     ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &s.done,
                                      &watchdog),
@@ -828,6 +1192,8 @@ TEST(OdinRelayTest, T10) {
     EXPECT_EQ(s.done.calls, 0);
     EXPECT_TRUE(s.done.timed_out);
 
+    odin_transport_destroy(a);
+    odin_transport_destroy(b);
     EXPECT_EQ(close(fd_a), 0);
     EXPECT_EQ(close(fd_b), 0);
     EXPECT_EQ(close(s.pa), 0);
@@ -836,67 +1202,29 @@ TEST(OdinRelayTest, T10) {
   });
 }
 
-// T11 — odin_relay_start partial rollback: a pre-watched fd_b forces the
-// relay's second watch to fail EEXIST; *out untouched, the first watch
-// un-registered.
-TEST(OdinRelayTest, T11) {
-  RelayRunDeadline::Run([] {
-    int fd_a = -1;
-    int pa = -1;
-    int fd_b = -1;
-    int pb = -1;
-    MakeUnixPair(&fd_a, &pa, false);
-    MakeUnixPair(&fd_b, &pb, false);
-    odin_event_loop_t *loop = nullptr;
-    ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+// T16 — Failed half-close → one aggregated ERROR with errno.
+TEST(OdinRelayTest, T16) {
+  FakeTransport a{};
+  a.base.vt = &kFakeVtable;
+  FakeTransport b{};
+  b.base.vt = &kFakeVtable;
+  a.reads.push_back(ReadEof()); // dir A EOF, ring empty -> drive half-closes
+  b.shutdown_rc = -1;           // shutdown_write(b) fails
+  b.shutdown_errno = EPIPE;
 
-    odin_event_io_t *ext = nullptr;
-    ASSERT_EQ(odin_event_io_start(loop, fd_b, ODIN_EVENT_READ, NoopIoCb, nullptr,
-                                  &ext),
-              0)
-        << std::strerror(errno);
+  DoneState state;
+  odin_relay_t *r = nullptr;
+  ASSERT_EQ(odin_relay_create(OnDone, &state, &r), 0) << std::strerror(errno);
+  ASSERT_EQ(odin_relay_start(r, &a.base, &b.base), 0) << std::strerror(errno);
 
-    DoneState state;
-    state.loop = loop;
-    // Recognizable invalid sentinel (never dereferenced): odin_relay_start must
-    // leave *out untouched on its EEXIST rollback path.
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    odin_relay_t *r = reinterpret_cast<odin_relay_t *>(-1);
-    errno = 0;
-    EXPECT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r), -1);
-    EXPECT_EQ(errno, EEXIST);
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    EXPECT_EQ(r, reinterpret_cast<odin_relay_t *>(-1));
+  odin_relay_ready(&a.base, ODIN_TRANSPORT_READ, r);
 
-    odin_event_io_stop(ext);
+  EXPECT_EQ(state.calls, 1);
+  EXPECT_EQ(state.status, ODIN_RELAY_ERROR);
+  EXPECT_EQ(state.err, EPIPE);
+  EXPECT_EQ(b.shutdown_calls, 1);
 
-    odin_relay_t *r2 = nullptr;
-    ASSERT_EQ(odin_relay_start(loop, fd_a, fd_b, OnDone, &state, &r2), 0)
-        << std::strerror(errno);
-
-    ASSERT_TRUE(WriteAll(pa, "ping", 4));
-    ASSERT_TRUE(WriteAll(pb, "pong", 4));
-    ASSERT_EQ(shutdown(pa, SHUT_WR), 0) << std::strerror(errno);
-    ASSERT_EQ(shutdown(pb, SHUT_WR), 0) << std::strerror(errno);
-
-    odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
-    EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
-
-    ASSERT_EQ(state.calls, 1);
-    EXPECT_EQ(state.status, ODIN_RELAY_OK);
-    EXPECT_EQ(state.err, 0);
-    EXPECT_FALSE(state.timed_out);
-
-    odin_relay_destroy(r2);
-    EXPECT_EQ(close(fd_a), 0);
-    EXPECT_EQ(close(fd_b), 0);
-    EXPECT_EQ(close(pa), 0);
-    EXPECT_EQ(close(pb), 0);
-    odin_event_loop_destroy(loop);
-  });
+  odin_relay_destroy(r);
 }
 
 // NOLINTEND(misc-const-correctness, misc-use-internal-linkage)

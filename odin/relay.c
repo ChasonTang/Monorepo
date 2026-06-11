@@ -1,13 +1,14 @@
-/* odin/relay.c -- RFC-011 bidirectional byte relay.
+/* odin/relay.c -- RFC-014 transport-agnostic bidirectional byte relay.
  *
- * Single-thread, event-loop-driven: watches two caller-owned nonblocking
- * connected stream sockets via the RFC-010 odin_event_io_* API and forwards
- * bytes in each direction through a fixed 64 KiB per-direction ring buffer with
- * backpressure (stop reading a source when its destination buffer is full,
- * resume when it drains). End-of-stream propagates as shutdown(SHUT_WR) on the
- * peer fd after flushing; a genuine read/write/shutdown (or asynchronous
- * socket) error aggregates into one teardown that fires on_done exactly once.
- * The relay never closes the fds and frees only its own state.
+ * Forwards bytes between two caller-owned odin_transport_t endpoints (RFC-013)
+ * through the odin_transport_* dispatchers: every read, write, half-close,
+ * readiness/interest change, and asynchronous-error probe goes through the
+ * vtable, so the relay names no concrete transport and carries none of a
+ * transport's dependencies. It provides fixed 64 KiB
+ * per-direction backpressure buffering, end-of-stream-as-shutdown_write
+ * propagation, single-error aggregation, and exactly-once completion. It owns
+ * its object and its two buffers only: it destroys neither transport and closes
+ * no fd.
  */
 
 #include "odin/relay.h"
@@ -15,17 +16,13 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
-#if defined(ODIN_RELAY_TESTING)
-#include "odin/relay_internal_test.h"
-#endif
+#include "odin/transport.h"
 
 /* Fixed per-direction buffer capacity: 64 KiB (§3.2.2 CAP). */
 #define ODIN_RELAY_CAP 65536u
 
-/* Direction indices: A = fd_a -> fd_b, B = fd_b -> fd_a. */
+/* Direction indices: A = a -> b, B = b -> a. */
 #define ODIN_RELAY_DIR_A 0
 #define ODIN_RELAY_DIR_B 1
 
@@ -45,11 +42,11 @@ enum {
   ODIN_RELAY_READ_FAILED,
 };
 
-/* One forwarding direction: read from src_fd into a CAP-byte ring, write the
- * ring out to sink_fd. head/len describe the ring; tail is derived. */
+/* One forwarding direction: read from src_t into a CAP-byte ring, write the ring
+ * out to sink_t. head/len describe the ring; tail is derived. */
 typedef struct {
-  int src_fd;
-  int sink_fd;
+  odin_transport_t *src_t;
+  odin_transport_t *sink_t;
   unsigned char *buf;
   size_t head;
   size_t len;
@@ -57,17 +54,16 @@ typedef struct {
   int write_shut;
 } odin_relay_dir_t;
 
-/* One watched fd endpoint: sources one direction, sinks the other. */
+/* One watched endpoint: sources one direction, sinks the other. cur is the last
+ * interest mask set on the endpoint. */
 typedef struct {
-  int fd;
+  odin_transport_t *t;
   odin_relay_dir_t *src;
   odin_relay_dir_t *sink;
-  odin_event_io_t *io;
   unsigned int cur;
 } odin_relay_end_t;
 
 struct odin_relay_t {
-  odin_event_loop_t *loop;
   odin_relay_done_cb on_done;
   void *user_data;
   odin_relay_dir_t dir[2];
@@ -77,28 +73,6 @@ struct odin_relay_t {
   int torn_down;
 };
 
-static void on_ready(odin_event_loop_t *loop, odin_event_io_t *io, int fd,
-                     unsigned int events, void *user_data);
-
-static odin_relay_dir_t *relay_src(odin_relay_t *r, int fd) {
-  return (fd == r->end[0].fd) ? r->end[0].src : r->end[1].src;
-}
-
-static odin_relay_dir_t *relay_sink(odin_relay_t *r, int fd) {
-  return (fd == r->end[0].fd) ? r->end[0].sink : r->end[1].sink;
-}
-
-/* getsockopt(SO_ERROR): the latched asynchronous socket error, or the errno
- * from a failing getsockopt. Nonzero means a genuine fault. */
-static int so_error(int fd) {
-  int err = 0;
-  socklen_t len = sizeof(err);
-  if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) {
-    return errno;
-  }
-  return err;
-}
-
 /* Reads into d's contiguous free run at tail (min(CAP-len, CAP-tail), > 0
  * whenever READ is watched), so the direction never buffers more than CAP. */
 static int do_read(odin_relay_t *r, odin_relay_dir_t *d) {
@@ -107,106 +81,77 @@ static int do_read(odin_relay_t *r, odin_relay_dir_t *d) {
   if (run > ODIN_RELAY_CAP - tail) {
     run = ODIN_RELAY_CAP - tail;
   }
-  const ssize_t n = read(d->src_fd, d->buf + tail, run);
-  if (n > 0) {
-    d->len += (size_t)n;
-    return ODIN_RELAY_READ_PROGRESS;
-  }
-  if (n == 0) {
-    d->read_eof = 1;
-    return ODIN_RELAY_READ_EOF;
-  }
-  if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-    return ODIN_RELAY_READ_AGAIN;
+  size_t n = 0;
+  switch (odin_transport_read(d->src_t, d->buf + tail, run, &n)) {
+    case ODIN_TRANSPORT_OK:
+      d->len += n;
+      return ODIN_RELAY_READ_PROGRESS;
+    case ODIN_TRANSPORT_EOF:
+      d->read_eof = 1;
+      return ODIN_RELAY_READ_EOF;
+    case ODIN_TRANSPORT_AGAIN:
+      return ODIN_RELAY_READ_AGAIN;
+    case ODIN_TRANSPORT_IO_ERROR:
+      break;
   }
   r->outcome = ODIN_RELAY_OUTCOME_ERROR;
-  r->err = errno;
+  r->err = errno; /* errno set by transport (RFC-013) */
   return ODIN_RELAY_READ_FAILED;
 }
 
-/* Drains d's contiguous buffered run at head (min(len, CAP-head)). */
+/* Drains d's contiguous buffered run at head (min(len, CAP-head)). write never
+ * returns EOF (RFC-013), so any non-OK/AGAIN result is a genuine fault. */
 static void do_write(odin_relay_t *r, odin_relay_dir_t *d) {
   size_t run = d->len;
   if (run > ODIN_RELAY_CAP - d->head) {
     run = ODIN_RELAY_CAP - d->head;
   }
-  const ssize_t n = write(d->sink_fd, d->buf + d->head, run);
-  if (n > 0) {
-    d->head = (d->head + (size_t)n) % ODIN_RELAY_CAP;
-    d->len -= (size_t)n;
-    return;
-  }
-  if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-    return;
+  size_t n = 0;
+  switch (odin_transport_write(d->sink_t, d->buf + d->head, run, &n)) {
+    case ODIN_TRANSPORT_OK:
+      d->head = (d->head + n) % ODIN_RELAY_CAP;
+      d->len -= n;
+      return;
+    case ODIN_TRANSPORT_AGAIN:
+      return;
+    case ODIN_TRANSPORT_EOF:
+    case ODIN_TRANSPORT_IO_ERROR:
+      break;
   }
   r->outcome = ODIN_RELAY_OUTCOME_ERROR;
   r->err = errno;
 }
 
-/* Recomputes and applies an endpoint's watch mask: READ while its source can
- * still fill (read_eof clear and buffer below CAP), WRITE while its sink has
- * bytes. An empty mask stops the watch (re-started when it next wants one). */
+/* Recomputes one endpoint's interest: READ while its source can still fill
+ * (read_eof clear and buffer below CAP), WRITE while its sink has bytes.
+ * set_interest handles the lazy start/update/stop of the underlying watch. */
 static void reconcile(odin_relay_t *r, odin_relay_end_t *e) {
   unsigned int m = 0;
   if (e->src->read_eof == 0 && e->src->len < ODIN_RELAY_CAP) {
-    m |= ODIN_EVENT_READ;
+    m |= ODIN_TRANSPORT_READ;
   }
   if (e->sink->len > 0) {
-    m |= ODIN_EVENT_WRITE;
+    m |= ODIN_TRANSPORT_WRITE;
   }
   if (m == e->cur) {
     return;
   }
-  if (m == 0) {
-    odin_event_io_stop(e->io);
-    e->io = NULL;
-  } else if (e->io == NULL) {
-    if (odin_event_io_start(r->loop, e->fd, m, on_ready, r, &e->io) != 0) {
-      r->outcome = ODIN_RELAY_OUTCOME_ERROR;
-      r->err = errno;
-      return;
-    }
-  } else {
-    if (odin_event_io_update(e->io, m) != 0) {
-      r->outcome = ODIN_RELAY_OUTCOME_ERROR;
-      r->err = errno;
-      return;
-    }
+  if (odin_transport_set_interest(e->t, m) != 0) {
+    r->outcome = ODIN_RELAY_OUTCOME_ERROR;
+    r->err = errno;
+    return;
   }
   e->cur = m;
 }
 
-/* Stops both watches, then fires on_done as the relay's final action. The
- * torn_down guard makes this idempotent; no relay state is read or written
- * after on_done returns, so odin_relay_destroy from inside on_done is safe. */
-static void teardown(odin_relay_t *r) {
-  if (r->torn_down) {
-    return;
-  }
-  r->torn_down = 1;
-  if (r->end[0].io != NULL) {
-    odin_event_io_stop(r->end[0].io);
-    r->end[0].io = NULL;
-  }
-  if (r->end[1].io != NULL) {
-    odin_event_io_stop(r->end[1].io);
-    r->end[1].io = NULL;
-  }
-  const odin_relay_done_cb cb = r->on_done;
-  void *const ud = r->user_data;
-  const odin_relay_status_t st =
-      (r->outcome == ODIN_RELAY_OUTCOME_OK) ? ODIN_RELAY_OK : ODIN_RELAY_ERROR;
-  const int e = (st == ODIN_RELAY_OK) ? 0 : r->err;
-  cb(r, st, e, ud);
-}
-
-/* For each drained, EOF'd direction issue exactly one shutdown(SHUT_WR); then
- * reconcile both watches; then complete when both directions are half-closed. */
+/* For each drained, EOF'd direction issue exactly one shutdown_write on the
+ * peer; then reconcile both interests; then complete when both directions are
+ * half-closed. */
 static void drive(odin_relay_t *r) {
   for (int i = 0; i < 2; ++i) {
     odin_relay_dir_t *d = &r->dir[i];
     if (d->read_eof && d->len == 0 && !d->write_shut) {
-      if (shutdown(d->sink_fd, SHUT_WR) != 0) {
+      if (odin_transport_shutdown_write(d->sink_t) != 0) {
         r->outcome = ODIN_RELAY_OUTCOME_ERROR;
         r->err = errno;
         return;
@@ -216,42 +161,97 @@ static void drive(odin_relay_t *r) {
   }
   reconcile(r, &r->end[0]);
   reconcile(r, &r->end[1]);
-  if (r->outcome == ODIN_RELAY_OUTCOME_NONE && r->dir[ODIN_RELAY_DIR_A].write_shut &&
+  if (r->outcome == ODIN_RELAY_OUTCOME_NONE &&
+      r->dir[ODIN_RELAY_DIR_A].write_shut &&
       r->dir[ODIN_RELAY_DIR_B].write_shut) {
     r->outcome = ODIN_RELAY_OUTCOME_OK;
   }
 }
 
-/* Readiness callback: flush the ready fd's sink, drain its source, classify an
- * ODIN_EVENT_ERROR via read()/SO_ERROR, then drive; teardown when an outcome
- * is set. Skips every sub-step once outcome != NONE (so a same-batch sibling
- * that still re-enters becomes a no-op). */
-static void on_ready(odin_event_loop_t *loop, odin_event_io_t *io, int fd,
-                     unsigned int events, void *user_data) {
-  (void)loop;
-  (void)io;
+/* Stops both interests, then fires on_done as the relay's final action. The
+ * torn_down guard makes this idempotent; no relay state is read or written after
+ * on_done returns, so odin_relay_destroy from inside on_done is safe. */
+static void teardown(odin_relay_t *r) {
+  if (r->torn_down) {
+    return;
+  }
+  r->torn_down = 1;
+  if (r->end[0].cur != 0) {
+    odin_transport_set_interest(r->end[0].t, 0);
+    r->end[0].cur = 0;
+  }
+  if (r->end[1].cur != 0) {
+    odin_transport_set_interest(r->end[1].t, 0);
+    r->end[1].cur = 0;
+  }
+  const odin_relay_done_cb cb = r->on_done;
+  void *const ud = r->user_data;
+  const odin_relay_status_t st =
+      (r->outcome == ODIN_RELAY_OUTCOME_OK) ? ODIN_RELAY_OK
+                                               : ODIN_RELAY_ERROR;
+  const int e = (st == ODIN_RELAY_OK) ? 0 : r->err;
+  cb(r, st, e, ud);
+}
+
+int odin_relay_create(odin_relay_done_cb on_done, void *user_data,
+                         odin_relay_t **out) {
+  odin_relay_t *r = (odin_relay_t *)calloc(1, sizeof(*r));
+  if (r == NULL) {
+    errno = ENOMEM;
+    return -1;
+  }
+  r->dir[ODIN_RELAY_DIR_A].buf =
+      (unsigned char *)malloc(ODIN_RELAY_CAP);
+  r->dir[ODIN_RELAY_DIR_B].buf =
+      (unsigned char *)malloc(ODIN_RELAY_CAP);
+  if (r->dir[ODIN_RELAY_DIR_A].buf == NULL ||
+      r->dir[ODIN_RELAY_DIR_B].buf == NULL) {
+    free(r->dir[ODIN_RELAY_DIR_A].buf);
+    free(r->dir[ODIN_RELAY_DIR_B].buf);
+    free(r);
+    errno = ENOMEM;
+    return -1;
+  }
+
+  r->on_done = on_done;
+  r->user_data = user_data;
+  r->outcome = ODIN_RELAY_OUTCOME_NONE;
+
+  *out = r;
+  return 0;
+}
+
+/* Readiness handler: flush the ready endpoint's sink, drain its source, classify
+ * an ODIN_TRANSPORT_ERROR readiness via do_read/odin_transport_error, then
+ * drive; teardown when an outcome is set. Skips every sub-step once outcome
+ * != NONE (so a same-batch sibling that still re-enters becomes a no-op).
+ * sink->sink_t == t and src->src_t == t by construction, so both ops act on the
+ * endpoint that fired. */
+void odin_relay_ready(odin_transport_t *t, unsigned int events,
+                         void *user_data) {
   odin_relay_t *r = (odin_relay_t *)user_data;
-  odin_relay_dir_t *src = relay_src(r, fd);
-  odin_relay_dir_t *sink = relay_sink(r, fd);
-  const int err = (events & ODIN_EVENT_ERROR) != 0;
+  odin_relay_end_t *e = (t == r->end[0].t) ? &r->end[0] : &r->end[1];
+  odin_relay_dir_t *src = e->src;
+  odin_relay_dir_t *sink = e->sink;
+  const int err = (events & ODIN_TRANSPORT_ERROR) != 0;
 
   if (r->outcome == ODIN_RELAY_OUTCOME_NONE && sink->len > 0 &&
-      ((events & ODIN_EVENT_WRITE) || err)) {
+      ((events & ODIN_TRANSPORT_WRITE) || err)) {
     do_write(r, sink);
   }
 
   int rd = ODIN_RELAY_READ_AGAIN;
   if (r->outcome == ODIN_RELAY_OUTCOME_NONE && src->read_eof == 0 &&
-      src->len < ODIN_RELAY_CAP && ((events & ODIN_EVENT_READ) || err)) {
+      src->len < ODIN_RELAY_CAP && ((events & ODIN_TRANSPORT_READ) || err)) {
     rd = do_read(r, src);
   }
 
   if (r->outcome == ODIN_RELAY_OUTCOME_NONE && err && src->read_eof == 0 &&
       rd != ODIN_RELAY_READ_PROGRESS) {
-    const int e = so_error(fd);
-    if (e != 0) {
+    const int e2 = odin_transport_error(t); /* latched async error; 0 when benign */
+    if (e2 != 0) {
       r->outcome = ODIN_RELAY_OUTCOME_ERROR;
-      r->err = e;
+      r->err = e2;
     }
   }
 
@@ -263,69 +263,35 @@ static void on_ready(odin_event_loop_t *loop, odin_event_io_t *io, int fd,
   }
 }
 
-int odin_relay_start(odin_event_loop_t *loop, int fd_a, int fd_b,
-                     odin_relay_done_cb on_done, void *user_data,
-                     odin_relay_t **out) {
-  odin_relay_t *r = (odin_relay_t *)calloc(1, sizeof(*r));
-  if (r == NULL) {
-    errno = ENOMEM;
-    return -1;
+int odin_relay_start(odin_relay_t *relay, odin_transport_t *a,
+                        odin_transport_t *b) {
+  /* dir A: a -> b; dir B: b -> a. */
+  relay->dir[ODIN_RELAY_DIR_A].src_t = a;
+  relay->dir[ODIN_RELAY_DIR_A].sink_t = b;
+  relay->dir[ODIN_RELAY_DIR_B].src_t = b;
+  relay->dir[ODIN_RELAY_DIR_B].sink_t = a;
+
+  /* end[0] = a sources A, sinks B; end[1] = b sources B, sinks A. */
+  relay->end[0].t = a;
+  relay->end[0].src = &relay->dir[ODIN_RELAY_DIR_A];
+  relay->end[0].sink = &relay->dir[ODIN_RELAY_DIR_B];
+  relay->end[1].t = b;
+  relay->end[1].src = &relay->dir[ODIN_RELAY_DIR_B];
+  relay->end[1].sink = &relay->dir[ODIN_RELAY_DIR_A];
+
+  /* One READ watch per endpoint, a first then b. Roll a back if b's fails. */
+  if (odin_transport_set_interest(a, ODIN_TRANSPORT_READ) != 0) {
+    return -1; /* errno preserved; nothing registered, re-startable */
   }
-  r->dir[ODIN_RELAY_DIR_A].buf = (unsigned char *)malloc(ODIN_RELAY_CAP);
-  r->dir[ODIN_RELAY_DIR_B].buf = (unsigned char *)malloc(ODIN_RELAY_CAP);
-  if (r->dir[ODIN_RELAY_DIR_A].buf == NULL ||
-      r->dir[ODIN_RELAY_DIR_B].buf == NULL) {
-    free(r->dir[ODIN_RELAY_DIR_A].buf);
-    free(r->dir[ODIN_RELAY_DIR_B].buf);
-    free(r);
-    errno = ENOMEM;
-    return -1;
-  }
-
-  r->loop = loop;
-  r->on_done = on_done;
-  r->user_data = user_data;
-  r->outcome = ODIN_RELAY_OUTCOME_NONE;
-
-  /* dir A: fd_a -> fd_b; dir B: fd_b -> fd_a. */
-  r->dir[ODIN_RELAY_DIR_A].src_fd = fd_a;
-  r->dir[ODIN_RELAY_DIR_A].sink_fd = fd_b;
-  r->dir[ODIN_RELAY_DIR_B].src_fd = fd_b;
-  r->dir[ODIN_RELAY_DIR_B].sink_fd = fd_a;
-
-  /* end[0] = fd_a sources A, sinks B; end[1] = fd_b sources B, sinks A. */
-  r->end[0].fd = fd_a;
-  r->end[0].src = &r->dir[ODIN_RELAY_DIR_A];
-  r->end[0].sink = &r->dir[ODIN_RELAY_DIR_B];
-  r->end[1].fd = fd_b;
-  r->end[1].src = &r->dir[ODIN_RELAY_DIR_B];
-  r->end[1].sink = &r->dir[ODIN_RELAY_DIR_A];
-
-  /* Both buffers empty, both read sides open: one READ watch per fd, fd_a
-   * first, then fd_b. Roll back fd_a's watch if fd_b's fails. */
-  if (odin_event_io_start(loop, fd_a, ODIN_EVENT_READ, on_ready, r,
-                          &r->end[0].io) != 0) {
+  relay->end[0].cur = ODIN_TRANSPORT_READ;
+  if (odin_transport_set_interest(b, ODIN_TRANSPORT_READ) != 0) {
     const int saved = errno;
-    free(r->dir[ODIN_RELAY_DIR_A].buf);
-    free(r->dir[ODIN_RELAY_DIR_B].buf);
-    free(r);
-    errno = saved;
+    odin_transport_set_interest(a, 0);
+    relay->end[0].cur = 0;
+    errno = saved; /* both cur == 0, a/b rebindable -> re-startable */
     return -1;
   }
-  r->end[0].cur = ODIN_EVENT_READ;
-  if (odin_event_io_start(loop, fd_b, ODIN_EVENT_READ, on_ready, r,
-                          &r->end[1].io) != 0) {
-    const int saved = errno;
-    odin_event_io_stop(r->end[0].io);
-    free(r->dir[ODIN_RELAY_DIR_A].buf);
-    free(r->dir[ODIN_RELAY_DIR_B].buf);
-    free(r);
-    errno = saved;
-    return -1;
-  }
-  r->end[1].cur = ODIN_EVENT_READ;
-
-  *out = r;
+  relay->end[1].cur = ODIN_TRANSPORT_READ;
   return 0;
 }
 
@@ -333,28 +299,15 @@ void odin_relay_destroy(odin_relay_t *relay) {
   if (relay == NULL) {
     return;
   }
-  if (relay->end[0].io != NULL) {
-    odin_event_io_stop(relay->end[0].io);
-    relay->end[0].io = NULL;
+  if (relay->end[0].cur != 0) {
+    odin_transport_set_interest(relay->end[0].t, 0);
+    relay->end[0].cur = 0;
   }
-  if (relay->end[1].io != NULL) {
-    odin_event_io_stop(relay->end[1].io);
-    relay->end[1].io = NULL;
+  if (relay->end[1].cur != 0) {
+    odin_transport_set_interest(relay->end[1].t, 0);
+    relay->end[1].cur = 0;
   }
   free(relay->dir[ODIN_RELAY_DIR_A].buf);
   free(relay->dir[ODIN_RELAY_DIR_B].buf);
   free(relay);
 }
-
-#if defined(ODIN_RELAY_TESTING)
-int odin_relay_test_io_handles(odin_relay_t *relay, odin_event_io_t **out_a,
-                               odin_event_io_t **out_b) {
-  if (relay->end[0].io == NULL || relay->end[1].io == NULL) {
-    errno = ENOENT;
-    return -1;
-  }
-  *out_a = relay->end[0].io;
-  *out_b = relay->end[1].io;
-  return 0;
-}
-#endif
