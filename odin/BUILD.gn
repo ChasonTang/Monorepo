@@ -44,6 +44,7 @@ source_set("odin") {
     ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
+    ":odin_relay_v2",
     ":odin_transport",
     ":odin_transport_fd",
   ]
@@ -63,6 +64,15 @@ source_set("odin_relay") {
   ]
 
   public_deps = [ ":odin_event_loop" ]
+}
+
+source_set("odin_relay_v2") {
+  sources = [
+    "relay_v2.c",
+    "relay_v2.h",
+  ]
+
+  public_deps = [ ":odin_transport" ]
 }
 
 source_set("odin_dial") {
@@ -178,6 +188,9 @@ executable("odin_unittests") {
     "relay_internal_test.h",
     "relay_testing.c",
     "relay_unittests.cpp",
+    "relay_v2.h",
+    "relay_v2_testing.c",
+    "relay_v2_unittests.cpp",
     "transport.h",
     "transport_fd.h",
     "transport_fd_internal_test.h",
