@@ -208,9 +208,9 @@ void RecvReadyCb(odin_udp_t *u, unsigned int events, void *user_data) {
   s->calls += 1;
   s->events |= events;
   s->srclen = sizeof(s->src);
-  s->recv_rc = odin_udp_recv(u, s->buf, sizeof(s->buf), &s->n,
-                             reinterpret_cast<struct sockaddr *>(&s->src),
-                             &s->srclen);
+  s->recv_rc =
+      odin_udp_recv(u, s->buf, sizeof(s->buf), &s->n,
+                    reinterpret_cast<struct sockaddr *>(&s->src), &s->srclen);
   odin_event_loop_stop(s->loop);
 }
 
@@ -219,9 +219,9 @@ void CloseReadyCb(odin_udp_t *u, unsigned int events, void *user_data) {
   s->calls += 1;
   s->events |= events;
   s->srclen = sizeof(s->src);
-  s->recv_rc = odin_udp_recv(u, s->buf, sizeof(s->buf), &s->n,
-                             reinterpret_cast<struct sockaddr *>(&s->src),
-                             &s->srclen);
+  s->recv_rc =
+      odin_udp_recv(u, s->buf, sizeof(s->buf), &s->n,
+                    reinterpret_cast<struct sockaddr *>(&s->src), &s->srclen);
   odin_udp_close(u);
   s->u = nullptr;
   s->closed = true;
@@ -241,13 +241,13 @@ void TruncateReadyCb(odin_udp_t *u, unsigned int events, void *user_data) {
   s->calls += 1;
   s->events |= events;
   s->srclen = sizeof(s->src);
-  s->recv_rc = odin_udp_recv(u, s->buf, 16, &s->n,
-                             reinterpret_cast<struct sockaddr *>(&s->src),
-                             &s->srclen);
+  s->recv_rc =
+      odin_udp_recv(u, s->buf, 16, &s->n,
+                    reinterpret_cast<struct sockaddr *>(&s->src), &s->srclen);
   s->srclen2 = sizeof(s->src2);
-  s->recv2_rc = odin_udp_recv(u, s->buf2, 16, &s->n2,
-                              reinterpret_cast<struct sockaddr *>(&s->src2),
-                              &s->srclen2);
+  s->recv2_rc =
+      odin_udp_recv(u, s->buf2, 16, &s->n2,
+                    reinterpret_cast<struct sockaddr *>(&s->src2), &s->srclen2);
   odin_event_loop_stop(s->loop);
 }
 
@@ -261,9 +261,8 @@ void ErrorReadyCb(odin_udp_t *u, unsigned int events, void *user_data) {
 
 void ArmWatchdog(odin_event_loop_t *loop, ReadyState *state) {
   odin_event_timer_t *watchdog = nullptr;
-  ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, state,
-                                   &watchdog),
-            0)
+  ASSERT_EQ(
+      odin_event_timer_start(loop, 100000, 0, WatchdogCb, state, &watchdog), 0)
       << std::strerror(errno);
 }
 
@@ -309,8 +308,8 @@ TEST(OdinUdpTest, T1) {
     MakeUdp4Peer(&peer, &peer_addr);
     ASSERT_EQ(odin_udp_set_interest(state.u, ODIN_UDP_READ), 0)
         << std::strerror(errno);
-    ASSERT_EQ(sendto(peer, "hi", 2, 0,
-                     reinterpret_cast<struct sockaddr *>(&ep), sizeof(ep)),
+    ASSERT_EQ(sendto(peer, "hi", 2, 0, reinterpret_cast<struct sockaddr *>(&ep),
+                     sizeof(ep)),
               2)
         << std::strerror(errno);
     ArmWatchdog(loop, &state);
@@ -345,8 +344,7 @@ TEST(OdinUdpTest, T2) {
     struct sockaddr_storage src;
     socklen_t srclen = sizeof(src);
     EXPECT_EQ(odin_udp_recv(state.u, buf, sizeof(buf), &n,
-                            reinterpret_cast<struct sockaddr *>(&src),
-                            &srclen),
+                            reinterpret_cast<struct sockaddr *>(&src), &srclen),
               ODIN_UDP_AGAIN);
     odin_udp_close(state.u);
     odin_event_loop_destroy(loop);
@@ -437,9 +435,9 @@ TEST(OdinUdpTest, T5) {
     struct sockaddr_in dst = Loopback4(9);
     size_t n = 0;
     errno = 0;
-    const odin_udp_io_t rc = odin_udp_send(
-        state.u, big.data(), big.size(), &n,
-        reinterpret_cast<struct sockaddr *>(&dst), sizeof(dst));
+    const odin_udp_io_t rc =
+        odin_udp_send(state.u, big.data(), big.size(), &n,
+                      reinterpret_cast<struct sockaddr *>(&dst), sizeof(dst));
     const int err = errno;
     EXPECT_EQ(rc, ODIN_UDP_IO_ERROR);
     EXPECT_EQ(err, EMSGSIZE);
@@ -464,9 +462,9 @@ TEST(OdinUdpTest, T6) {
         reinterpret_cast<odin_udp_t *>(-1); // NOLINT(performance-no-int-to-ptr)
     odin_udp_t *u = sentinel;
     errno = 0;
-    const int rc = odin_udp_open(
-        loop, reinterpret_cast<struct sockaddr *>(&bad), sizeof(bad),
-        ErrorReadyCb, &state, &u);
+    const int rc =
+        odin_udp_open(loop, reinterpret_cast<struct sockaddr *>(&bad),
+                      sizeof(bad), ErrorReadyCb, &state, &u);
     const int err = errno;
     ASSERT_EQ(odin_event_loop_test_liveness(&live_after), 0)
         << std::strerror(errno);
@@ -501,9 +499,9 @@ TEST(OdinUdpTest, T7) {
         reinterpret_cast<odin_udp_t *>(-1); // NOLINT(performance-no-int-to-ptr)
     odin_udp_t *u = sentinel;
     errno = 0;
-    const int rc = odin_udp_open(
-        loop, reinterpret_cast<struct sockaddr *>(&bad), sizeof(bad),
-        ErrorReadyCb, &state, &u);
+    const int rc =
+        odin_udp_open(loop, reinterpret_cast<struct sockaddr *>(&bad),
+                      sizeof(bad), ErrorReadyCb, &state, &u);
     const int err = errno;
     ASSERT_EQ(odin_event_loop_test_liveness(&live_after), 0)
         << std::strerror(errno);
@@ -541,9 +539,8 @@ TEST(OdinUdpTest, T8) {
     odin_event_io_t *io_before = nullptr;
     ASSERT_EQ(odin_udp_test_io(state.u, &io_before), 0) << std::strerror(errno);
     unsigned int mask_before = 0;
-    ASSERT_EQ(odin_event_loop_test_kqueue_registered_mask(loop, fd0,
-                                                          &mask_before),
-              0)
+    ASSERT_EQ(
+        odin_event_loop_test_kqueue_registered_mask(loop, fd0, &mask_before), 0)
         << std::strerror(errno);
     EXPECT_EQ(mask_before, ODIN_EVENT_READ);
 
@@ -563,9 +560,8 @@ TEST(OdinUdpTest, T8) {
     EXPECT_EQ(fcntl(fd0, F_GETFD), -1);
     EXPECT_EQ(errno, EBADF);
     unsigned int mask_after = 99;
-    EXPECT_EQ(odin_event_loop_test_kqueue_registered_mask(loop, fd0,
-                                                          &mask_after),
-              0)
+    EXPECT_EQ(
+        odin_event_loop_test_kqueue_registered_mask(loop, fd0, &mask_after), 0)
         << std::strerror(errno);
     EXPECT_EQ(mask_after, 0u);
     EXPECT_FALSE(state.timed_out);
@@ -676,9 +672,9 @@ TEST(OdinUdpTest, T11) {
         << std::strerror(errno);
     size_t n = 123;
     errno = 0;
-    const odin_udp_io_t rc = odin_udp_send(
-        state.u, "retry", 5, &n, reinterpret_cast<struct sockaddr *>(&dst),
-        sizeof(dst));
+    const odin_udp_io_t rc =
+        odin_udp_send(state.u, "retry", 5, &n,
+                      reinterpret_cast<struct sockaddr *>(&dst), sizeof(dst));
     const int err = errno;
     EXPECT_EQ(rc, ODIN_UDP_AGAIN);
     EXPECT_EQ(err, EAGAIN);

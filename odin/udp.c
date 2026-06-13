@@ -80,9 +80,8 @@ int odin_udp_open(odin_event_loop_t *loop, const struct sockaddr *addr,
   return 0;
 }
 
-odin_udp_io_t odin_udp_recv(odin_udp_t *u, void *buf, size_t len,
-                            size_t *out_n, struct sockaddr *src,
-                            socklen_t *srclen) {
+odin_udp_io_t odin_udp_recv(odin_udp_t *u, void *buf, size_t len, size_t *out_n,
+                            struct sockaddr *src, socklen_t *srclen) {
   const ssize_t n = recvfrom(u->fd, buf, len, 0, src, srclen);
   if (n >= 0) {
     *out_n = (size_t)n;

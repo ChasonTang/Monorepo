@@ -3,8 +3,8 @@
  * Transport-agnostic bidirectional byte relay (RFC-014).
  *
  * Forwards bytes between two
- * caller-supplied, caller-owned odin_transport_t endpoints (RFC-013) through the
- * odin_transport_* dispatchers instead of raw fds and odin_event_io_*. It
+ * caller-supplied, caller-owned odin_transport_t endpoints (RFC-013) through
+ * the odin_transport_* dispatchers instead of raw fds and odin_event_io_*. It
  * provides fixed 64 KiB per-direction backpressure buffering,
  * end-of-stream-as-shutdown_write propagation, single-error aggregation, and
  * exactly-once completion. It depends only on odin/transport.h: it issues no
@@ -17,10 +17,10 @@
  * registers a READ interest on each. No readiness can arrive before start.
  *
  * Ownership: the relay owns its object and its two buffers only. It never calls
- * odin_transport_destroy on either transport and never closes any fd; the caller
- * owns both transports and their fds and destroys them after on_done. Because
- * destroy may touch the transports to stop their watches when aborting a
- * still-running relay, the caller must call odin_relay_destroy(relay) BEFORE
+ * odin_transport_destroy on either transport and never closes any fd; the
+ * caller owns both transports and their fds and destroys them after on_done.
+ * Because destroy may touch the transports to stop their watches when aborting
+ * a still-running relay, the caller must call odin_relay_destroy(relay) BEFORE
  * destroying the two transports.
  *
  * Completion: on_done fires exactly once on the owner thread, as the relay's
@@ -52,16 +52,16 @@ typedef enum odin_relay_status_t {
 } odin_relay_status_t;
 
 typedef void (*odin_relay_done_cb)(odin_relay_t *relay,
-                                      odin_relay_status_t status, int err,
-                                      void *user_data);
+                                   odin_relay_status_t status, int err,
+                                   void *user_data);
 
 /* Allocates the relay object and its two 64 KiB buffers, stores on_done /
  * user_data, writes *out, and returns 0; binds no transport and registers
  * nothing. Its only failure is ENOMEM (returns -1, errno == ENOMEM, *out
  * untouched). on_done must be non-null. Owner-thread API.
  */
-int  odin_relay_create(odin_relay_done_cb on_done, void *user_data,
-                          odin_relay_t **out);
+int odin_relay_create(odin_relay_done_cb on_done, void *user_data,
+                      odin_relay_t **out);
 
 /* The relay's exported readiness trampoline: install it as the on_ready of BOTH
  * transports, with user_data set to the odin_relay_t * from create. It is the
@@ -70,7 +70,7 @@ int  odin_relay_create(odin_relay_done_cb on_done, void *user_data,
  * bound transports and the matching relay handle.
  */
 void odin_relay_ready(odin_transport_t *t, unsigned int events,
-                         void *user_data);
+                      void *user_data);
 
 /* Binds a and b as direction A (a -> b) and direction B (b -> a), registers a
  * READ interest on each via odin_transport_set_interest, and returns 0. On the
@@ -79,12 +79,12 @@ void odin_relay_ready(odin_transport_t *t, unsigned int events,
  * before returning -1 with the second call's errno. After either failure path
  * the relay is left re-startable. Owner-thread API.
  */
-int  odin_relay_start(odin_relay_t *relay, odin_transport_t *a,
-                         odin_transport_t *b);
+int odin_relay_start(odin_relay_t *relay, odin_transport_t *a,
+                     odin_transport_t *b);
 
-/* Stops any interest the relay still holds (odin_transport_set_interest(t, 0) on
- * each still-watched endpoint), frees the two buffers and the relay object, and
- * never invokes on_done; odin_relay_destroy(NULL) is a no-op. Callable from
+/* Stops any interest the relay still holds (odin_transport_set_interest(t, 0)
+ * on each still-watched endpoint), frees the two buffers and the relay object,
+ * and never invokes on_done; odin_relay_destroy(NULL) is a no-op. Callable from
  * within on_done to reclaim a completed relay, or on a still-running relay to
  * abort it. Must be called before destroying the two transports.
  */

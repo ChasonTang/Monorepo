@@ -19,22 +19,23 @@ static const char kResp505[] =
 
 odin_http_response_t odin_http_response_for_status(odin_http_status_t status) {
   switch (status) {
-    case ODIN_HTTP_OK:
-      return (odin_http_response_t){kRespOk, sizeof(kRespOk) - 1};
-    case ODIN_HTTP_ERR_BAD_METHOD:
-      return (odin_http_response_t){kResp405, sizeof(kResp405) - 1};
-    case ODIN_HTTP_ERR_BAD_REQUEST_TARGET:
-    case ODIN_HTTP_ERR_HOST_LEN_INVALID:
-    case ODIN_HTTP_ERR_PORT_INVALID:
-      return (odin_http_response_t){kResp400, sizeof(kResp400) - 1};
-    case ODIN_HTTP_ERR_BAD_VERSION:
-      return (odin_http_response_t){kResp505, sizeof(kResp505) - 1};
-    case ODIN_HTTP_ERR_REQUEST_TOO_LARGE:
-      return (odin_http_response_t){kResp414, sizeof(kResp414) - 1};
-    case ODIN_HTTP_NEED_MORE:
-    default:
-      assert(0 && "odin_http_response_for_status: non-terminal or unknown status");
-      return (odin_http_response_t){kResp400, sizeof(kResp400) - 1};
+  case ODIN_HTTP_OK:
+    return (odin_http_response_t){kRespOk, sizeof(kRespOk) - 1};
+  case ODIN_HTTP_ERR_BAD_METHOD:
+    return (odin_http_response_t){kResp405, sizeof(kResp405) - 1};
+  case ODIN_HTTP_ERR_BAD_REQUEST_TARGET:
+  case ODIN_HTTP_ERR_HOST_LEN_INVALID:
+  case ODIN_HTTP_ERR_PORT_INVALID:
+    return (odin_http_response_t){kResp400, sizeof(kResp400) - 1};
+  case ODIN_HTTP_ERR_BAD_VERSION:
+    return (odin_http_response_t){kResp505, sizeof(kResp505) - 1};
+  case ODIN_HTTP_ERR_REQUEST_TOO_LARGE:
+    return (odin_http_response_t){kResp414, sizeof(kResp414) - 1};
+  case ODIN_HTTP_NEED_MORE:
+  default:
+    assert(0 &&
+           "odin_http_response_for_status: non-terminal or unknown status");
+    return (odin_http_response_t){kResp400, sizeof(kResp400) - 1};
   }
 }
 

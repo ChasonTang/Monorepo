@@ -30,7 +30,8 @@ int odin_event_loop_create(odin_event_loop_t **out);
  */
 int odin_event_loop_run(odin_event_loop_t *loop);
 
-/* Requests that an active run exit after the current snapshot batch boundary. */
+/* Requests that an active run exit after the current snapshot batch boundary.
+ */
 void odin_event_loop_stop(odin_event_loop_t *loop);
 
 /* Releases loop-owned backend descriptors, I/O handles, timers, and queued
@@ -38,25 +39,22 @@ void odin_event_loop_stop(odin_event_loop_t *loop);
  */
 void odin_event_loop_destroy(odin_event_loop_t *loop);
 
-#define ODIN_EVENT_READ  0x01u
+#define ODIN_EVENT_READ 0x01u
 #define ODIN_EVENT_WRITE 0x02u
 #define ODIN_EVENT_ERROR 0x04u
 
 typedef struct odin_event_io_t odin_event_io_t;
 
-typedef void (*odin_event_io_cb)(odin_event_loop_t *loop,
-                                 odin_event_io_t *io,
-                                 int fd,
-                                 unsigned int events,
-                                 void *user_data);
+typedef void (*odin_event_io_cb)(odin_event_loop_t *loop, odin_event_io_t *io,
+                                 int fd, unsigned int events, void *user_data);
 
 /* Starts one active level-triggered watch for caller-owned nonblocking fd.
  * Input masks are exactly a non-empty subset of READ|WRITE; ERROR is
  * output-only. Duplicate active fd watches fail with errno=EEXIST.
  */
-int odin_event_io_start(odin_event_loop_t *loop, int fd,
-                        unsigned int events, odin_event_io_cb cb,
-                        void *user_data, odin_event_io_t **out);
+int odin_event_io_start(odin_event_loop_t *loop, int fd, unsigned int events,
+                        odin_event_io_cb cb, void *user_data,
+                        odin_event_io_t **out);
 
 /* Updates an active watch to a new non-empty READ|WRITE input mask. */
 int odin_event_io_update(odin_event_io_t *io, unsigned int events);
@@ -69,8 +67,7 @@ void odin_event_io_stop(odin_event_io_t *io);
 typedef struct odin_event_timer_t odin_event_timer_t;
 
 typedef void (*odin_event_timer_cb)(odin_event_loop_t *loop,
-                                    odin_event_timer_t *timer,
-                                    void *user_data);
+                                    odin_event_timer_t *timer, void *user_data);
 
 /* Starts a monotonic microsecond timer. delay_us==0 is due on the next timer
  * pass; repeat_us==0 is one-shot; positive repeat_us auto-reschedules from

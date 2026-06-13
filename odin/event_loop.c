@@ -270,9 +270,8 @@ static int timer_heap_prepare_push(odin_event_loop_t *loop) {
     errno = ENOMEM;
     return -1;
   }
-  odin_timer_heap_entry_t *new_heap =
-      (odin_timer_heap_entry_t *)realloc(loop->timer_heap,
-                                         new_cap * sizeof(new_heap[0]));
+  odin_timer_heap_entry_t *new_heap = (odin_timer_heap_entry_t *)realloc(
+      loop->timer_heap, new_cap * sizeof(new_heap[0]));
   if (new_heap == NULL) {
     errno = ENOMEM;
     return -1;
@@ -305,8 +304,7 @@ static void timer_heap_push_prepared(odin_event_loop_t *loop,
 
 static odin_timer_heap_entry_t timer_heap_pop_min(odin_event_loop_t *loop) {
   const odin_timer_heap_entry_t min = loop->timer_heap[0];
-  const odin_timer_heap_entry_t last =
-      loop->timer_heap[--loop->timer_heap_len];
+  const odin_timer_heap_entry_t last = loop->timer_heap[--loop->timer_heap_len];
   size_t i = 0;
   while (loop->timer_heap_len > 0) {
     const size_t left = i * 2 + 1;
@@ -467,10 +465,10 @@ static int kqueue_change_kind_to_test_kind(int add) {
              : ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_DELETE;
 }
 
-static odin_kqueue_registered_t *find_kqueue_registered(
-    odin_event_loop_t *loop, int fd) {
-  for (odin_kqueue_registered_t *entry = loop->kqueue_registered;
-       entry != NULL; entry = entry->next) {
+static odin_kqueue_registered_t *find_kqueue_registered(odin_event_loop_t *loop,
+                                                        int fd) {
+  for (odin_kqueue_registered_t *entry = loop->kqueue_registered; entry != NULL;
+       entry = entry->next) {
     if (entry->fd == fd) {
       return entry;
     }
@@ -529,8 +527,7 @@ static void free_kqueue_registered(odin_event_loop_t *loop) {
 #endif
 
 static int backend_kqueue_change_one(odin_event_loop_t *loop, int fd, int add,
-                                     unsigned int event,
-                                     odin_event_io_t *io) {
+                                     unsigned int event, odin_event_io_t *io) {
 #if defined(ODIN_EVENT_LOOP_TESTING)
   const int test_change = kqueue_change_kind_to_test_kind(add);
   if (loop->fail_kqueue_change == test_change &&
@@ -570,8 +567,7 @@ static int backend_kqueue_change_one(odin_event_loop_t *loop, int fd, int add,
 }
 
 static int rollback_kqueue_filters(odin_event_loop_t *loop, int fd,
-                                   unsigned int events,
-                                   odin_event_io_t *io) {
+                                   unsigned int events, odin_event_io_t *io) {
   int first_err = 0;
   if (events & ODIN_EVENT_READ) {
     if (backend_kqueue_change_one(loop, fd, 0, ODIN_EVENT_READ, io) != 0 &&
@@ -675,9 +671,9 @@ static void backend_io_delete(odin_event_io_t *io) {
 }
 #endif
 
-static int ready_item_add(odin_ready_item_t **items, size_t *count,
-                          size_t *cap, odin_event_io_t *io,
-                          unsigned int generation, unsigned int events) {
+static int ready_item_add(odin_ready_item_t **items, size_t *count, size_t *cap,
+                          odin_event_io_t *io, unsigned int generation,
+                          unsigned int events) {
   if (events == 0) {
     return 0;
   }
@@ -758,7 +754,7 @@ static int dispatch_due_timers(odin_event_loop_t *loop) {
       const size_t new_cap = cap == 0 ? 8 : cap * 2;
       odin_timer_heap_entry_t *new_snapshot =
           (odin_timer_heap_entry_t *)realloc(snapshot,
-                                            new_cap * sizeof(snapshot[0]));
+                                             new_cap * sizeof(snapshot[0]));
       if (new_snapshot == NULL) {
         errno = ENOMEM;
         rc = -1;
@@ -807,8 +803,7 @@ done:
 }
 
 #if defined(__linux__)
-static int arm_timerfd(odin_event_loop_t *loop, int has_due,
-                       uint64_t due_us) {
+static int arm_timerfd(odin_event_loop_t *loop, int has_due, uint64_t due_us) {
   struct itimerspec its;
   memset(&its, 0, sizeof(its));
   if (has_due) {
@@ -1145,9 +1140,9 @@ void odin_event_loop_destroy(odin_event_loop_t *loop) {
   free(loop);
 }
 
-int odin_event_io_start(odin_event_loop_t *loop, int fd,
-                        unsigned int events, odin_event_io_cb cb,
-                        void *user_data, odin_event_io_t **out) {
+int odin_event_io_start(odin_event_loop_t *loop, int fd, unsigned int events,
+                        odin_event_io_cb cb, void *user_data,
+                        odin_event_io_t **out) {
   assert_owner(loop);
   if (!valid_input_mask(events)) {
     errno = EINVAL;
@@ -1226,8 +1221,7 @@ int odin_event_timer_start(odin_event_loop_t *loop, uint64_t delay_us,
   if (timer_heap_prepare_push(loop) != 0) {
     return -1;
   }
-  odin_event_timer_t *timer =
-      (odin_event_timer_t *)calloc(1, sizeof(*timer));
+  odin_event_timer_t *timer = (odin_event_timer_t *)calloc(1, sizeof(*timer));
   if (timer == NULL) {
     errno = ENOMEM;
     return -1;
@@ -1352,9 +1346,8 @@ int odin_event_loop_test_fail_next_backend_wait(odin_event_loop_t *loop,
   return 0;
 }
 
-int odin_event_loop_test_prepare_wait(
-    odin_event_loop_t *loop,
-    odin_event_loop_test_wait_record_t *out) {
+int odin_event_loop_test_prepare_wait(odin_event_loop_t *loop,
+                                      odin_event_loop_test_wait_record_t *out) {
   assert_owner(loop);
   if (out == NULL) {
     errno = EINVAL;
@@ -1405,8 +1398,7 @@ int odin_event_loop_test_backend_fds(odin_event_loop_t *loop,
 }
 
 int odin_event_loop_test_fail_next_kqueue_change(odin_event_loop_t *loop,
-                                                 int change,
-                                                 unsigned int event,
+                                                 int change, unsigned int event,
                                                  int errnum) {
   assert_owner(loop);
 #if defined(__linux__)
@@ -1418,8 +1410,7 @@ int odin_event_loop_test_fail_next_kqueue_change(odin_event_loop_t *loop,
 #else
   if ((change != ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD &&
        change != ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_DELETE) ||
-      (event != ODIN_EVENT_READ && event != ODIN_EVENT_WRITE) ||
-      errnum <= 0) {
+      (event != ODIN_EVENT_READ && event != ODIN_EVENT_WRITE) || errnum <= 0) {
     errno = EINVAL;
     return -1;
   }
@@ -1430,8 +1421,7 @@ int odin_event_loop_test_fail_next_kqueue_change(odin_event_loop_t *loop,
 #endif
 }
 
-int odin_event_loop_test_kqueue_registered_mask(odin_event_loop_t *loop,
-                                                int fd,
+int odin_event_loop_test_kqueue_registered_mask(odin_event_loop_t *loop, int fd,
                                                 unsigned int *out_events) {
   assert_owner(loop);
 #if defined(__linux__)
@@ -1451,8 +1441,7 @@ int odin_event_loop_test_kqueue_registered_mask(odin_event_loop_t *loop,
 }
 
 int odin_event_loop_test_dispatch_backend_events(
-    odin_event_loop_t *loop,
-    const odin_event_loop_test_ready_t *entries,
+    odin_event_loop_t *loop, const odin_event_loop_test_ready_t *entries,
     size_t count) {
   assert_owner(loop);
   if (count > 0 && entries == NULL) {
@@ -1480,8 +1469,7 @@ int odin_event_loop_test_dispatch_backend_events(
 }
 
 int odin_event_loop_test_queue_backend_events(
-    odin_event_loop_t *loop,
-    const odin_event_loop_test_ready_t *entries,
+    odin_event_loop_t *loop, const odin_event_loop_test_ready_t *entries,
     size_t count) {
   assert_owner(loop);
   if (loop->queued_backend_events != NULL) {

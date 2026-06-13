@@ -20,9 +20,8 @@
 namespace {
 
 class EventLoopRunDeadline {
- public:
-  template <typename Fn>
-  static void Run(Fn fn) {
+public:
+  template <typename Fn> static void Run(Fn fn) {
     const pid_t pid = fork();
     ASSERT_NE(pid, -1) << std::strerror(errno);
     if (pid == 0) {
@@ -53,13 +52,9 @@ class EventLoopRunDeadline {
   }
 };
 
-void ExpectOk(int rc) {
-  EXPECT_EQ(rc, 0) << std::strerror(errno);
-}
+void ExpectOk(int rc) { EXPECT_EQ(rc, 0) << std::strerror(errno); }
 
-void AssertOk(int rc) {
-  ASSERT_EQ(rc, 0) << std::strerror(errno);
-}
+void AssertOk(int rc) { ASSERT_EQ(rc, 0) << std::strerror(errno); }
 
 void CreateNonblockingSocketpair(int fds[2]) {
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0)
@@ -415,8 +410,8 @@ TEST(OdinEventLoopTest, T8) {
   CreateNonblockingSocketpair(a);
   CreateNonblockingSocketpair(b);
   AssertOk(odin_event_loop_create(&loop));
-  AssertOk(odin_event_io_start(loop, a[1], ODIN_EVENT_READ, T8ACb, &state,
-                               &io_a));
+  AssertOk(
+      odin_event_io_start(loop, a[1], ODIN_EVENT_READ, T8ACb, &state, &io_a));
   AssertOk(odin_event_io_start(loop, b[1], ODIN_EVENT_READ, T8BCb, &state,
                                &state.io_b));
   const odin_event_loop_test_ready_t entries[] = {
@@ -483,8 +478,8 @@ TEST(OdinEventLoopTest, T10) {
     odin_event_timer_t *timer = nullptr;
     T10State state = {};
     AssertOk(odin_event_loop_create(&loop));
-    AssertOk(odin_event_timer_start(loop, 0, 60000000, T10TimerCb, &state,
-                                    &timer));
+    AssertOk(
+        odin_event_timer_start(loop, 0, 60000000, T10TimerCb, &state, &timer));
     EXPECT_EQ(odin_event_loop_run(loop), 0);
     EXPECT_EQ(state.timer_calls, 2);
     odin_event_loop_destroy(loop);
@@ -558,8 +553,8 @@ TEST(OdinEventLoopTest, T12) {
     T12State state = {};
     AssertOk(odin_event_loop_create(&loop));
     AssertOk(odin_event_timer_start(loop, 0, 0, T12TimerA, &state, &timer_a));
-    AssertOk(odin_event_timer_start(loop, 0, 0, T12TimerB, &state,
-                                    &state.timer_b));
+    AssertOk(
+        odin_event_timer_start(loop, 0, 0, T12TimerB, &state, &state.timer_b));
     EXPECT_EQ(odin_event_loop_run(loop), 0);
     EXPECT_EQ(state.a_calls, 1);
     EXPECT_EQ(state.b_calls, 0);
@@ -884,14 +879,13 @@ TEST(OdinEventLoopTest, T21) {
   for (unsigned int events : invalid_starts) {
     odin_event_io_t *out = reinterpret_cast<odin_event_io_t *>(0x1);
     errno = 0;
-    EXPECT_EQ(odin_event_io_start(loop, fds[1], events, NoopIoCb, nullptr,
-                                  &out),
-              -1);
+    EXPECT_EQ(
+        odin_event_io_start(loop, fds[1], events, NoopIoCb, nullptr, &out), -1);
     EXPECT_EQ(errno, EINVAL);
     EXPECT_EQ(out, reinterpret_cast<odin_event_io_t *>(0x1));
   }
-  AssertOk(odin_event_io_start(loop, fds[1], ODIN_EVENT_READ, NoopIoCb,
-                               nullptr, &io));
+  AssertOk(odin_event_io_start(loop, fds[1], ODIN_EVENT_READ, NoopIoCb, nullptr,
+                               &io));
   const unsigned int invalid_updates[] = {
       0,
       ODIN_EVENT_ERROR,
@@ -934,8 +928,8 @@ TEST(OdinEventLoopTest, T23) {
 #if defined(__linux__)
   errno = 0;
   EXPECT_EQ(odin_event_loop_test_fail_next_kqueue_change(
-                loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD,
-                ODIN_EVENT_WRITE, ENOSPC),
+                loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD, ODIN_EVENT_WRITE,
+                ENOSPC),
             -1);
   EXPECT_EQ(errno, EOPNOTSUPP);
   odin_event_loop_destroy(loop);
@@ -956,8 +950,8 @@ TEST(OdinEventLoopTest, T23) {
   ExpectOk(odin_event_loop_test_kqueue_registered_mask(loop, fds[1], &mask));
   EXPECT_EQ(mask, 0u);
 
-  AssertOk(odin_event_io_start(loop, fds[1], ODIN_EVENT_READ, NoopIoCb,
-                               nullptr, &io));
+  AssertOk(odin_event_io_start(loop, fds[1], ODIN_EVENT_READ, NoopIoCb, nullptr,
+                               &io));
   ExpectOk(odin_event_loop_test_kqueue_registered_mask(loop, fds[1], &mask));
   EXPECT_EQ(mask, ODIN_EVENT_READ);
   AssertOk(odin_event_loop_test_fail_next_kqueue_change(
@@ -1001,10 +995,10 @@ TEST(OdinEventLoopTest, T24) {
   int calls = 0;
   CreateNonblockingSocketpair(fds);
   AssertOk(odin_event_loop_create(&loop));
-  AssertOk(odin_event_io_start(loop, fds[1], ODIN_EVENT_READ, NoopIoCb,
-                               nullptr, &io));
-  AssertOk(odin_event_timer_start(loop, 60000000, 0, CountTimerCb, &calls,
-                                  &timer));
+  AssertOk(odin_event_io_start(loop, fds[1], ODIN_EVENT_READ, NoopIoCb, nullptr,
+                               &io));
+  AssertOk(
+      odin_event_timer_start(loop, 60000000, 0, CountTimerCb, &calls, &timer));
   ExpectOk(odin_event_post(loop, StopTask, &calls));
   ExpectOk(odin_event_loop_test_liveness(&before));
   EXPECT_EQ(before.loops, 1u);
@@ -1062,8 +1056,8 @@ TEST(OdinEventLoopTest, T27) {
   int timer_calls = 0;
   AssertOk(odin_event_loop_create(&loop));
   odin_event_loop_test_set_now_us(loop, 1000000);
-  AssertOk(odin_event_timer_start(loop, 60000000, 0, CountTimerCb,
-                                  &timer_calls, &timer));
+  AssertOk(odin_event_timer_start(loop, 60000000, 0, CountTimerCb, &timer_calls,
+                                  &timer));
   odin_event_timer_stop(timer);
   odin_event_loop_test_set_now_us(loop, 61000000);
   odin_event_loop_test_wait_record_t wait = {};

@@ -12,11 +12,11 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <csignal>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -40,9 +40,8 @@ namespace {
 // the loop and all assertions, then _exit(HasFailure() ? 1 : 0); the parent
 // fails the row unless the child exits 0 within the deadline.
 class DialRunDeadline {
- public:
-  template <typename Fn>
-  static void Run(Fn fn) {
+public:
+  template <typename Fn> static void Run(Fn fn) {
     const pid_t pid = fork();
     ASSERT_NE(pid, -1) << std::strerror(errno);
     if (pid == 0) {
@@ -132,8 +131,8 @@ void MakeTcpListener(int *out_lfd, struct sockaddr_in *out_addr) {
   *out_addr = addr;
 }
 
-// An unused loopback address: bind a 127.0.0.1:0 SO_REUSEADDR socket to claim an
-// ephemeral port, read it back, then close so a later connect is refused.
+// An unused loopback address: bind a 127.0.0.1:0 SO_REUSEADDR socket to claim
+// an ephemeral port, read it back, then close so a later connect is refused.
 void UnusedLoopbackAddr(struct sockaddr_in *out_addr) {
   const int s = socket(AF_INET, SOCK_STREAM, 0);
   ASSERT_GE(s, 0) << std::strerror(errno);
@@ -144,10 +143,12 @@ void UnusedLoopbackAddr(struct sockaddr_in *out_addr) {
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = 0;
-  ASSERT_EQ(bind(s, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)), 0)
+  ASSERT_EQ(bind(s, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)),
+            0)
       << std::strerror(errno);
   socklen_t alen = sizeof(addr);
-  ASSERT_EQ(getsockname(s, reinterpret_cast<struct sockaddr *>(&addr), &alen), 0)
+  ASSERT_EQ(getsockname(s, reinterpret_cast<struct sockaddr *>(&addr), &alen),
+            0)
       << std::strerror(errno);
   ASSERT_EQ(close(s), 0) << std::strerror(errno);
   *out_addr = addr;
@@ -187,9 +188,9 @@ TEST(OdinDialTest, T1) {
     DialState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_dial_t *d = nullptr;
     EXPECT_EQ(odin_dial_start(loop, reinterpret_cast<struct sockaddr *>(&addr),
@@ -238,7 +239,8 @@ TEST(OdinDialTest, T2) {
     std::memset(&un, 0, sizeof(un));
     un.sun_family = AF_UNIX;
     (void)std::snprintf(un.sun_path, sizeof(un.sun_path), "%s", path);
-    ASSERT_EQ(bind(lfd, reinterpret_cast<struct sockaddr *>(&un), sizeof(un)), 0)
+    ASSERT_EQ(bind(lfd, reinterpret_cast<struct sockaddr *>(&un), sizeof(un)),
+              0)
         << std::strerror(errno);
     ASSERT_EQ(listen(lfd, 1), 0) << std::strerror(errno);
 
@@ -248,9 +250,9 @@ TEST(OdinDialTest, T2) {
     DialState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_dial_t *d = nullptr;
     EXPECT_EQ(odin_dial_start(loop, reinterpret_cast<struct sockaddr *>(&un),
@@ -298,9 +300,9 @@ TEST(OdinDialTest, T3) {
     DialState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_dial_t *d = nullptr;
     EXPECT_EQ(odin_dial_start(loop, reinterpret_cast<struct sockaddr *>(&addr),
@@ -324,8 +326,8 @@ TEST(OdinDialTest, T3) {
   });
 }
 
-// T4 — AF_UNIX dial to a nonexistent path fails immediately and is delivered via
-// the deferred-error timer; socket closed.
+// T4 — AF_UNIX dial to a nonexistent path fails immediately and is delivered
+// via the deferred-error timer; socket closed.
 TEST(OdinDialTest, T4) {
   DialRunDeadline::Run([] {
     char path[108];
@@ -342,9 +344,9 @@ TEST(OdinDialTest, T4) {
     DialState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_dial_t *d = nullptr;
     EXPECT_EQ(odin_dial_start(loop, reinterpret_cast<struct sockaddr *>(&un),
@@ -393,12 +395,13 @@ TEST(OdinDialTest, T5) {
     EXPECT_EQ(d, reinterpret_cast<odin_dial_t *>(-1));
 
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state, &watchdog),
+        0);
     EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
 
-    EXPECT_EQ(state.calls, 0); // failed start created no dial, registered nothing
+    EXPECT_EQ(state.calls,
+              0); // failed start created no dial, registered nothing
     EXPECT_TRUE(state.timed_out);
 
     odin_event_loop_destroy(loop);
@@ -422,13 +425,12 @@ TEST(OdinDialTest, T6) {
     T6State s;
     s.done.loop = loop;
     odin_event_timer_t *destroyer = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 30000, 0, T6DestroyCb, &s,
-                                     &destroyer),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 30000, 0, T6DestroyCb, &s, &destroyer), 0);
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &s.done,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &s.done, &watchdog),
+        0);
 
     odin_dial_t *d = nullptr;
     EXPECT_EQ(odin_dial_start(loop, reinterpret_cast<struct sockaddr *>(&addr),
@@ -439,9 +441,10 @@ TEST(OdinDialTest, T6) {
     const int fd0 = odin_dial_test_fd(d);
     EXPECT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
 
-    EXPECT_GE(fd0, 0); // dial registered an in-flight attempt and owns the socket
-    EXPECT_EQ(s.done.calls, 0);   // destroy never invokes the callback
-    EXPECT_TRUE(s.done.timed_out); // only the watchdog stopped the loop
+    EXPECT_GE(fd0,
+              0); // dial registered an in-flight attempt and owns the socket
+    EXPECT_EQ(s.done.calls, 0);         // destroy never invokes the callback
+    EXPECT_TRUE(s.done.timed_out);      // only the watchdog stopped the loop
     EXPECT_EQ(fcntl(fd0, F_GETFD), -1); // destroy closed the still-owned socket
     EXPECT_EQ(errno, EBADF);
 
@@ -463,9 +466,9 @@ TEST(OdinDialTest, T7) {
     state.loop = loop;
     state.destroy_in_cb = true;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 100000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_dial_t *d = nullptr;
     EXPECT_EQ(odin_dial_start(loop, reinterpret_cast<struct sockaddr *>(&addr),
@@ -485,7 +488,8 @@ TEST(OdinDialTest, T7) {
     char buf[1] = {0};
     ASSERT_EQ(read(srv, buf, sizeof(buf)), 1) << std::strerror(errno);
     EXPECT_EQ(buf[0], 'z');
-    EXPECT_EQ(fcntl(state.fd, F_GETFD), 0); // destroy did not close handed-off fd
+    EXPECT_EQ(fcntl(state.fd, F_GETFD),
+              0); // destroy did not close handed-off fd
 
     EXPECT_EQ(close(state.fd), 0);
     EXPECT_EQ(close(srv), 0);

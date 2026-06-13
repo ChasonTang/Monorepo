@@ -63,25 +63,20 @@ int odin_event_loop_test_liveness(odin_event_loop_test_liveness_t *out);
 int odin_event_loop_test_fail_next_backend_create(int errnum);
 int odin_event_loop_test_fail_next_backend_wait(odin_event_loop_t *loop,
                                                 int errnum);
-int odin_event_loop_test_prepare_wait(
-    odin_event_loop_t *loop,
-    odin_event_loop_test_wait_record_t *out);
+int odin_event_loop_test_prepare_wait(odin_event_loop_t *loop,
+                                      odin_event_loop_test_wait_record_t *out);
 int odin_event_loop_test_backend_fds(odin_event_loop_t *loop,
                                      odin_event_loop_test_fd_record_t *out);
 int odin_event_loop_test_fail_next_kqueue_change(odin_event_loop_t *loop,
-                                                 int change,
-                                                 unsigned int event,
+                                                 int change, unsigned int event,
                                                  int errnum);
-int odin_event_loop_test_kqueue_registered_mask(odin_event_loop_t *loop,
-                                                int fd,
+int odin_event_loop_test_kqueue_registered_mask(odin_event_loop_t *loop, int fd,
                                                 unsigned int *out_events);
 int odin_event_loop_test_dispatch_backend_events(
-    odin_event_loop_t *loop,
-    const odin_event_loop_test_ready_t *entries,
+    odin_event_loop_t *loop, const odin_event_loop_test_ready_t *entries,
     size_t count);
 int odin_event_loop_test_queue_backend_events(
-    odin_event_loop_t *loop,
-    const odin_event_loop_test_ready_t *entries,
+    odin_event_loop_t *loop, const odin_event_loop_test_ready_t *entries,
     size_t count);
 
 #ifdef __cplusplus

@@ -27,12 +27,12 @@
  * fd is the owned socket, set to -1 the instant ownership leaves (handed to the
  * caller on OK, or closed on ERROR / abort). */
 struct odin_dial_t {
-  odin_dial_cb        on_done;
-  void               *user_data;
-  int                 fd;           /* owned socket; -1 once ownership leaves   */
-  int                 pending_err;  /* errno to deliver on the deferred path    */
-  odin_event_io_t    *io;           /* WRITE watch while connecting; else NULL  */
-  odin_event_timer_t *timer;        /* deferred-error timer; else NULL          */
+  odin_dial_cb on_done;
+  void *user_data;
+  int fd;                    /* owned socket; -1 once ownership leaves   */
+  int pending_err;           /* errno to deliver on the deferred path    */
+  odin_event_io_t *io;       /* WRITE watch while connecting; else NULL  */
+  odin_event_timer_t *timer; /* deferred-error timer; else NULL          */
 };
 
 /* Makes fd nonblocking. Returns 0, or -1 with errno set. */
@@ -93,9 +93,10 @@ static void on_writable(odin_event_loop_t *loop, odin_event_io_t *io, int fd,
   complete(d, so_error(fd));
 }
 
-/* Deferred delivery of an immediate connect(2) failure on the next loop turn. */
-static void on_deferred_error(odin_event_loop_t *loop, odin_event_timer_t *timer,
-                              void *user_data) {
+/* Deferred delivery of an immediate connect(2) failure on the next loop turn.
+ */
+static void on_deferred_error(odin_event_loop_t *loop,
+                              odin_event_timer_t *timer, void *user_data) {
   (void)loop;
   (void)timer;
   odin_dial_t *d = (odin_dial_t *)user_data;

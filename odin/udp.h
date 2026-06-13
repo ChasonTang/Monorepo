@@ -48,15 +48,15 @@ extern "C" {
 typedef struct odin_udp_t odin_udp_t;
 
 typedef enum odin_udp_io_t {
-  ODIN_UDP_OK = 0,      /* transferred one datagram of *out_n bytes      */
-  ODIN_UDP_AGAIN,       /* would block; wait for the next readiness       */
-  ODIN_UDP_IO_ERROR,    /* failed; errno is set                           */
+  ODIN_UDP_OK = 0,   /* transferred one datagram of *out_n bytes      */
+  ODIN_UDP_AGAIN,    /* would block; wait for the next readiness       */
+  ODIN_UDP_IO_ERROR, /* failed; errno is set                           */
 } odin_udp_io_t;
 
 /* Readiness flags (same values as ODIN_EVENT_*): output bits delivered to
  * odin_udp_ready_cb, and the input mask accepted by set_interest (READ|WRITE
  * only; ERROR is output-only). */
-#define ODIN_UDP_READ  0x01u
+#define ODIN_UDP_READ 0x01u
 #define ODIN_UDP_WRITE 0x02u
 #define ODIN_UDP_ERROR 0x04u
 
@@ -64,8 +64,8 @@ typedef void (*odin_udp_ready_cb)(odin_udp_t *u, unsigned int events,
                                   void *user_data);
 
 int odin_udp_open(odin_event_loop_t *loop, const struct sockaddr *addr,
-                  socklen_t addrlen, odin_udp_ready_cb on_ready, void *user_data,
-                  odin_udp_t **out);
+                  socklen_t addrlen, odin_udp_ready_cb on_ready,
+                  void *user_data, odin_udp_t **out);
 
 odin_udp_io_t odin_udp_recv(odin_udp_t *u, void *buf, size_t len, size_t *out_n,
                             struct sockaddr *src, socklen_t *srclen);

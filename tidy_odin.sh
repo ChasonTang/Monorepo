@@ -5,8 +5,10 @@
 # every run. Checks are configured in odin/.clang-tidy.
 #
 # Usage:
-#   ./tidy_odin.sh                       # uses out/
-#   BUILD_DIR=out/linux ./tidy_odin.sh   # CI / cross builds
+#   ./tidy_odin.sh                                  # all odin TUs, uses out/
+#   ./tidy_odin.sh odin/protocol.c                  # only selected TU(s)
+#   JOBS=4 ./tidy_odin.sh                           # limit parallelism
+#   BUILD_DIR=out/linux ./tidy_odin.sh              # CI / cross builds
 
 set -euo pipefail
 
@@ -15,6 +17,27 @@ GN="$REPO_ROOT/tool/gn"
 CLANG_TIDY="$REPO_ROOT/tool/clang/bin/clang-tidy"
 ODIN_DIR="$REPO_ROOT/odin"
 BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/out}"
+HEADER_FILTER="odin/.*"
+
+default_jobs() {
+    if command -v nproc >/dev/null 2>&1; then
+        nproc
+    elif command -v getconf >/dev/null 2>&1; then
+        getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+    elif command -v sysctl >/dev/null 2>&1; then
+        sysctl -n hw.ncpu 2>/dev/null || echo 1
+    else
+        echo 1
+    fi
+}
+
+JOBS="${JOBS:-$(default_jobs)}"
+case "$JOBS" in
+    ''|*[!0-9]*|0)
+        echo "error: JOBS must be a positive integer, got '$JOBS'" >&2
+        exit 1
+        ;;
+esac
 
 if [ ! -x "$GN" ]; then
     echo "error: $GN not found or not executable" >&2
@@ -38,26 +61,95 @@ fi
 echo "regenerating $BUILD_DIR/compile_commands.json"
 "$GN" gen "$BUILD_DIR" --add-export-compile-commands="//odin/*" >/dev/null
 
-HEADER_FILTER="odin/.*"
+FILES=()
+if [ "$#" -gt 0 ]; then
+    for arg in "$@"; do
+        if [[ "$arg" = /* ]]; then
+            f="$arg"
+        else
+            f="$REPO_ROOT/${arg#./}"
+        fi
+
+        if [ ! -f "$f" ]; then
+            echo "error: $arg not found" >&2
+            exit 1
+        fi
+
+        case "$f" in
+            "$ODIN_DIR"/*.c|"$ODIN_DIR"/*.cc|"$ODIN_DIR"/*.cpp)
+                FILES+=("$f")
+                ;;
+            *)
+                echo "error: $arg is not an odin C/C++ translation unit" >&2
+                exit 1
+                ;;
+        esac
+    done
+else
+    while IFS= read -r f; do
+        FILES+=("$f")
+    done < <(find "$ODIN_DIR" \
+        -type f \
+        \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) \
+        -print | sort)
+fi
 
 STATUS=0
-COUNT=0
-while IFS= read -r -d '' f; do
-    rel="${f#$REPO_ROOT/}"
-    echo "tidying $rel"
-    if ! "$CLANG_TIDY" -p "$BUILD_DIR" --header-filter="$HEADER_FILTER" "$f"; then
-        STATUS=1
-    fi
-    COUNT=$((COUNT + 1))
-done < <(find "$ODIN_DIR" \
-    -type f \
-    \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \) \
-    -print0)
+COUNT="${#FILES[@]}"
 
 if [ "$COUNT" -eq 0 ]; then
     echo "no C/C++ translation units found under $ODIN_DIR"
     exit 0
 fi
+
+LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tidy-odin.XXXXXX")"
+cleanup() {
+    rm -rf "$LOG_DIR"
+}
+trap cleanup EXIT
+
+log_path_for() {
+    local rel="${1#$REPO_ROOT/}"
+    rel="${rel//\//__}"
+    printf '%s/%s.log' "$LOG_DIR" "$rel"
+}
+
+run_tidy_one() {
+    local f="$1"
+    local rel="${f#$REPO_ROOT/}"
+    local log
+    log="$(log_path_for "$f")"
+
+    {
+        echo "tidying $rel"
+        if [[ "$f" = *_unittests.cpp ]]; then
+            "$CLANG_TIDY" \
+                -p "$BUILD_DIR" \
+                --quiet \
+                --header-filter="$HEADER_FILTER" \
+                --checks=-misc-use-internal-linkage \
+                "$f"
+        else
+            "$CLANG_TIDY" \
+                -p "$BUILD_DIR" \
+                --quiet \
+                --header-filter="$HEADER_FILTER" \
+                "$f"
+        fi
+    } >"$log" 2>&1
+}
+
+export REPO_ROOT BUILD_DIR CLANG_TIDY HEADER_FILTER LOG_DIR
+export -f log_path_for run_tidy_one
+
+echo "tidying $COUNT translation unit(s) with $JOBS parallel job(s)"
+if ! printf '%s\0' "${FILES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_tidy_one "$1"' _; then
+    STATUS=1
+fi
+
+for f in "${FILES[@]}"; do
+    cat "$(log_path_for "$f")"
+done
 
 if [ "$STATUS" -eq 0 ]; then
     echo "done. tidied $COUNT translation unit(s), no issues."

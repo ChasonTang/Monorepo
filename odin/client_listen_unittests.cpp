@@ -21,8 +21,7 @@
 
 namespace {
 
-constexpr const char kResp200[] =
-    "HTTP/1.1 200 Connection Established\r\n\r\n";
+constexpr const char kResp200[] = "HTTP/1.1 200 Connection Established\r\n\r\n";
 constexpr size_t kResp200Len = sizeof(kResp200) - 1; // 39
 
 constexpr const char kResp400[] = "HTTP/1.1 400 Bad Request\r\n\r\n";
@@ -110,8 +109,7 @@ TEST(OdinClientListenTest, T2RejectedResponses) {
       {"CONNECT bad HTTP/1.1\r\n\r\n", kResp400, kResp400Len},
       {"CONNECT a:1 HTTP/2.0\r\n\r\n", kResp505, kResp505Len},
       {"CONNECT a:99999 HTTP/1.1\r\n\r\n", kResp400, kResp400Len},
-      {std::string("CONNECT ") + std::string(256, 'x') +
-           ":1 HTTP/1.1\r\n\r\n",
+      {std::string("CONNECT ") + std::string(256, 'x') + ":1 HTTP/1.1\r\n\r\n",
        kResp400, kResp400Len},
   };
 
@@ -122,8 +120,7 @@ TEST(OdinClientListenTest, T2RejectedResponses) {
         << "req=" << c.request;
     ASSERT_EQ(shutdown(fds[0], SHUT_WR), 0) << strerror(errno);
 
-    EXPECT_EQ(odin_client_listen_handshake(fds[1]),
-              ODIN_CLIENT_LISTEN_REJECTED)
+    EXPECT_EQ(odin_client_listen_handshake(fds[1]), ODIN_CLIENT_LISTEN_REJECTED)
         << "req=" << c.request;
 
     const std::string got = DrainToEof(fds[0]);
@@ -259,8 +256,7 @@ TEST(OdinClientListenTest, T8OpenBindsLoopbackEphemeral) {
 
   int reuse = 0;
   socklen_t rlen = sizeof(reuse);
-  ASSERT_EQ(
-      getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, &rlen), 0)
+  ASSERT_EQ(getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, &rlen), 0)
       << strerror(errno);
   EXPECT_NE(reuse, 0);
 

@@ -404,9 +404,9 @@ TEST(OdinHttpResponseTest, T1OkExactBytes) {
   const odin_http_response_t r = odin_http_response_for_status(ODIN_HTTP_OK);
   ASSERT_NE(r.bytes, nullptr);
   EXPECT_EQ(r.len, static_cast<size_t>(39));
-  EXPECT_EQ(std::memcmp(r.bytes, "HTTP/1.1 200 Connection Established\r\n\r\n",
-                        39),
-            0);
+  EXPECT_EQ(
+      std::memcmp(r.bytes, "HTTP/1.1 200 Connection Established\r\n\r\n", 39),
+      0);
 }
 
 // T2 — The three 400-mapped errors share one byte sequence.
@@ -430,18 +430,19 @@ TEST(OdinHttpResponseTest, T3NonBadRequestExactBytes) {
     const odin_http_response_t r =
         odin_http_response_for_status(ODIN_HTTP_ERR_BAD_METHOD);
     EXPECT_EQ(r.len, static_cast<size_t>(51));
-    EXPECT_EQ(std::memcmp(
-                  r.bytes,
-                  "HTTP/1.1 405 Method Not Allowed\r\nAllow: CONNECT\r\n\r\n",
-                  51),
-              0);
+    EXPECT_EQ(
+        std::memcmp(r.bytes,
+                    "HTTP/1.1 405 Method Not Allowed\r\nAllow: CONNECT\r\n\r\n",
+                    51),
+        0);
   }
   {
     const odin_http_response_t r =
         odin_http_response_for_status(ODIN_HTTP_ERR_BAD_VERSION);
     EXPECT_EQ(r.len, static_cast<size_t>(43));
     EXPECT_EQ(std::memcmp(r.bytes,
-                          "HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n", 43),
+                          "HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n",
+                          43),
               0);
   }
   {

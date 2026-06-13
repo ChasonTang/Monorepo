@@ -3,9 +3,9 @@
  * Single-thread, event-loop-driven nonblocking socket dialer (RFC-012).
  *
  * Given a live odin_event_loop_t and an already-resolved struct sockaddr,
- * odin_dial_start creates one nonblocking SOCK_STREAM socket, issues connect(2),
- * and resolves the attempt entirely from the loop -- watching the socket for
- * writability through the RFC-010 odin_event_io_* API and reading
+ * odin_dial_start creates one nonblocking SOCK_STREAM socket, issues
+ * connect(2), and resolves the attempt entirely from the loop -- watching the
+ * socket for writability through the RFC-010 odin_event_io_* API and reading
  * getsockopt(SO_ERROR) to classify the outcome, or, when connect(2) fails
  * immediately, carrying that error to the next loop turn through a 0-delay
  * one-shot odin_event_timer. It performs no name resolution and selects no
@@ -21,12 +21,12 @@
  * Completion: on_done fires exactly once on the owner thread, as the dial's
  * final action -- no dial state is read or written after on_done returns, so
  * odin_dial_destroy(dial) is legal from inside on_done. ODIN_DIAL_OK carries
- * err == 0 and fd set to the connected socket; the caller's ownership of that fd
- * begins at that moment and the dial never closes it. ODIN_DIAL_ERROR carries
- * fd == -1 and err set to the failing connection errno, the socket the dial
- * created already closed; status is the authoritative signal. Even a connect(2)
- * that completes synchronously is reported on a later loop turn, never
- * re-entrantly from within odin_dial_start.
+ * err == 0 and fd set to the connected socket; the caller's ownership of that
+ * fd begins at that moment and the dial never closes it. ODIN_DIAL_ERROR
+ * carries fd == -1 and err set to the failing connection errno, the socket the
+ * dial created already closed; status is the authoritative signal. Even a
+ * connect(2) that completes synchronously is reported on a later loop turn,
+ * never re-entrantly from within odin_dial_start.
  */
 
 #ifndef ODIN_DIAL_H_
@@ -68,9 +68,9 @@ int odin_dial_start(odin_event_loop_t *loop, const struct sockaddr *addr,
  * deferred-error timer), closes the socket only if the dial still owns it (an
  * in-flight or aborted attempt -- after ODIN_DIAL_OK the socket has passed to
  * the caller, after ODIN_DIAL_ERROR it is already closed), frees the dial
- * object, and never invokes on_done. odin_dial_destroy(NULL) is a no-op, and the
- * pointer is dead afterward. Callable from within on_done to reclaim a completed
- * dial, or on an in-flight dial to abort it.
+ * object, and never invokes on_done. odin_dial_destroy(NULL) is a no-op, and
+ * the pointer is dead afterward. Callable from within on_done to reclaim a
+ * completed dial, or on an in-flight dial to abort it.
  */
 void odin_dial_destroy(odin_dial_t *dial);
 
