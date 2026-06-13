@@ -272,11 +272,11 @@ clang_toolchain("clang_linux_x64") {
   }
 }
 
-# iOS device: arm64-only. Min deployment ios10.0 is encoded in the triple
+# iOS device: arm64-only. Min deployment ios15.0 is encoded in the triple
 # (LLVM ≥11 prefers triple-embedded versions over -mios-version-min flags).
 clang_toolchain("clang_ios_device") {
   is_apple = true
-  target_triple = "arm64-apple-ios10.0"
+  target_triple = "arm64-apple-ios15.0"
   sysroot_path = "//build/sdk/iPhoneOS.sdk"
   toolchain_args = {
     current_os = "ios"
@@ -290,8 +290,8 @@ clang_toolchain("clang_ios_device") {
 # driver pick libclang_rt.iossim.a instead of libclang_rt.ios.a.
 clang_toolchain("clang_ios_sim") {
   is_apple = true
-  target_triple_x64 = "x86_64-apple-ios10.0-simulator"
-  target_triple_arm64 = "arm64-apple-ios10.0-simulator"
+  target_triple_x64 = "x86_64-apple-ios15.0-simulator"
+  target_triple_arm64 = "arm64-apple-ios15.0-simulator"
   sysroot_path = "//build/sdk/iPhoneSimulator.sdk"
   toolchain_args = {
     current_os = "ios"
