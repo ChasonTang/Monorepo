@@ -10,6 +10,3 @@
 [submodule "googletest"]
 	path = googletest
 	url = git@github.com:google/googletest.git
-[submodule "skia"]
-	path = third_party/skia
-	url = git@github.com:google/skia.git

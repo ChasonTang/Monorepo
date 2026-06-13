@@ -1,246 +1,284 @@
 # Toolchain definitions
 
-toolchain("clang") {
-  prefix = rebase_path("//tool/clang/bin", root_build_dir)
-  clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
-  sysroot = rebase_path("//build/sdk/MacOSX.sdk", root_build_dir)
+# Shared clang toolchain template covering every supported platform family:
+#
+#   - Apple Mach-O (mac, ios device, ios simulator) — is_apple=true:
+#     ObjC/ObjC++ tools are defined, ld64.lld is driven with @rpath /
+#     @loader_path / @executable_path install names, the bundled static
+#     libc++.a is linked explicitly via -nostdlib++, no -fPIC needed
+#     (Mach-O is PIC by construction).
+#
+#   - ELF (linux) — is_apple=false:
+#     no ObjC tools, ld.lld is driven with DT_SONAME / $ORIGIN, libc++ and
+#     libunwind are pulled in by the driver via -static-libstdc++
+#     -unwindlib=libunwind, -fPIC is required for shared objects.
+#
+# Invoker variables:
+#   is_apple             — selects family (Mach-O vs ELF) per above.
+#   sysroot_path         — //-prefixed GN path to the sysroot directory.
+#   target_triple        — full --target= string. Use this when the toolchain
+#                          serves a single CPU (e.g. linux x64, ios device
+#                          arm64).
+#   target_triple_x64,
+#   target_triple_arm64  — alternative to target_triple, used when one
+#                          toolchain serves both x64 and arm64 (e.g. mac,
+#                          ios simulator). The template picks by current_cpu
+#                          at toolchain-evaluation time, which lets the same
+#                          definition serve both the default toolchain
+#                          (current_cpu defaults from target_cpu in
+#                          BUILDCONFIG) and any secondary references
+#                          (current_cpu set via toolchain_args).
+#   toolchain_args       — forwarded to the toolchain() block. Must set
+#                          current_os, and (for dual-CPU toolchains)
+#                          current_cpu = target_cpu so secondary references
+#                          don't silently fall back to host_cpu.
+template("clang_toolchain") {
+  toolchain(target_name) {
+    forward_variables_from(invoker,
+                           [
+                             "is_apple",
+                             "sysroot_path",
+                             "toolchain_args",
+                           ])
+    not_needed([ "target_name" ])
 
-  # Map current_cpu to a Mach-O target triple. --target= tells clang to emit
-  # objects for the requested architecture and tells the lld driver which
-  # slice to pull from the universal libc++.a / libclang_rt.osx.a / *.tbd
-  # inputs the bundled SDK and toolchain ship. Driving the arch off
-  # current_cpu lets a single toolchain definition serve both the default
-  # toolchain (current_cpu defaults from target_cpu in BUILDCONFIG) and any
-  # secondary references (current_cpu set via toolchain_args below).
-  if (current_cpu == "x64") {
-    target_triple = "x86_64-apple-macos"
-  } else {
-    target_triple = "arm64-apple-macos"
+    prefix = rebase_path("//tool/clang/bin", root_build_dir)
+    clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
+    sysroot = rebase_path(sysroot_path, root_build_dir)
+
+    # --target= tells clang which backend / Mach-O slice / ELF machine to
+    # emit, and tells the lld driver which slice to pull from any universal
+    # archive (libc++.a / libclang_rt.*.a / *.tbd) the SDK and toolchain ship.
+    if (defined(invoker.target_triple)) {
+      target_triple = invoker.target_triple
+    } else if (current_cpu == "x64") {
+      target_triple = invoker.target_triple_x64
+    } else {
+      target_triple = invoker.target_triple_arm64
+    }
+
+    if (is_apple) {
+      # -isysroot is needed by both the frontend (header search) and the
+      # linker (-syslibroot), so it lives in the shared compile_flags.
+      # --target= must be in both compile and link flags so the driver picks
+      # the right backend and passes -arch + -platform_version to ld64.lld.
+      compile_flags = "--target=$target_triple -isysroot $sysroot"
+
+      # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld
+      # (Xcode's ld64), so the link is fully hermetic and faster.
+      # -nostdlib++ suppresses the driver's automatic -lc++ (which would
+      # resolve to the SDK's libc++.dylib); we link the bundled static
+      # libc++.a explicitly in solink/link so binaries don't depend on the
+      # host's libc++ ABI.
+      link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
+    } else {
+      # -fPIC is required for code that ends up in a .so. Mach-O is PIC by
+      # construction so the Apple toolchains don't need this; ELF defaults
+      # to absolute addressing and ld.lld rejects R_X86_64_PC32 against
+      # globals when producing a shared object. Applied uniformly because
+      # component() in debug mode is shared_library and in release mode is
+      # source_set that gets aggregated into a .so by consumers — both want
+      # PIC.
+      compile_flags = "--target=$target_triple --sysroot=$sysroot -fPIC"
+
+      # -fuse-ld=lld is required, not optional: the bundled Fuchsia clang
+      # has CLANG_DEFAULT_LINKER unset, so without it the driver would
+      # invoke /usr/bin/ld (ld64 on a macOS host) and refuse the ELF
+      # objects.
+      #
+      # -static-libstdc++ + -unwindlib=libunwind let the driver itself find
+      # and statically link the bundled libc++.a / libunwind.a from
+      # tool/clang/lib/<triple>/, plus the right CRT objects and
+      # compiler-rt. No need to spell out paths or -nostdlib++.
+      link_flags =
+          "$compile_flags -fuse-ld=lld -static-libstdc++ -unwindlib=libunwind"
+    }
+
+    cc = "$prefix/clang"
+    cxx = "$prefix/clang++"
+    asm = "$prefix/clang"
+    ar = "$prefix/llvm-ar"
+    ld = "$prefix/clang++"
+
+    tool("cc") {
+      depfile = "{{output}}.d"
+      command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+      depsformat = "gcc"
+      outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+    }
+
+    tool("cxx") {
+      depfile = "{{output}}.d"
+      command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+      depsformat = "gcc"
+      outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+    }
+
+    tool("asm") {
+      depfile = "{{output}}.d"
+      command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+      depsformat = "gcc"
+      outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+    }
+
+    tool("alink") {
+      rspfile = "{{output}}.rsp"
+      command = "$ar rcs {{output}} @$rspfile"
+      rspfile_content = "{{inputs}}"
+      outputs =
+          [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
+      default_output_extension = ".a"
+      output_prefix = "lib"
+    }
+
+    tool("stamp") {
+      command = "touch {{output}}"
+    }
+
+    tool("copy") {
+      command = "cp -af {{source}} {{output}}"
+    }
+
+    if (is_apple) {
+      # ObjC is a superset of C and ObjC++ a superset of C++, so the C / C++
+      # flag streams are inherited too — a config that sets cflags_cc (e.g.
+      # //build:no_rtti / //build:no_exceptions) takes effect on .mm sources
+      # without having to also set cflags_objcc. This matches the convention
+      # in Chromium / Flutter engine's mac toolchains.
+      #
+      # -fobjc-arc is appended after {{cflags_objc}} / {{cflags_objcc}} so
+      # it wins over any per-target opt-out — ARC is a project-wide policy,
+      # not a knob. Manual retain/release/autorelease in .m/.mm sources will
+      # fail to compile, which is the intended guardrail.
+      tool("objc") {
+        depfile = "{{output}}.d"
+        command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} {{cflags_objc}} -fobjc-arc -c {{source}} -o {{output}}"
+        depsformat = "gcc"
+        outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+      }
+
+      tool("objcxx") {
+        depfile = "{{output}}.d"
+        command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -fobjc-arc -c {{source}} -o {{output}}"
+        depsformat = "gcc"
+        outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+      }
+
+      tool("solink") {
+        rspfile = "{{output}}.rsp"
+
+        # -install_name @rpath/<leaf> makes dependents resolve via the
+        # consumer's rpath instead of dyld's system search path. Without
+        # this, bare-name install names collide with
+        # /usr/lib/libcrypto.*.dylib and dyld aborts with "loading libcrypto
+        # in an unsafe way".
+        #
+        # -rpath @loader_path lets a dylib find its sibling dylibs in its
+        # own directory regardless of which binary loaded it, instead of
+        # relying on the consumer's rpath being set up correctly.
+        command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
+        rspfile_content = "{{inputs}}"
+        default_output_extension = ".dylib"
+        output_prefix = "lib"
+        outputs =
+            [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
+      }
+
+      tool("link") {
+        # Output executables to the root output directory, not obj
+        # directory.
+        outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
+        rspfile = "$outfile.rsp"
+
+        # -rpath @executable_path lets the binary resolve sibling dylibs
+        # whose install names start with @rpath/.
+        command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
+        rspfile_content = "{{inputs}}"
+        outputs = [ outfile ]
+      }
+    } else {
+      tool("solink") {
+        rspfile = "{{output}}.rsp"
+
+        # ELF analogues of the Apple solink flags:
+        #   -Wl,-soname,<leaf>     ↔ -install_name @rpath/<leaf>
+        #     records DT_SONAME so consumers reference the leaf, not the
+        #     build path.
+        #   -Wl,-rpath,$ORIGIN     ↔ -Wl,-rpath,@loader_path
+        #     lets a .so locate sibling .so files in its own directory.
+        # The driver auto-adds --as-needed -lunwind --no-as-needed;
+        # pthread/dl are not added by the driver, so we wrap them manually
+        # so pure-C targets don't carry spurious DT_NEEDED entries.
+        command = "$ld $link_flags -shared -Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
+        rspfile_content = "{{inputs}}"
+        default_output_extension = ".so"
+        output_prefix = "lib"
+        outputs =
+            [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
+      }
+
+      tool("link") {
+        outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
+        rspfile = "$outfile.rsp"
+
+        # -Wl,-rpath,$ORIGIN ↔ -Wl,-rpath,@executable_path on macOS.
+        command = "$ld $link_flags -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
+        rspfile_content = "{{inputs}}"
+        outputs = [ outfile ]
+      }
+    }
   }
+}
 
-  # -isysroot is needed by both the frontend (header search) and the linker
-  # (-syslibroot), so it lives in the shared compile_flags. --target= must be
-  # in both compile and link flags so the driver picks the right backend and
-  # passes -arch + -platform_version to ld64.lld.
-  compile_flags = "--target=$target_triple -isysroot $sysroot"
-
-  # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld (Xcode's
-  # ld64), so the link is fully hermetic and faster.
-  # -nostdlib++ suppresses the driver's automatic -lc++ (which would resolve to
-  # the SDK's libc++.dylib); we link the bundled static libc++.a explicitly so
-  # binaries don't depend on the host's libc++ ABI.
-  link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
-
-  cc = "$prefix/clang"
-  cxx = "$prefix/clang++"
-  asm = "$prefix/clang"
-  ar = "$prefix/llvm-ar"
-  ld = "$prefix/clang++"
-
-  tool("cc") {
-    depfile = "{{output}}.d"
-    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("cxx") {
-    depfile = "{{output}}.d"
-    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  # ObjC is a superset of C and ObjC++ a superset of C++, so the C / C++
-  # flag streams are inherited too — a config that sets cflags_cc (e.g.
-  # //build:no_rtti / //build:no_exceptions) takes effect on .mm sources
-  # without having to also set cflags_objcc. This matches the convention in
-  # Chromium / Flutter engine's mac toolchains.
-  #
-  # -fobjc-arc is appended after {{cflags_objc}} / {{cflags_objcc}} so it wins
-  # over any per-target opt-out — ARC is a project-wide policy, not a knob.
-  # Manual retain/release/autorelease in .m/.mm sources will fail to compile,
-  # which is the intended guardrail.
-  tool("objc") {
-    depfile = "{{output}}.d"
-    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} {{cflags_objc}} -fobjc-arc -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("objcxx") {
-    depfile = "{{output}}.d"
-    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -fobjc-arc -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("asm") {
-    depfile = "{{output}}.d"
-    command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("alink") {
-    rspfile = "{{output}}.rsp"
-    command = "$ar rcs {{output}} @$rspfile"
-    rspfile_content = "{{inputs}}"
-    outputs =
-        [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
-    default_output_extension = ".a"
-    output_prefix = "lib"
-  }
-
-  tool("solink") {
-    rspfile = "{{output}}.rsp"
-
-    # -install_name @rpath/<leaf> makes dependents resolve via the consumer's
-    # rpath instead of dyld's system search path. Without this, bare-name
-    # install names collide with /usr/lib/libcrypto.*.dylib and dyld aborts
-    # with "loading libcrypto in an unsafe way".
-    #
-    # -rpath @loader_path lets a dylib find its sibling dylibs in its own
-    # directory regardless of which binary loaded it, instead of relying on
-    # the consumer's rpath being set up correctly.
-    command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
-    rspfile_content = "{{inputs}}"
-    default_output_extension = ".dylib"
-    output_prefix = "lib"
-    outputs = [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
-  }
-
-  tool("link") {
-    # Output executables to the root output directory, not obj directory
-    outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
-    rspfile = "$outfile.rsp"
-
-    # -rpath @executable_path lets the binary resolve sibling dylibs whose
-    # install names start with @rpath/.
-    command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
-    rspfile_content = "{{inputs}}"
-    outputs = [ outfile ]
-  }
-
-  tool("stamp") {
-    command = "touch {{output}}"
-  }
-
-  tool("copy") {
-    command = "cp -af {{source}} {{output}}"
-  }
-
+# macOS: one toolchain serves both x64 and arm64 — current_cpu drives the
+# triple. toolchain_args must set current_cpu = target_cpu so any secondary
+# reference to //build/toolchain:clang gets target-arch binaries, not
+# host-arch (which would silently link into a target-arch dylib).
+clang_toolchain("clang") {
+  is_apple = true
+  target_triple_x64 = "x86_64-apple-macos"
+  target_triple_arm64 = "arm64-apple-macos"
+  sysroot_path = "//build/sdk/MacOSX.sdk"
   toolchain_args = {
-    # This toolchain produces binaries for the build's target_cpu — the
-    # arch selection is keyed off current_cpu (see target_triple above), so
-    # any secondary reference to //build/toolchain:clang must set
-    # current_cpu = target_cpu, not host_cpu, otherwise it would silently
-    # build host-arch binaries and link them into a target-arch dylib.
     current_os = "mac"
     current_cpu = target_cpu
   }
 }
 
-toolchain("clang_linux_x64") {
-  prefix = rebase_path("//tool/clang/bin", root_build_dir)
-  sysroot =
-      rebase_path("//build/sdk/debian_bullseye_amd64-sysroot", root_build_dir)
+# Linux x86_64.
+clang_toolchain("clang_linux_x64") {
+  is_apple = false
   target_triple = "x86_64-unknown-linux-gnu"
-
-  # -fPIC is required for code that ends up in a .so. Mach-O is PIC by
-  # construction so the macOS toolchain doesn't need this; ELF defaults to
-  # absolute addressing and ld.lld rejects R_X86_64_PC32 against globals
-  # when producing a shared object. Applied uniformly because component()
-  # in debug mode is shared_library and in release mode is source_set that
-  # gets aggregated into a .so by consumers — both want PIC.
-  compile_flags = "--target=$target_triple --sysroot=$sysroot -fPIC"
-
-  # -fuse-ld=lld is required, not optional: the bundled Fuchsia clang has
-  # CLANG_DEFAULT_LINKER unset, so without it the driver would invoke
-  # /usr/bin/ld (ld64 on a macOS host) and refuse the ELF objects.
-  #
-  # -static-libstdc++ + -unwindlib=libunwind let the driver itself find and
-  # statically link the bundled libc++.a / libunwind.a from
-  # tool/clang/lib/<triple>/, plus the right CRT objects and compiler-rt.
-  # No need to spell out paths or -nostdlib++.
-  link_flags =
-      "$compile_flags -fuse-ld=lld -static-libstdc++ -unwindlib=libunwind"
-
-  cc = "$prefix/clang"
-  cxx = "$prefix/clang++"
-  asm = "$prefix/clang"
-  ar = "$prefix/llvm-ar"
-  ld = "$prefix/clang++"
-
-  tool("cc") {
-    depfile = "{{output}}.d"
-    command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("cxx") {
-    depfile = "{{output}}.d"
-    command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("asm") {
-    depfile = "{{output}}.d"
-    command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
-    depsformat = "gcc"
-    outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
-  }
-
-  tool("alink") {
-    rspfile = "{{output}}.rsp"
-    command = "$ar rcs {{output}} @$rspfile"
-    rspfile_content = "{{inputs}}"
-    outputs =
-        [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
-    default_output_extension = ".a"
-    output_prefix = "lib"
-  }
-
-  tool("solink") {
-    rspfile = "{{output}}.rsp"
-
-    # ELF analogues of the macOS solink flags:
-    #   -Wl,-soname,<leaf>     ↔ -install_name @rpath/<leaf>
-    #     records DT_SONAME so consumers reference the leaf, not the build path.
-    #   -Wl,-rpath,$ORIGIN     ↔ -Wl,-rpath,@loader_path
-    #     lets a .so locate sibling .so files in its own directory.
-    # The driver auto-adds --as-needed -lunwind --no-as-needed; pthread/dl are
-    # not added by the driver, so we wrap them manually so pure-C targets don't
-    # carry spurious DT_NEEDED entries.
-    command = "$ld $link_flags -shared -Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
-    rspfile_content = "{{inputs}}"
-    default_output_extension = ".so"
-    output_prefix = "lib"
-    outputs = [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
-  }
-
-  tool("link") {
-    outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
-    rspfile = "$outfile.rsp"
-
-    # -Wl,-rpath,$ORIGIN ↔ -Wl,-rpath,@executable_path on macOS.
-    command = "$ld $link_flags -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} -Wl,--as-needed -lpthread -ldl -Wl,--no-as-needed"
-    rspfile_content = "{{inputs}}"
-    outputs = [ outfile ]
-  }
-
-  tool("stamp") {
-    command = "touch {{output}}"
-  }
-
-  tool("copy") {
-    command = "cp -af {{source}} {{output}}"
-  }
-
+  sysroot_path = "//build/sdk/debian_bullseye_amd64-sysroot"
   toolchain_args = {
     current_os = "linux"
     current_cpu = "x64"
+  }
+}
+
+# iOS device: arm64-only. Min deployment ios10.0 is encoded in the triple
+# (LLVM ≥11 prefers triple-embedded versions over -mios-version-min flags).
+clang_toolchain("clang_ios_device") {
+  is_apple = true
+  target_triple = "arm64-apple-ios10.0"
+  sysroot_path = "//build/sdk/iPhoneOS.sdk"
+  toolchain_args = {
+    current_os = "ios"
+    current_cpu = "arm64"
+  }
+}
+
+# iOS simulator: arm64 (Apple Silicon hosts) or x64 (Intel hosts). One
+# toolchain serves both arches — current_cpu drives the triple, mirroring
+# the macOS pattern. The "-simulator" environment suffix is what makes the
+# driver pick libclang_rt.iossim.a instead of libclang_rt.ios.a.
+clang_toolchain("clang_ios_sim") {
+  is_apple = true
+  target_triple_x64 = "x86_64-apple-ios10.0-simulator"
+  target_triple_arm64 = "arm64-apple-ios10.0-simulator"
+  sysroot_path = "//build/sdk/iPhoneSimulator.sdk"
+  toolchain_args = {
+    current_os = "ios"
+    current_cpu = target_cpu
   }
 }

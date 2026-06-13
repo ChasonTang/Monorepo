@@ -6,6 +6,13 @@ declare_args() {
 
   # Enable AddressSanitizer
   is_asan = false
+
+  # "device" or "simulator" — only meaningful when target_os == "ios".
+  # Selects between iPhoneOS.sdk + arm64-apple-ios triple (device) and
+  # iPhoneSimulator.sdk + *-apple-ios-simulator triple (simulator). Device
+  # builds are arm64-only; simulator accepts arm64 (Apple Silicon hosts) or
+  # x64 (Intel hosts).
+  target_environment = ""
 }
 
 # Validate the build host. Bundled clang at //tool/clang and the SDKs at
@@ -37,12 +44,23 @@ if (current_cpu == "") {
 
 # Validate the requested target and pick its default toolchain. This is the
 # single point of truth for supported (target_os, target_cpu) combinations
-# (mac x64/arm64, linux x64) — downstream toolchain and per-package BUILD.gn
-# files trust this whitelist and don't re-check.
+# (mac x64/arm64, linux x64, ios device/simulator) — downstream toolchain and
+# per-package BUILD.gn files trust this whitelist and don't re-check.
 if (target_os == "mac" && (target_cpu == "x64" || target_cpu == "arm64")) {
   set_default_toolchain("//build/toolchain:clang")
 } else if (target_os == "linux" && target_cpu == "x64") {
   set_default_toolchain("//build/toolchain:clang_linux_x64")
+} else if (target_os == "ios" && target_environment == "device") {
+  assert(target_cpu == "arm64",
+         "iOS device only supports target_cpu=\"arm64\" (got $target_cpu)")
+  set_default_toolchain("//build/toolchain:clang_ios_device")
+} else if (target_os == "ios" && target_environment == "simulator") {
+  assert(target_cpu == "arm64" || target_cpu == "x64",
+         "iOS simulator requires target_cpu=\"arm64\" or \"x64\" (got $target_cpu)")
+  set_default_toolchain("//build/toolchain:clang_ios_sim")
+} else if (target_os == "ios") {
+  assert(false,
+         "target_os=\"ios\" requires target_environment=\"device\" or \"simulator\"")
 } else {
   assert(false,
          "Unsupported target: target_os=$target_os target_cpu=$target_cpu")

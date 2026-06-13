@@ -62,31 +62,8 @@ Set via `--args=` on `gn gen`. See `build/BUILDCONFIG.gn`.
   vendored third-party trees that don't ship a usable GN build.
 - `{PROJECT}/` — third-party submodules (upstream layout) without their own
   GN build.
-- `third_party/skia/` — skia submodule (upstream layout, ships its own
-  3856-line BUILD.gn that we deliberately don't load).
-- `skia/BUILD.gn` — our hand-rolled minimal skia build. Lives at top level
-  so the label `//skia:skia` is short; the upstream BUILD.gn at
-  `//third_party/skia` is out of the way.
 - `ipsw/` — macOS-only tool that parses `dyld_shared_cache`.
 - `tool/`, `build/sdk/`, `out/` — gitignored; populated by the sync/extract scripts.
-
-## Skia
-
-`skia/BUILD.gn` builds a minimal CPU-only Skia from sources at
-`third_party/skia/`: core canvas + raster pipeline + SkSL runtime-effect
-compiler + skcms color management. No image codecs, no GPU backends, no
-font managers (besides `SkFontMgr::RefEmpty()`), no text shaping, no
-PDF/SVG/Skottie. Adding any of those requires vendoring external libraries
-— see the table below.
-
-| Skia feature | External deps to vendor |
-| --- | --- |
-| Image codecs (PNG/JPEG/WebP/GIF/RAW) | libpng, libjpeg-turbo, libwebp, wuffs, dng_sdk |
-| Text shaping & system fontmgrs | harfbuzz, icu (or icu4x), freetype, expat |
-| PDF / PNG encoder | zlib |
-| GPU (Ganesh) | OpenGL/Metal (system-provided) |
-| GPU (Graphite) | Dawn, vulkan-headers, SwiftShader |
-| Tracing / shader validation | Perfetto, SPIR-V Tools |
 
 ## Adding a Component
 

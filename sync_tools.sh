@@ -6,9 +6,9 @@
 set -e  # Exit on any error
 
 # Version and platform configuration
-GN_GIT_REVISION="11777fd3e509b2835ffdb901c1bf1744651ba314"  # Fixed gn git revision
+GN_GIT_REVISION="81b24e01531ecf0eff12ec9359a555ec3944ec4e"  # Fixed gn git revision
 NINJA_VERSION="1.13.2"  # Ninja version
-CLANG_GIT_REVISION="8c7a2ce01a77c96028fe2c8566f65c45ad9408d3"  # Clang git revision
+CLANG_GIT_REVISION="80743bd43fd5b38fedc503308e7a652e23d3ec93"  # Clang git revision
 PLATFORM="mac"  # Target platform
 
 # Detect current machine architecture to download corresponding gn and clang versions
@@ -185,4 +185,4 @@ echo ""
 echo "Usage:"
 echo "  1. Run ./tool/gn gen out to generate build files"
 echo "  2. Run ./tool/ninja -C out to build"
-echo "  3. Use ./tool/clang/bin/clang for C/C++ compilation" 
+echo "  3. Use ./tool/clang/bin/clang for C/C++ compilation"

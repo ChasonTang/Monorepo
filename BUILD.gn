@@ -4,9 +4,7 @@ group("default") {
   deps = [
     "//boringssl:ssl",
     "//c-ares:cares",
-    "//display_list",
     "//odin:odin_cli_artifacts",
-    "//skia",
     "//xquic",
   ]
 
