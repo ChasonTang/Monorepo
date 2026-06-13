@@ -7,7 +7,7 @@ A C/C++ monorepo built with GN + Ninja.
 ```bash
 git submodule update --init --recursive
 ./sync_tools.sh                           # gn, ninja, clang → ./tool/
-./extract_sdk.sh                          # macOS SDK from the CLT .dmg (see below)
+./extract_sdk.sh                          # macOS + iOS SDKs from installed Xcode (see below)
 ./tool/gn gen out
 ./tool/ninja -C out
 ```
@@ -18,9 +18,14 @@ The build host must be macOS — `sync_tools.sh` ships a macOS clang and
 `BUILDCONFIG.gn` asserts on `host_os`. Fetch only the SDK your `target_os`
 needs:
 
-- **macOS targets:** download `Command_Line_Tools_for_Xcode_<version>.dmg`
-  from <https://developer.apple.com/download/all/>, drop it at the repo
-  root, run `./extract_sdk.sh` → `build/sdk/MacOSX.sdk/`.
+- **macOS / iOS targets:** download `Xcode.app` from
+  <https://developer.apple.com/download/all/>, drop it (or a symlink) at the
+  repo root, then run `./extract_sdk.sh` →
+  `build/sdk/{MacOSX,iPhoneOS,iPhoneSimulator}.sdk/`. The extraction is
+  pinned to the bundled `Xcode.app` rather than `xcode-select -p` so every
+  developer ends up with the same SDK version regardless of what's in
+  `/Applications/`. The iOS SDKs only ship inside Xcode, so the macOS SDK
+  is pulled from the same source to keep the extraction uniform.
 - **Linux x86_64 targets:** `./sync_linux_sysroot.sh` → SHA256-pinned
   Debian bullseye sysroot at `build/sdk/debian_bullseye_amd64-sysroot/`.
 

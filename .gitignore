@@ -6,8 +6,9 @@
 # Tool dependencies directory (absolute path from repo root)
 /tool/
 
-# Extracted macOS SDK (produced by extract_sdk.sh)
+# Extracted Apple SDKs (produced by extract_sdk.sh)
 /build/sdk/
 
-# Command Line Tools dmg (downloaded by developer, not committed)
-/Command_Line_Tools_for_Xcode_*.dmg
+# Xcode.app dropped at repo root for extract_sdk.sh (downloaded by developer,
+# not committed — multi-GB bundle)
+/Xcode.app/

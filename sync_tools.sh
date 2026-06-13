@@ -7,7 +7,7 @@ set -e  # Exit on any error
 
 # Version and platform configuration
 GN_GIT_REVISION="81b24e01531ecf0eff12ec9359a555ec3944ec4e"  # Fixed gn git revision
-NINJA_VERSION="1.13.2"  # Ninja version
+NINJA_VERSION="version:2@1.11.1.chromium.4"  # Ninja CIPD tag
 CLANG_GIT_REVISION="80743bd43fd5b38fedc503308e7a652e23d3ec93"  # Clang git revision
 PLATFORM="mac"  # Target platform
 
@@ -15,10 +15,12 @@ PLATFORM="mac"  # Target platform
 ARCH=$(uname -m)
 if [ "$ARCH" = "arm64" ]; then
     GN_PLATFORM="mac-arm64"
+    NINJA_PLATFORM="mac-arm64"
     CLANG_PLATFORM="mac-arm64"
     echo "Detected Apple Silicon (ARM64) architecture"
 elif [ "$ARCH" = "x86_64" ]; then
     GN_PLATFORM="mac-amd64"
+    NINJA_PLATFORM="mac-amd64"
     CLANG_PLATFORM="mac-amd64"
     echo "Detected Intel (x86_64) architecture"
 else
@@ -87,7 +89,7 @@ fi
 
 # Download ninja
 echo "Downloading ninja $NINJA_VERSION..."
-NINJA_URL="https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-mac.zip"
+NINJA_URL="https://chrome-infra-packages.appspot.com/dl/infra/3pp/tools/ninja/${NINJA_PLATFORM}/+/${NINJA_VERSION}"
 NINJA_ZIP="$TOOL_DIR/ninja.zip"
 
 if [ ! -f "$TOOL_DIR/ninja" ]; then

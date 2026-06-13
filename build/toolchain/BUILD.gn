@@ -43,21 +43,37 @@ template("clang_toolchain") {
     not_needed([ "target_name" ])
 
     prefix = rebase_path("//tool/clang/bin", root_build_dir)
-    clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
     sysroot = rebase_path(sysroot_path, root_build_dir)
 
     # --target= tells clang which backend / Mach-O slice / ELF machine to
     # emit, and tells the lld driver which slice to pull from any universal
     # archive (libc++.a / libclang_rt.*.a / *.tbd) the SDK and toolchain ship.
+    # Dual-CPU toolchains pass both target_triple_x64 and target_triple_arm64
+    # but only the one matching current_cpu is read; the other would trip
+    # GN's strict unused-invoker-variable check. not_needed() acknowledges
+    # the dead branch on each path explicitly so the check stays in force
+    # for any future variable that is genuinely forgotten.
     if (defined(invoker.target_triple)) {
       target_triple = invoker.target_triple
+      not_needed(invoker,
+                 [
+                   "target_triple_x64",
+                   "target_triple_arm64",
+                 ])
     } else if (current_cpu == "x64") {
       target_triple = invoker.target_triple_x64
+      not_needed(invoker, [ "target_triple_arm64" ])
     } else {
       target_triple = invoker.target_triple_arm64
+      not_needed(invoker, [ "target_triple_x64" ])
     }
 
     if (is_apple) {
+      # clang_lib only feeds the explicit libc++.a in Apple solink/link
+      # (-nostdlib++ suppresses the driver's auto -lc++). The ELF driver
+      # finds libc++.a itself via -static-libstdc++, so it's Apple-only.
+      clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
+
       # -isysroot is needed by both the frontend (header search) and the
       # linker (-syslibroot), so it lives in the shared compile_flags.
       # --target= must be in both compile and link flags so the driver picks

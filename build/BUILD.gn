@@ -86,6 +86,27 @@ config("release") {
     "-Os",  # Optimize for size rather than speed
     "-g",  # Keep debug symbols for crash analysis
   ]
+
+  # Drop unreferenced functions/data at link time. Stacks with ThinLTO since
+  # cross-module inlining exposes more unreachable code to the linker.
+  #   ELF (Linux):
+  #     -ffunction-sections / -fdata-sections emit each function and data
+  #     object into its own section so --gc-sections can drop them
+  #     individually. Without them every .o has one .text / .data and
+  #     --gc-sections degenerates to no-op.
+  #   Mach-O (mac, ios):
+  #     The assembler emits .subsections_via_symbols by default for
+  #     C / C++ / ObjC, giving the linker symbol-level granularity for
+  #     free, so only the linker flag is needed.
+  if (current_os == "linux") {
+    cflags += [
+      "-ffunction-sections",
+      "-fdata-sections",
+    ]
+    ldflags = [ "-Wl,--gc-sections" ]
+  } else if (current_os == "mac" || current_os == "ios") {
+    ldflags = [ "-Wl,-dead_strip" ]
+  }
 }
 
 config("asan") {
