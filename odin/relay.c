@@ -71,7 +71,26 @@ struct odin_relay_t {
   int outcome;
   int err;
   int torn_down;
+  int active_depth;
+  int destroy_pending;
 };
+
+static void free_relay(odin_relay_t *r) {
+  free(r->dir[ODIN_RELAY_DIR_A].buf);
+  free(r->dir[ODIN_RELAY_DIR_B].buf);
+  free(r);
+}
+
+static void relay_enter(odin_relay_t *r) { r->active_depth += 1; }
+
+static int relay_leave(odin_relay_t *r) {
+  r->active_depth -= 1;
+  if (r->active_depth == 0 && r->destroy_pending) {
+    free_relay(r);
+    return 1;
+  }
+  return 0;
+}
 
 /* Reads into d's contiguous free run at tail (min(CAP-len, CAP-tail), > 0
  * whenever READ is watched), so the direction never buffers more than CAP. */
@@ -126,6 +145,9 @@ static void do_write(odin_relay_t *r, odin_relay_dir_t *d) {
  * (read_eof clear and buffer below CAP), WRITE while its sink has bytes.
  * set_interest handles the lazy start/update/stop of the underlying watch. */
 static void reconcile(odin_relay_t *r, odin_relay_end_t *e) {
+  if (r->torn_down || r->destroy_pending) {
+    return;
+  }
   unsigned int m = 0;
   if (e->src->read_eof == 0 && e->src->len < ODIN_RELAY_CAP) {
     m |= ODIN_TRANSPORT_READ;
@@ -136,12 +158,18 @@ static void reconcile(odin_relay_t *r, odin_relay_end_t *e) {
   if (m == e->cur) {
     return;
   }
+  const unsigned int old = e->cur;
+  e->cur = m;
   if (odin_transport_set_interest(e->t, m) != 0) {
+    const int saved = errno;
+    if (r->torn_down || r->destroy_pending) {
+      return;
+    }
+    e->cur = old;
     r->outcome = ODIN_RELAY_OUTCOME_ERROR;
-    r->err = errno;
+    r->err = saved;
     return;
   }
-  e->cur = m;
 }
 
 /* For each drained, EOF'd direction issue exactly one shutdown_write on the
@@ -160,7 +188,13 @@ static void drive(odin_relay_t *r) {
     }
   }
   reconcile(r, &r->end[0]);
+  if (r->torn_down || r->destroy_pending) {
+    return;
+  }
   reconcile(r, &r->end[1]);
+  if (r->torn_down || r->destroy_pending) {
+    return;
+  }
   if (r->outcome == ODIN_RELAY_OUTCOME_NONE &&
       r->dir[ODIN_RELAY_DIR_A].write_shut &&
       r->dir[ODIN_RELAY_DIR_B].write_shut) {
@@ -169,20 +203,26 @@ static void drive(odin_relay_t *r) {
 }
 
 /* Stops both interests, then fires on_done as the relay's final action. The
- * torn_down guard makes this idempotent; no relay state is read or written
- * after on_done returns, so odin_relay_destroy from inside on_done is safe. */
+ * torn_down guard makes this idempotent; destroy from inside on_done is
+ * deferred until the active readiness stack unwinds. */
 static void teardown(odin_relay_t *r) {
   if (r->torn_down) {
     return;
   }
   r->torn_down = 1;
   if (r->end[0].cur != 0) {
-    odin_transport_set_interest(r->end[0].t, 0);
+    const unsigned int old = r->end[0].cur;
     r->end[0].cur = 0;
+    if (odin_transport_set_interest(r->end[0].t, 0) != 0) {
+      r->end[0].cur = old;
+    }
   }
   if (r->end[1].cur != 0) {
-    odin_transport_set_interest(r->end[1].t, 0);
+    const unsigned int old = r->end[1].cur;
     r->end[1].cur = 0;
+    if (odin_transport_set_interest(r->end[1].t, 0) != 0) {
+      r->end[1].cur = old;
+    }
   }
   const odin_relay_done_cb cb = r->on_done;
   void *const ud = r->user_data;
@@ -228,6 +268,11 @@ int odin_relay_create(odin_relay_done_cb on_done, void *user_data,
 void odin_relay_ready(odin_transport_t *t, unsigned int events,
                       void *user_data) {
   odin_relay_t *r = (odin_relay_t *)user_data;
+  relay_enter(r);
+  if (r->torn_down || r->destroy_pending) {
+    (void)relay_leave(r);
+    return;
+  }
   odin_relay_end_t *e = (t == r->end[0].t) ? &r->end[0] : &r->end[1];
   odin_relay_dir_t *src = e->src;
   odin_relay_dir_t *sink = e->sink;
@@ -260,6 +305,7 @@ void odin_relay_ready(odin_transport_t *t, unsigned int events,
   if (r->outcome != ODIN_RELAY_OUTCOME_NONE) {
     teardown(r);
   }
+  (void)relay_leave(r);
 }
 
 int odin_relay_start(odin_relay_t *relay, odin_transport_t *a,
@@ -298,6 +344,10 @@ void odin_relay_destroy(odin_relay_t *relay) {
   if (relay == NULL) {
     return;
   }
+  if (relay->active_depth != 0) {
+    relay->destroy_pending = 1;
+    return;
+  }
   if (relay->end[0].cur != 0) {
     odin_transport_set_interest(relay->end[0].t, 0);
     relay->end[0].cur = 0;
@@ -306,7 +356,5 @@ void odin_relay_destroy(odin_relay_t *relay) {
     odin_transport_set_interest(relay->end[1].t, 0);
     relay->end[1].cur = 0;
   }
-  free(relay->dir[ODIN_RELAY_DIR_A].buf);
-  free(relay->dir[ODIN_RELAY_DIR_B].buf);
-  free(relay);
+  free_relay(relay);
 }

@@ -46,6 +46,7 @@ source_set("odin") {
     ":odin_relay",
     ":odin_transport",
     ":odin_transport_fd",
+    ":odin_transport_xqc",
     ":odin_udp",
   ]
 }
@@ -103,6 +104,37 @@ source_set("odin_transport_fd") {
   ]
 }
 
+source_set("odin_transport_xqc") {
+  sources = [
+    "transport_xqc.c",
+    "transport_xqc.h",
+  ]
+
+  public_deps = [
+    ":odin_transport",
+    "//xquic",
+  ]
+}
+
+action("odin_transport_xqc_scope_check") {
+  script = "check_xqc_stream_transport_scope.py"
+
+  inputs = [
+    "transport_xqc.c",
+    "transport_xqc.h",
+    "BUILD.gn",
+  ]
+
+  outputs = [ "$target_gen_dir/odin_transport_xqc_scope_check.stamp" ]
+
+  args = [
+    "--root",
+    rebase_path("//", root_build_dir),
+    "--stamp",
+    rebase_path(outputs[0], root_build_dir),
+  ]
+}
+
 config("odin_event_loop_testing_config") {
   defines = [ "ODIN_EVENT_LOOP_TESTING" ]
 }
@@ -125,6 +157,10 @@ config("odin_dial_testing_config") {
 
 config("odin_transport_fd_testing_config") {
   defines = [ "ODIN_TRANSPORT_FD_TESTING" ]
+}
+
+config("odin_transport_xqc_testing_config") {
+  defines = [ "ODIN_TRANSPORT_XQC_TESTING" ]
 }
 
 config("odin_udp_testing_config") {
@@ -192,6 +228,10 @@ executable("odin_unittests") {
     "transport_fd_internal_test.h",
     "transport_fd_testing.c",
     "transport_fd_unittests.cpp",
+    "transport_xqc.h",
+    "transport_xqc_internal_test.h",
+    "transport_xqc_testing.c",
+    "transport_xqc_unittests.cpp",
     "transport_testing.c",
     "transport_unittests.cpp",
     "udp.h",
@@ -204,6 +244,7 @@ executable("odin_unittests") {
     ":odin_core",
     ":odin_event_loop_testing",
     "//googletest:gtest",
+    "//xquic",
   ]
 
   data_deps = [ ":odin_cli_artifacts" ]
@@ -212,6 +253,7 @@ executable("odin_unittests") {
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_transport_fd_testing_config",
+    ":odin_transport_xqc_testing_config",
     ":odin_udp_testing_config",
     "//build:cxx17",
   ]

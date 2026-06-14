@@ -24,9 +24,9 @@
  * destroying the two transports.
  *
  * Completion: on_done fires exactly once on the owner thread, as the relay's
- * final action during teardown -- no relay state is read or written after
- * on_done returns, so odin_relay_destroy(relay) (and then the two
- * odin_transport_destroy calls) from inside on_done is legal. It reports
+ * final action during teardown. odin_relay_destroy(relay) from inside on_done
+ * is legal; if teardown is nested inside odin_relay_ready, the physical free is
+ * deferred until the outermost readiness frame returns. It reports
  * ODIN_RELAY_OK with err == 0 when both directions reached end-of-stream, or
  * ODIN_RELAY_ERROR with the failing errno when a genuine read/write/
  * half-close (or latched asynchronous transport) error tears the relay down;
@@ -86,7 +86,8 @@ int odin_relay_start(odin_relay_t *relay, odin_transport_t *a,
  * on each still-watched endpoint), frees the two buffers and the relay object,
  * and never invokes on_done; odin_relay_destroy(NULL) is a no-op. Callable from
  * within on_done to reclaim a completed relay, or on a still-running relay to
- * abort it. Must be called before destroying the two transports.
+ * abort it; an active odin_relay_ready frame defers the physical free until the
+ * outermost frame unwinds. Must be called before destroying the two transports.
  */
 void odin_relay_destroy(odin_relay_t *relay);
 
