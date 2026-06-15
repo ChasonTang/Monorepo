@@ -20,6 +20,17 @@ You are the original author of this RFC. Revise it to pass the next review round
 4. Do not make changes outside the review's scope.
 5. `Blocker`/`Major` findings with `Origin: Upheld` or `Reopened` are binding — address or escalate. For `Upheld`, do not re-reject on the listed Basis; for `Reopened`, do not repeat the prior Change the reviewer judged inadequate. `Minor` is never binding.
 
+## Post-Revision Self-Check
+
+Run before declaring the revision ready. Re-review restricts the reviewer to changed text — regressions outside the finding's scope survive to the next fresh `first` review (one round wasted).
+
+1. **Code grounding for new references.** For every Change line introducing or modifying a code identifier (struct field, function, file path, line number, errno, flag), grep the source to confirm exact spelling. A plausible-looking rename (e.g., `io_count` where the header defines `io_handles`) compiles in the reviewer's head and ships to the next `first` review as `Major`. Keep grep commands and hit counts on hand.
+2. **Numeric consistency on changed ranges.** If a revision split, merged, added, or removed §5 rows, re-check the §5 table row count, every §5 narrative range (`"Rows T1–T18 are unit tests"`), and every §6 `"Done when"` range against the new total. A stale `"T1–T15"` after splitting T15 into T15/T16 is the classic instance.
+3. **Internal contradiction grep on changed claims.** When a revision rewords a "must Y" / "cannot Y" / "is X" claim, grep the full RFC for the prior wording and synonyms; one stale recurrence reopens the finding.
+4. **Cross-section side effects.** If §3.2 mechanism changed, re-check §3.2.1 **Unstated contract** paragraphs and §5 row **Expected Result** cells for stale prose. If §5 row Setup changed (e.g., rlimit math, watchdog vs destroy-trigger), re-check **Expected Result** matches the new Setup. Side effects in adjacent paragraphs survive the "only changed text" discipline as next-round regressions.
+
+A self-check finding is not a Minor to defer — fix it before declaring ready. A `Major` regression the re-reviewer finds in your change is `New` with no Origin protection.
+
 ## Output Format
 
 1. Apply revisions directly to the RFC file; do not paste the full document.

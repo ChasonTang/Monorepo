@@ -27,6 +27,8 @@ For each `P#` in §6, in declared order:
 5. Verify each `Done when` clause against the artifact it cites (grep the §5 row, run the test suite, read the header doc-comment, inspect the schema artifact).
 6. Treat the phase as complete only after every `Done when` clause is verified. Keep the work in the working tree and continue; do not stage a Code Review diff for an intermediate phase unless the user explicitly asks.
 
+**Cross-compile-only `T#` rows / branches.** When §6 `Done when` designates a row or branch as cross-compile-only under the local execution limit (writing-side rule: `rfc_writing_prompt.md` "Local Execution Constraint"), steps 3–4 reduce to running the named build command (e.g., `ninja -C out/event_loop_linux_x64 odin_unittests`) and confirming successful compile. Do not attempt to execute the cross-compiled binary. Host-runnable rows in the same phase still execute steps 3–4 as written.
+
 ## What to skip
 
 - Cosmetic edits to files §6 does not pin (formatter sweeps, comment rewording, unrelated TODOs).
@@ -37,7 +39,7 @@ For each `P#` in §6, in declared order:
 
 After all §6 phases complete:
 
-1. Re-run the local test suite with every final `T#` ungated and asserting for real.
+1. Re-run the local test suite with every final `T#` ungated and asserting for real. For cross-compile-only branches designated by §6 `Done when`, re-run the named build command and confirm successful compile; do not execute those binaries.
 2. Verify the final working tree satisfies every `G#`, every §3.2 contract surface, and every `S#` mitigation.
 3. `git add` the touched files so `git diff --staged` is the complete cumulative Code Review change set. Do not commit unless the user explicitly asks.
 4. Inspect `git diff --staged` before reporting. Fix the staging if it contains unrelated edits or omits required work.

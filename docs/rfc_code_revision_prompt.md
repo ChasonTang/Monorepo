@@ -16,7 +16,7 @@ You are the author of the staged code change. Revise it to pass the next CR roun
 3. Reject a finding only if it conflicts with the RFC or verifiable project facts, or its evidence does not hold against the current diff.
 4. No out-of-scope changes — no "while I'm here" cleanups, refactors, comment polish, or file moves.
 5. `Blocker`/`Major` findings with `Origin: Upheld` or `Reopened` are binding. For `Upheld`, do not re-reject on the listed Basis; for `Reopened`, do not repeat the prior Change the reviewer judged inadequate. `Minor` is never binding.
-6. For `T#` rows this revision touches, keep the test ungated and asserting against the spec. Run the local test suite before reporting.
+6. For `T#` rows this revision touches, keep the test ungated and asserting against the spec. Run the local test suite before reporting. For cross-compile-only branches designated by §6 `Done when`, re-run the named build command and confirm successful compile; do not execute those binaries.
 7. `git add` the touched files so `git diff --staged` reflects the cumulative revised state. Do not commit until CR returns `Pass`.
 
 ## Output Format
