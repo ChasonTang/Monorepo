@@ -76,6 +76,9 @@ odin_udp_io_t odin_udp_send(odin_udp_t *u, const void *buf, size_t len,
 
 int odin_udp_set_interest(odin_udp_t *u, unsigned int events);
 
+int odin_udp_local_addr(odin_udp_t *u, struct sockaddr *addr,
+                        socklen_t *addrlen);
+
 void odin_udp_close(odin_udp_t *u);
 
 #ifdef __cplusplus

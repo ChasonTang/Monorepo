@@ -115,6 +115,14 @@ odin_udp_io_t odin_udp_send(odin_udp_t *u, const void *buf, size_t len,
   return ODIN_UDP_IO_ERROR;
 }
 
+int odin_udp_local_addr(odin_udp_t *u, struct sockaddr *addr,
+                        socklen_t *addrlen) {
+  if (getsockname(u->fd, addr, addrlen) != 0) {
+    return -1;
+  }
+  return 0;
+}
+
 int odin_udp_set_interest(odin_udp_t *u, unsigned int events) {
   if ((events & ~(ODIN_UDP_READ | ODIN_UDP_WRITE)) != 0) {
     errno = EINVAL;

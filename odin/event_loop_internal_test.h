@@ -63,6 +63,8 @@ int odin_event_loop_test_liveness(odin_event_loop_test_liveness_t *out);
 int odin_event_loop_test_fail_next_backend_create(int errnum);
 int odin_event_loop_test_fail_next_backend_wait(odin_event_loop_t *loop,
                                                 int errnum);
+int odin_event_loop_test_fail_next_timer_start(odin_event_loop_t *loop,
+                                               int errnum);
 int odin_event_loop_test_prepare_wait(odin_event_loop_t *loop,
                                       odin_event_loop_test_wait_record_t *out);
 int odin_event_loop_test_backend_fds(odin_event_loop_t *loop,

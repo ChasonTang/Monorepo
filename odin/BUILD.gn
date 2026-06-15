@@ -48,6 +48,7 @@ source_set("odin") {
     ":odin_transport_fd",
     ":odin_transport_xqc",
     ":odin_udp",
+    ":odin_xqc_udp",
   ]
 }
 
@@ -116,6 +117,19 @@ source_set("odin_transport_xqc") {
   ]
 }
 
+source_set("odin_xqc_udp") {
+  sources = [
+    "xqc_udp.c",
+    "xqc_udp.h",
+  ]
+
+  public_deps = [
+    ":odin_event_loop",
+    ":odin_udp",
+    "//xquic",
+  ]
+}
+
 action("odin_transport_xqc_scope_check") {
   script = "check_xqc_stream_transport_scope.py"
 
@@ -165,6 +179,10 @@ config("odin_transport_xqc_testing_config") {
 
 config("odin_udp_testing_config") {
   defines = [ "ODIN_UDP_TESTING" ]
+}
+
+config("odin_xqc_udp_testing_config") {
+  defines = [ "ODIN_XQC_UDP_TESTING" ]
 }
 
 executable("odin_main") {
@@ -238,6 +256,10 @@ executable("odin_unittests") {
     "udp_internal_test.h",
     "udp_testing.c",
     "udp_unittests.cpp",
+    "xqc_udp.h",
+    "xqc_udp_internal_test.h",
+    "xqc_udp_testing.c",
+    "xqc_udp_unittests.cpp",
   ]
 
   deps = [
@@ -255,6 +277,7 @@ executable("odin_unittests") {
     ":odin_transport_fd_testing_config",
     ":odin_transport_xqc_testing_config",
     ":odin_udp_testing_config",
+    ":odin_xqc_udp_testing_config",
     "//build:cxx17",
   ]
 

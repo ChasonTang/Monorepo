@@ -112,6 +112,7 @@ struct odin_event_loop_t {
   int use_fake_now;
   uint64_t fake_now_us;
   int fail_next_backend_wait_err;
+  int fail_next_timer_start_err;
   odin_event_loop_test_ready_t *queued_backend_events;
   size_t queued_backend_count;
 #if defined(__APPLE__)
@@ -1213,6 +1214,14 @@ int odin_event_timer_start(odin_event_loop_t *loop, uint64_t delay_us,
                            uint64_t repeat_us, odin_event_timer_cb cb,
                            void *user_data, odin_event_timer_t **out) {
   assert_owner(loop);
+#if defined(ODIN_EVENT_LOOP_TESTING)
+  if (loop->fail_next_timer_start_err != 0) {
+    const int err = loop->fail_next_timer_start_err;
+    loop->fail_next_timer_start_err = 0;
+    errno = err;
+    return -1;
+  }
+#endif
   const uint64_t now = monotonic_us(loop);
   if (UINT64_MAX - now < delay_us) {
     errno = EOVERFLOW;
@@ -1343,6 +1352,17 @@ int odin_event_loop_test_fail_next_backend_wait(odin_event_loop_t *loop,
     return -1;
   }
   loop->fail_next_backend_wait_err = errnum;
+  return 0;
+}
+
+int odin_event_loop_test_fail_next_timer_start(odin_event_loop_t *loop,
+                                               int errnum) {
+  assert_owner(loop);
+  if (errnum <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  loop->fail_next_timer_start_err = errnum;
   return 0;
 }
 
