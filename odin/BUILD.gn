@@ -40,6 +40,7 @@ source_set("odin_core") {
 
 source_set("odin") {
   deps = [
+    ":odin_connect_session",
     ":odin_core",
     ":odin_dial",
     ":odin_event_loop",
@@ -75,6 +76,18 @@ source_set("odin_relay") {
   ]
 
   public_deps = [ ":odin_transport" ]
+}
+
+source_set("odin_connect_session") {
+  sources = [
+    "connect_session.c",
+    "connect_session.h",
+  ]
+
+  public_deps = [
+    ":odin_core",
+    ":odin_transport",
+  ]
 }
 
 source_set("odin_dial") {
@@ -229,6 +242,9 @@ executable("odin_unittests") {
   sources = [
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
+    "connect_session.h",
+    "connect_session_testing.c",
+    "connect_session_unittests.cpp",
     "dial.h",
     "dial_internal_test.h",
     "dial_testing.c",
