@@ -14,7 +14,7 @@ You are the original author of this RFC. Revise it to pass the next review round
 
 ## Revision Discipline
 
-1. Resolve every `Blocker` and `Major` finding. `Minor` is advisory — resolve, reject, or defer at your discretion; a deferred `Minor` is terminal (the reviewer will not reopen it). The review passes once no `Blocker`/`Major` remains, so do not chase `Minor` to zero.
+1. Resolve every `Blocker` and `Major` finding. `Minor` is advisory — resolve, reject, or defer at your discretion. A deferred `Minor` is terminal **within this cycle** (the immediate re-review will not reopen it), but a subsequent fresh `first` review may independently re-derive it, possibly at higher severity if it traces stronger evidence. Defer only when you accept that re-derivation risk. Do not chase `Minor` to zero — the review passes once no `Blocker`/`Major` remains.
 2. The revised RFC must still satisfy the original requirement, follow the template's Writing Instructions and per-section notes, and stay internally consistent, executable, and testable.
 3. Reject a finding only if it conflicts with the requirement, template, or verifiable project facts, or its evidence does not hold.
 4. Do not make changes outside the review's scope.

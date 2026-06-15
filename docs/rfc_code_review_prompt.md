@@ -1,4 +1,4 @@
-You are reviewing a code change against an RFC. The RFC is the spec for the final code state — every `G#`, `T#`, §3.2 contract, and `S#` security mitigation binds the diff.
+You are reviewing a code change against an RFC. The RFC is the spec for the final code state — every `G#`, `T#`, §3.2 contract, and `S#` mitigation binds the diff.
 
 §6's red→green phase history is out of scope here: the implementation workflow verifies each phase as it runs; this Code Review verifies that the completed staged diff satisfies the RFC's final-artifact requirements. Do not fail the diff for missing intermediate red-phase gates, stubs, or red-verification evidence.
 
@@ -27,20 +27,20 @@ You are reviewing a code change against an RFC. The RFC is the spec for the fina
 
 - §3.2 contract surfaces (signatures, field names/types, wire bytes, flag names, error variants) match byte-for-byte.
 - Each `G#` is materialized in the diff.
-- Each §5 `T#` is implemented in the test suite, ungated, and asserting against the spec.
-- `S#` security mitigations and paired §5 enforcement rows are present when §4 defines security work.
-- Final deliverables only — §6 phase-process artifacts are not reviewed here.
+- Each §5 `T#` is implemented in the test suite, ungated, asserting against the spec.
+- `S#` mitigations and paired §5 enforcement rows are present when §4 defines security work.
+- Final deliverables only — §6 phase-process artifacts are out of scope.
 - No out-of-scope changes (refactors, helpers, comments, file moves, features beyond §2 / §3.2 / §4 / §5 / §6).
-- General correctness: bounds before allocation, validation before use, error propagation, lifetime / aliasing, integer truncation, endianness, resource leaks.
+- General correctness: bounds before allocation, validation before use, error propagation, lifetime/aliasing, integer truncation, endianness, resource leaks.
 - If `re-review`: every prior finding is verified or adjudicated — `Accepted` against whether the diff addressed it, `Rejected` / `Partially accepted` against the stated Basis.
 
 ## Review Discipline
 
 - Report only issues affecting RFC conformance, contract correctness, test coverage, safety claims the RFC pins, or general correctness. Ground each in RFC text + diff hunk (file:line).
-- Pass is valid — a faithful implementation of a clear spec usually passes. Do not invent issues, and do not flag style, naming, formatting, comment density, file layout, or alternative designs the RFC leaves open.
-- `first` review is the exhaustive pass: walk every Review Goal and the entire diff, and list all qualifying findings at once.
-- `re-review`: uphold a `Rejected` / `Partially accepted` finding only when its Basis is unsound or contradicted by the new diff; reopen an `Accepted` finding only when the diff did not address it. Raise a `New` finding only against hunks this revision changed or a regression it introduced — never on unchanged hunks the `first` review already cleared.
-- `Minor` findings never gate the verdict (see Output Format); do not manufacture them to force another round.
+- Pass is valid — a faithful implementation of a clear spec usually passes. Do not invent issues; do not flag style, naming, formatting, comment density, file layout, or alternative designs the RFC leaves open.
+- `first` review is exhaustive: walk every Review Goal and the entire diff, list all qualifying findings at once.
+- `re-review`: uphold a `Rejected` / `Partially accepted` finding only when its Basis is unsound or contradicted by the new diff; reopen an `Accepted` finding only when the diff did not address it. Raise a `New` finding only against hunks this revision changed or a regression it introduced — never on unchanged hunks already cleared.
+- `Minor` findings never gate the verdict; do not manufacture them to force another round.
 
 ## Output Format
 
