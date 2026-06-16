@@ -19,6 +19,7 @@ You are the original author of this RFC. Revise it to pass the next review round
 3. Reject a finding only if it conflicts with the requirement, template, or verifiable project facts, or its evidence does not hold.
 4. Do not make changes outside the review's scope.
 5. `Blocker`/`Major` findings with `Origin: Upheld` or `Reopened` are binding — address or escalate. For `Upheld`, do not re-reject on the listed Basis; for `Reopened`, do not repeat the prior Change the reviewer judged inadequate. `Minor` is never binding.
+6. **Patch fatigue.** When a `Blocker` / `Major` is `Reopened` for the third time on the same code site (same §3.2 mechanism, same struct field, same lifecycle hazard, same trust boundary), treat the reviewer's escalate-to-redesign Recommendation as binding by default. To reject the escalation, the revision response must show that the prior three Change attempts addressed distinct root causes — not three variations of the same patch shape — and articulate why the contract surface itself is not the problem. Three patches on one mechanism is the signal to step back and ask whether the contract (not the mechanism) needs to change. A fourth patch of the same shape almost always re-fails the next round on the same call chain.
 
 ## Post-Revision Self-Check
 
@@ -35,7 +36,7 @@ A self-check finding is not a Minor to defer — fix it before declaring ready. 
 
 1. Apply revisions directly to the RFC file; do not paste the full document.
 2. Findings response — for each finding, in review order:
-   - Disposition: `Accepted` / `Rejected` / `Partially accepted` / `Deferred` (`Deferred` is `Minor`-only, needs no Basis, never valid for `Blocker`/`Major`)
+   - Disposition: `Accepted` / `Rejected` / `Partially accepted` / `Deferred` (`Deferred` is `Minor`-only, needs no Basis, never valid for `Blocker`/`Major`. A `Minor` that was `Deferred` in a prior cycle and re-derives in a fresh `first` review may not be `Deferred` a second time — Disposition must be `Accepted` or `Rejected` with Basis. Two-cycle deferral debt is the workflow's accumulating-tech-debt mode; closing the loop forces either fix or explicit rejection rather than indefinite carry.)
    - Location: same as the original finding
    - Change: one line on what changed, or why not
    - Basis (only for `Rejected` / `Partially accepted`): requirement / template / RFC text / project fact
