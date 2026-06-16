@@ -40,6 +40,7 @@ source_set("odin_core") {
 
 source_set("odin") {
   deps = [
+    ":odin_accept_loop",
     ":odin_connect_session",
     ":odin_core",
     ":odin_dial",
@@ -94,6 +95,15 @@ source_set("odin_dial") {
   sources = [
     "dial.c",
     "dial.h",
+  ]
+
+  public_deps = [ ":odin_event_loop" ]
+}
+
+source_set("odin_accept_loop") {
+  sources = [
+    "accept_loop.c",
+    "accept_loop.h",
   ]
 
   public_deps = [ ":odin_event_loop" ]
@@ -164,6 +174,10 @@ action("odin_transport_xqc_scope_check") {
 
 config("odin_event_loop_testing_config") {
   defines = [ "ODIN_EVENT_LOOP_TESTING" ]
+}
+
+config("odin_accept_loop_testing_config") {
+  defines = [ "ODIN_ACCEPT_LOOP_TESTING" ]
 }
 
 source_set("odin_event_loop_testing") {
@@ -240,6 +254,10 @@ executable("odin_unittests") {
   testonly = true
 
   sources = [
+    "accept_loop.h",
+    "accept_loop_internal_test.h",
+    "accept_loop_testing.c",
+    "accept_loop_unittests.cpp",
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
     "connect_session.h",
@@ -288,6 +306,7 @@ executable("odin_unittests") {
   data_deps = [ ":odin_cli_artifacts" ]
 
   configs += [
+    ":odin_accept_loop_testing_config",
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_transport_fd_testing_config",
