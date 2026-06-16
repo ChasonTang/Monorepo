@@ -46,6 +46,7 @@ source_set("odin") {
     ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
+    ":odin_server_session",
     ":odin_transport",
     ":odin_transport_fd",
     ":odin_transport_xqc",
@@ -77,6 +78,22 @@ source_set("odin_relay") {
   ]
 
   public_deps = [ ":odin_transport" ]
+}
+
+source_set("odin_server_session") {
+  sources = [
+    "server_session.c",
+    "server_session.h",
+  ]
+
+  public_deps = [
+    ":odin_connect_session",
+    ":odin_dial",
+    ":odin_event_loop",
+    ":odin_relay",
+    ":odin_transport",
+    ":odin_transport_fd",
+  ]
 }
 
 source_set("odin_connect_session") {
@@ -212,6 +229,10 @@ config("odin_xqc_udp_testing_config") {
   defines = [ "ODIN_XQC_UDP_TESTING" ]
 }
 
+config("odin_server_session_testing_config") {
+  defines = [ "ODIN_SERVER_SESSION_TESTING" ]
+}
+
 executable("odin_main") {
   output_name = "odin"
 
@@ -275,6 +296,10 @@ executable("odin_unittests") {
     "relay.h",
     "relay_testing.c",
     "relay_unittests.cpp",
+    "server_session.h",
+    "server_session_internal_test.h",
+    "server_session_testing.c",
+    "server_session_unittests.cpp",
     "transport.h",
     "transport_fd.h",
     "transport_fd_internal_test.h",
@@ -309,6 +334,7 @@ executable("odin_unittests") {
     ":odin_accept_loop_testing_config",
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
+    ":odin_server_session_testing_config",
     ":odin_transport_fd_testing_config",
     ":odin_transport_xqc_testing_config",
     ":odin_udp_testing_config",

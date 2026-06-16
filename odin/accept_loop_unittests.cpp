@@ -228,14 +228,13 @@ TEST(OdinAcceptLoopTest, T1) {
     state.loop = loop;
     state.stop_after = 1;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0)
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0)
         << std::strerror(errno);
 
     const int peer = ConnectLoopback(port);
@@ -277,14 +276,13 @@ TEST(OdinAcceptLoopTest, T2) {
     state.loop = loop;
     state.stop_after = 3;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
 
     int peers[3] = {-1, -1, -1};
     for (int i = 0; i < 3; ++i) {
@@ -382,9 +380,8 @@ TEST(OdinAcceptLoopTest, T3) {
               0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, T3OnAccept, OnError, &ctx,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, T3OnAccept, OnError, &ctx, &al), 0);
 
     int peers[65];
     for (int i = 0; i < 65; ++i) {
@@ -421,14 +418,13 @@ TEST(OdinAcceptLoopTest, T4) {
     state.loop = loop;
     state.stop_after = 1;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     const int peer = ConnectLoopback(port);
     ASSERT_GE(peer, 0);
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EINTR), 0);
@@ -460,14 +456,13 @@ TEST(OdinAcceptLoopTest, T5) {
     state.loop = loop;
     state.stop_after = 1;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     const int peer = ConnectLoopback(port);
     ASSERT_GE(peer, 0);
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, ECONNABORTED), 0);
@@ -490,8 +485,8 @@ namespace {
 struct T6Ctx {
   AcceptState state;
   int reserved_fd = -1;
-  int peer3_socket = -1;  // pre-allocated socket; connect() happens in inspector
-  struct sockaddr_in peer3_addr {};
+  int peer3_socket = -1; // pre-allocated socket; connect() happens in inspector
+  struct sockaddr_in peer3_addr{};
   bool observed_paused = false;
 };
 
@@ -551,9 +546,8 @@ TEST(OdinAcceptLoopTest, T6) {
                                      &watchdog),
               0);
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, T6OnAccept, OnError, &ctx,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, T6OnAccept, OnError, &ctx, &al), 0);
     ctx.state.al = al;
 
     ctx.reserved_fd = dup(0);
@@ -642,9 +636,9 @@ TEST(OdinAcceptLoopTest, T7) {
                 0);
 
       odin_accept_loop_t *al = nullptr;
-      ASSERT_EQ(odin_accept_loop_create(loop, lfd, T7OnAccept, OnError, &ctx,
-                                        &al),
-                0);
+      ASSERT_EQ(
+          odin_accept_loop_create(loop, lfd, T7OnAccept, OnError, &ctx, &al),
+          0);
       ctx.state.al = al;
 
       const int peer = ConnectLoopback(port);
@@ -681,14 +675,13 @@ TEST(OdinAcceptLoopTest, T8) {
     AcceptState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     const int peer = ConnectLoopback(port);
     ASSERT_GE(peer, 0);
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EBADF), 0);
@@ -733,13 +726,12 @@ TEST(OdinAcceptLoopTest, T9) {
     AcceptState state;
     state.loop = loop;
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
     ASSERT_EQ(odin_event_loop_test_fail_next_timer_start(loop, ENOMEM), 0);
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EMFILE), 0);
     const int peer = ConnectLoopback(port);
@@ -786,14 +778,13 @@ TEST(OdinAcceptLoopTest, T10) {
     AcceptState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 300000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 300000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EMFILE), 0);
     const int peer = ConnectLoopback(port);
     ASSERT_GE(peer, 0);
@@ -829,18 +820,17 @@ TEST(OdinAcceptLoopTest, T11) {
     AcceptState state;
     state.loop = loop;
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
 
     odin_event_loop_test_liveness_t liv_pre = {};
     ASSERT_EQ(odin_event_loop_test_liveness(&liv_pre), 0);
     EXPECT_EQ(liv_pre.io_handles, 1u);
 
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
     DestroyTrigCtx tctx;
     tctx.al = al;
     odin_event_timer_t *trigger = nullptr;
@@ -910,9 +900,9 @@ TEST(OdinAcceptLoopTest, T12) {
     T12Ctx ctx;
     ctx.state.loop = loop;
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &ctx.state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &ctx.state, &al),
+        0);
     ctx.al = al;
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EMFILE), 0);
     const int peer = ConnectLoopback(port);
@@ -956,14 +946,13 @@ TEST(OdinAcceptLoopTest, T13) {
     AcceptState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EBADF), 0);
     const int peer = ConnectLoopback(port);
     ASSERT_GE(peer, 0);
@@ -1017,14 +1006,13 @@ TEST(OdinAcceptLoopTest, T14) {
     state.loop = loop;
     state.destroy_in_cb = true;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     state.al = al;
     const int peer1 = ConnectLoopback(port);
     ASSERT_GE(peer1, 0);
@@ -1059,14 +1047,13 @@ TEST(OdinAcceptLoopTest, T15) {
     state.loop = loop;
     state.destroy_in_cb = true;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     state.al = al;
     ASSERT_EQ(odin_accept_loop_test_fail_next_accept(al, EBADF), 0);
     const int peer = ConnectLoopback(port);
@@ -1102,9 +1089,8 @@ TEST(OdinAcceptLoopTest, T16) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     odin_accept_loop_t *al = reinterpret_cast<odin_accept_loop_t *>(-1);
     errno = 0;
-    EXPECT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              -1);
+    EXPECT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), -1);
     EXPECT_EQ(errno, EEXIST);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     EXPECT_EQ(al, reinterpret_cast<odin_accept_loop_t *>(-1));
@@ -1165,8 +1151,7 @@ TEST(OdinAcceptLoopTest, T17) {
               0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &ctx,
-                                      &al),
+    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &ctx, &al),
               0);
     ctx.al = al;
 
@@ -1209,14 +1194,13 @@ TEST(OdinAcceptLoopTest, T18) {
     AcceptState state;
     state.loop = loop;
     odin_event_timer_t *watchdog = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state,
-                                     &watchdog),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 200000, 0, WatchdogCb, &state, &watchdog),
+        0);
 
     odin_accept_loop_t *al = nullptr;
-    ASSERT_EQ(odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state,
-                                      &al),
-              0);
+    ASSERT_EQ(
+        odin_accept_loop_create(loop, lfd, OnAccept, OnError, &state, &al), 0);
     const int peer = ConnectLoopback(port);
     ASSERT_GE(peer, 0);
     const int c_pre = LiveFdCount();

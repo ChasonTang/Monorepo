@@ -2,7 +2,8 @@
  *
  * Event-loop-driven multi-connection TCP accept listener (RFC-019).
  *
- * Given a live odin_event_loop_t and a caller-owned, already-bind(2) + listen(2)
+ * Given a live odin_event_loop_t and a caller-owned, already-bind(2) +
+ * listen(2)
  * + O_NONBLOCK listening fd of any address family the host supports (AF_INET,
  * AF_INET6, AF_UNIX), odin_accept_loop_create registers one level-triggered
  * ODIN_EVENT_READ watch on the listening fd through the RFC-010
