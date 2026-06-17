@@ -40,7 +40,7 @@ Save to docs/rfc_NNN_{slug}.md, where NNN is the lowest unused three-digit index
 
 Run each check before declaring the draft ready.
 
-1. **Coverage matrix.** Build the matrix §3.2's branches generate; every reachable cell needs a §5 row. Axes:
+1. **Coverage matrix.** Persist the matrix as a `### 5.0 Coverage Matrix` subsection in the RFC (before the §5 test-row table) — a `(axis-value) → [T#, …]` table. Every reachable cell needs a §5 row; an empty `[]` is a missing-row finding. Persistence (not transient scratch) is mandatory: a later reviewer building the matrix from scratch routinely misses different cells than the writer, accumulating "missed (state, event) cell" `Major` findings across review rounds. Update §5.0 in the same revision that adds, splits, or removes a §5 row — a stale §5.0 is a form defect. Axes:
    - **G#** — every testable Goal.
    - **State** — every `(state, event)` cell §3.2 branches on; same fault class under two different states is two rows.
    - **Completion mode** — happy single-call vs. happy staged-AGAIN-resume (from `s.write_off` / `s.buf_used`) are distinct even though both end in `OK`.
