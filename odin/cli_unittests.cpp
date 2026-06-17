@@ -24,12 +24,13 @@ extern "C" {
 extern char **environ;
 }
 
-namespace {
-
 // argv[0] captured by the custom test main below; used by T9 to derive
 // <bindir> for the spawned odin-client symlink, and by T10 to assert on
-// the renamed odin_unittests basename.
+// the renamed odin_unittests basename. External linkage so
+// cli_server_unittests.cpp can derive its own server symlink path.
 std::string g_test_argv0;
+
+namespace {
 
 // Owns mutable storage for argv tokens and exposes a NULL-terminable
 // std::vector<char *> to the C API and to execve. No std::string content
@@ -320,8 +321,6 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
        "",
        "odin: mode=client listen=8080 server=S:4433\n",
        0},
-      // OK SERVER
-      {{"odin-server", "-l", "4433"}, "", "odin: mode=server listen=4433\n", 0},
       // HELP CLIENT
       {{"odin-client", "--help"}, std::string(kUC) + "\n", "", 0},
       // HELP SERVER
@@ -545,11 +544,9 @@ TEST(OdinCliListenPortTest, T7MainBannerPrintsParsedPort) {
       {{"odin-client", "-l", "8443", "-s", "S"},
        "odin: mode=client listen=8443 server=S:4433\n",
        0},
-      {{"odin-server", "-l", "4433"}, "odin: mode=server listen=4433\n", 0},
       {{"odin-client", "-s", "S"},
        "odin: mode=client listen=8080 server=S:4433\n",
        0},
-      {{"odin-server"}, "odin: mode=server listen=4433\n", 0},
       {{"odin-server", "-l", "abc"},
        std::string("odin: invalid --listen port\n") + kUS + "\n",
        2},

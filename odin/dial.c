@@ -23,6 +23,10 @@
 #include "odin/dial_internal_test.h"
 #endif
 
+#if defined(ODIN_DIAL_TESTING) && defined(ODIN_CLI_SERVER_TESTING)
+#include "odin/cli_server_internal_test.h"
+#endif
+
 /* Internal state (§3.2.2). Exactly one of {io, timer} is registered at a time;
  * fd is the owned socket, set to -1 the instant ownership leaves (handed to the
  * caller on OK, or closed on ERROR / abort). */
@@ -106,6 +110,11 @@ static void on_deferred_error(odin_event_loop_t *loop,
 int odin_dial_start(odin_event_loop_t *loop, const struct sockaddr *addr,
                     socklen_t addrlen, odin_dial_cb on_done, void *user_data,
                     odin_dial_t **out) {
+#if defined(ODIN_DIAL_TESTING) && defined(ODIN_CLI_SERVER_TESTING)
+  if (odin_cli_server_test_maybe_probe_dial_start(addr, addrlen) != 0) {
+    return -1;
+  }
+#endif
   odin_dial_t *d = (odin_dial_t *)calloc(1, sizeof(*d));
   if (d == NULL) {
     errno = ENOMEM;

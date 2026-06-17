@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "odin/cli_server.h"
 #include "odin/host_addr.h"
 #include "odin/parse_util.h"
 
@@ -266,12 +267,11 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
       (void)fprintf(err, fmt, (unsigned)args.listen_port,
                     (int)args.server_host_len, args.server_host,
                     (unsigned)args.server_port);
+      rc = 0;
     } else {
-      // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-      (void)fprintf(err, "odin: mode=server listen=%u\n",
-                    (unsigned)args.listen_port);
+      (void)fflush(out);
+      rc = odin_cli_run_server(args.listen_port, err);
     }
-    rc = 0;
     break;
   case ODIN_CLI_HELP:
     (void)fputs(um, out);

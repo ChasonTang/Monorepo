@@ -41,6 +41,7 @@ source_set("odin_core") {
 source_set("odin") {
   deps = [
     ":odin_accept_loop",
+    ":odin_cli_server",
     ":odin_connect_session",
     ":odin_core",
     ":odin_dial",
@@ -53,6 +54,19 @@ source_set("odin") {
     ":odin_transport_xqc",
     ":odin_udp",
     ":odin_xqc_udp",
+  ]
+}
+
+source_set("odin_cli_server") {
+  sources = [
+    "cli_server.c",
+    "cli_server.h",
+  ]
+
+  public_deps = [
+    ":odin_core",
+    ":odin_event_loop",
+    ":odin_server_runtime",
   ]
 }
 
@@ -251,6 +265,10 @@ config("odin_server_runtime_testing_config") {
   defines = [ "ODIN_SERVER_RUNTIME_TESTING" ]
 }
 
+config("odin_cli_server_testing_config") {
+  defines = [ "ODIN_CLI_SERVER_TESTING" ]
+}
+
 executable("odin_main") {
   output_name = "odin"
 
@@ -297,6 +315,10 @@ executable("odin_unittests") {
     "accept_loop_internal_test.h",
     "accept_loop_testing.c",
     "accept_loop_unittests.cpp",
+    "cli_server.h",
+    "cli_server_internal_test.h",
+    "cli_server_testing.c",
+    "cli_server_unittests.cpp",
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
     "connect_session.h",
@@ -354,6 +376,7 @@ executable("odin_unittests") {
 
   configs += [
     ":odin_accept_loop_testing_config",
+    ":odin_cli_server_testing_config",
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_server_runtime_testing_config",
