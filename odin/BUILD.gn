@@ -13,13 +13,9 @@
 #                          and link/target paths, so relinking out/odin
 #                          must not re-run the action.
 #   :odin_cli_artifacts  — group bundling :odin_main + :odin_symlinks.
-#   :odin_unittests      — googletest binary (cli_unittests.cpp owns main(),
-#                          so we link :gtest, not :gtest_main). Pulls in
-#                          :odin_cli_artifacts via data_deps so
-#                          `ninja -C out/ tests` produces the runtime
-#                          artifacts T9 spawns. _GNU_SOURCE is set on
-#                          Linux only — T8's fmemopen is hidden behind that
-#                          feature macro by glibc.
+#
+# Test targets live in //odin/testing:BUILD.gn (notably :odin_unittests
+# and :odin_event_loop_testing).
 
 source_set("odin_core") {
   sources = [
@@ -217,58 +213,6 @@ action("odin_transport_xqc_scope_check") {
   ]
 }
 
-config("odin_event_loop_testing_config") {
-  defines = [ "ODIN_EVENT_LOOP_TESTING" ]
-}
-
-config("odin_accept_loop_testing_config") {
-  defines = [ "ODIN_ACCEPT_LOOP_TESTING" ]
-}
-
-source_set("odin_event_loop_testing") {
-  testonly = true
-
-  sources = [
-    "event_loop.h",
-    "event_loop_internal_test.h",
-    "event_loop_testing.c",
-  ]
-
-  configs += [ ":odin_event_loop_testing_config" ]
-}
-
-config("odin_dial_testing_config") {
-  defines = [ "ODIN_DIAL_TESTING" ]
-}
-
-config("odin_transport_fd_testing_config") {
-  defines = [ "ODIN_TRANSPORT_FD_TESTING" ]
-}
-
-config("odin_transport_xqc_testing_config") {
-  defines = [ "ODIN_TRANSPORT_XQC_TESTING" ]
-}
-
-config("odin_udp_testing_config") {
-  defines = [ "ODIN_UDP_TESTING" ]
-}
-
-config("odin_xqc_udp_testing_config") {
-  defines = [ "ODIN_XQC_UDP_TESTING" ]
-}
-
-config("odin_server_session_testing_config") {
-  defines = [ "ODIN_SERVER_SESSION_TESTING" ]
-}
-
-config("odin_server_runtime_testing_config") {
-  defines = [ "ODIN_SERVER_RUNTIME_TESTING" ]
-}
-
-config("odin_cli_server_testing_config") {
-  defines = [ "ODIN_CLI_SERVER_TESTING" ]
-}
-
 executable("odin_main") {
   output_name = "odin"
 
@@ -305,92 +249,4 @@ group("odin_cli_artifacts") {
     ":odin_main",
     ":odin_symlinks",
   ]
-}
-
-executable("odin_unittests") {
-  testonly = true
-
-  sources = [
-    "accept_loop.h",
-    "accept_loop_internal_test.h",
-    "accept_loop_testing.c",
-    "accept_loop_unittests.cpp",
-    "cli_server.h",
-    "cli_server_internal_test.h",
-    "cli_server_testing.c",
-    "cli_server_unittests.cpp",
-    "cli_unittests.cpp",
-    "client_listen_unittests.cpp",
-    "connect_session.h",
-    "connect_session_testing.c",
-    "connect_session_unittests.cpp",
-    "dial.h",
-    "dial_internal_test.h",
-    "dial_testing.c",
-    "dial_unittests.cpp",
-    "event_loop_unittests.cpp",
-    "host_addr_unittests.cpp",
-    "http_connect_unittests.cpp",
-    "parse_util_unittests.cpp",
-    "protocol_unittests.cpp",
-    "relay.h",
-    "relay_testing.c",
-    "relay_unittests.cpp",
-    "server_session.h",
-    "server_session_internal_test.h",
-    "server_session_testing.c",
-    "server_session_unittests.cpp",
-    "server_runtime.h",
-    "server_runtime_internal_test.h",
-    "server_runtime_testing.c",
-    "server_runtime_unittests.cpp",
-    "transport.h",
-    "transport_fd.h",
-    "transport_fd_internal_test.h",
-    "transport_fd_testing.c",
-    "transport_fd_unittests.cpp",
-    "transport_xqc.h",
-    "transport_xqc_internal_test.h",
-    "transport_xqc_testing.c",
-    "transport_xqc_unittests.cpp",
-    "transport_testing.c",
-    "transport_unittests.cpp",
-    "udp.h",
-    "udp_internal_test.h",
-    "udp_testing.c",
-    "udp_unittests.cpp",
-    "xqc_udp.h",
-    "xqc_udp_internal_test.h",
-    "xqc_udp_testing.c",
-    "xqc_udp_unittests.cpp",
-  ]
-
-  deps = [
-    ":odin_core",
-    ":odin_event_loop_testing",
-    "//googletest:gtest",
-    "//xquic",
-  ]
-
-  data_deps = [ ":odin_cli_artifacts" ]
-
-  configs += [
-    ":odin_accept_loop_testing_config",
-    ":odin_cli_server_testing_config",
-    ":odin_dial_testing_config",
-    ":odin_event_loop_testing_config",
-    ":odin_server_runtime_testing_config",
-    ":odin_server_session_testing_config",
-    ":odin_transport_fd_testing_config",
-    ":odin_transport_xqc_testing_config",
-    ":odin_udp_testing_config",
-    ":odin_xqc_udp_testing_config",
-    "//build:cxx17",
-  ]
-
-  if (target_os == "linux") {
-    defines = [ "_GNU_SOURCE" ]
-    configs -= [ "//build:visibility_hidden" ]
-    configs += [ "//build:visibility_default" ]
-  }
 }

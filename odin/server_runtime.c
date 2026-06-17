@@ -9,7 +9,7 @@
 #include "odin/accept_loop.h"
 
 #if defined(ODIN_SERVER_RUNTIME_TESTING)
-#include "odin/server_runtime_internal_test.h"
+#include "odin/testing/server_runtime_internal_test.h"
 #endif
 
 typedef struct odin_server_runtime_entry_t odin_server_runtime_entry_t;

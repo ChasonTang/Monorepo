@@ -9,7 +9,7 @@
 #include <sys/types.h>
 
 #if defined(ODIN_TRANSPORT_XQC_TESTING)
-#include "odin/transport_xqc_internal_test.h"
+#include "odin/testing/transport_xqc_internal_test.h"
 #endif
 
 typedef struct odin_xqc_stream_transport_t {

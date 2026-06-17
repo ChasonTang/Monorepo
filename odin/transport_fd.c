@@ -16,7 +16,7 @@
 #include <unistd.h>
 
 #if defined(ODIN_TRANSPORT_FD_TESTING)
-#include "odin/transport_fd_internal_test.h"
+#include "odin/testing/transport_fd_internal_test.h"
 #endif
 
 /* Internal state (§3.2.2). base is first so the cast in every slot is valid; fd

@@ -1,7 +1,7 @@
 #include "odin/event_loop.h"
 
 #if defined(ODIN_EVENT_LOOP_TESTING)
-#include "odin/event_loop_internal_test.h"
+#include "odin/testing/event_loop_internal_test.h"
 #endif
 
 #include <assert.h>

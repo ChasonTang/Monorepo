@@ -25,9 +25,9 @@
 #include "odin/server_session.h"
 
 #if defined(ODIN_CLI_SERVER_TESTING)
-#include "odin/cli_server_internal_test.h"
+#include "odin/testing/cli_server_internal_test.h"
 #if defined(ODIN_SERVER_RUNTIME_TESTING)
-#include "odin/server_runtime_internal_test.h"
+#include "odin/testing/server_runtime_internal_test.h"
 #endif
 #endif
 

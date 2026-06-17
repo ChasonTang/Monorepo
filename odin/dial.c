@@ -20,11 +20,11 @@
 #include <unistd.h>
 
 #if defined(ODIN_DIAL_TESTING)
-#include "odin/dial_internal_test.h"
+#include "odin/testing/dial_internal_test.h"
 #endif
 
 #if defined(ODIN_DIAL_TESTING) && defined(ODIN_CLI_SERVER_TESTING)
-#include "odin/cli_server_internal_test.h"
+#include "odin/testing/cli_server_internal_test.h"
 #endif
 
 /* Internal state (§3.2.2). Exactly one of {io, timer} is registered at a time;

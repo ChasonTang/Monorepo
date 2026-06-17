@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #if defined(ODIN_UDP_TESTING)
-#include "odin/udp_internal_test.h"
+#include "odin/testing/udp_internal_test.h"
 #endif
 
 struct odin_udp_t {

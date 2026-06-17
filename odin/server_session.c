@@ -29,7 +29,7 @@
 #include "odin/transport_fd.h"
 
 #if defined(ODIN_SERVER_SESSION_TESTING)
-#include "odin/server_session_internal_test.h"
+#include "odin/testing/server_session_internal_test.h"
 #endif
 
 enum {

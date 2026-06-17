@@ -28,7 +28,7 @@
 #include <unistd.h>
 
 #if defined(ODIN_ACCEPT_LOOP_TESTING)
-#include "odin/accept_loop_internal_test.h"
+#include "odin/testing/accept_loop_internal_test.h"
 #endif
 
 struct odin_accept_loop_t {

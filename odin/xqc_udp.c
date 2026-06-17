@@ -10,7 +10,7 @@
 #include <time.h>
 
 #if defined(ODIN_XQC_UDP_TESTING)
-#include "odin/xqc_udp_internal_test.h"
+#include "odin/testing/xqc_udp_internal_test.h"
 #endif
 
 struct odin_xqc_udp_t {
