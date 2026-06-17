@@ -401,8 +401,7 @@ TEST(OdinCliServerProcessTest, T1EphemeralStartupReportsActualPort) {
 
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
   uint16_t port = 0;
-  ASSERT_TRUE(ParseServerStartupLine(line, &port))
-      << "line=" << line;
+  ASSERT_TRUE(ParseServerStartupLine(line, &port)) << "line=" << line;
   EXPECT_GT(port, 0);
 
   const int client = TcpConnectLoopback(port, 1500);
@@ -694,15 +693,13 @@ TEST(OdinCliServerUnitTest, T5DefaultFilterDenyAllowMatrix) {
   }
 
   const char *const kAllowed[] = {
-      "1.0.0.0",         "9.255.255.255",  "11.0.0.0",
-      "100.63.255.255",  "100.128.0.0",    "126.255.255.255",
-      "128.0.0.0",       "169.253.255.255", "169.255.0.0",
-      "172.15.255.255",  "172.32.0.0",     "191.255.255.255",
-      "192.0.1.0",       "192.0.1.255",    "192.0.3.0",
-      "192.167.255.255", "192.169.0.0",    "198.17.255.255",
-      "198.20.0.0",      "198.51.99.255",  "198.51.101.0",
-      "203.0.112.255",   "203.0.114.0",    "223.255.255.255",
-      "8.8.8.8",         "93.184.216.34",
+      "1.0.0.0",      "9.255.255.255",   "11.0.0.0",    "100.63.255.255",
+      "100.128.0.0",  "126.255.255.255", "128.0.0.0",   "169.253.255.255",
+      "169.255.0.0",  "172.15.255.255",  "172.32.0.0",  "191.255.255.255",
+      "192.0.1.0",    "192.0.1.255",     "192.0.3.0",   "192.167.255.255",
+      "192.169.0.0",  "198.17.255.255",  "198.20.0.0",  "198.51.99.255",
+      "198.51.101.0", "203.0.112.255",   "203.0.114.0", "223.255.255.255",
+      "8.8.8.8",      "93.184.216.34",
   };
   for (const char *ip : kAllowed) {
     const struct sockaddr_in sa = MakeIpv4(ip);
@@ -750,8 +747,8 @@ const FailpointCase kFailpoints[] = {
      ODIN_CLI_SERVER_TEST_FAIL_FCNTL_GETFL, false},
     {"odin: server startup failed at fcntl(F_SETFL)\n",
      ODIN_CLI_SERVER_TEST_FAIL_FCNTL_SETFL, false},
-    {"odin: server startup failed at bind\n",
-     ODIN_CLI_SERVER_TEST_FAIL_BIND, false},
+    {"odin: server startup failed at bind\n", ODIN_CLI_SERVER_TEST_FAIL_BIND,
+     false},
     {"odin: server startup failed at listen\n",
      ODIN_CLI_SERVER_TEST_FAIL_LISTEN, false},
     {"odin: server startup failed at getsockname\n",
@@ -862,8 +859,7 @@ TEST(OdinCliServerUnitTest, T6SetupFailureCleanupMatrix) {
       const int probe = TcpConnectLoopback(port, 300);
       if (probe >= 0) {
         close(probe);
-        ADD_FAILURE() << "fp=" << static_cast<int>(fc.fp)
-                      << " left a listener";
+        ADD_FAILURE() << "fp=" << static_cast<int>(fc.fp) << " left a listener";
       }
     } else {
       // Post-banner: fork. Child writes liveness snapshot then pauses on a
@@ -1046,8 +1042,7 @@ TEST(OdinCliServerUnitTest, T7GracefulShutdownCleanupAndHandlers) {
   }
 
   uint8_t progress = 0;
-  const ssize_t pg =
-      ReadWithDeadline(progress_pipe[0], &progress, 1, 2000);
+  const ssize_t pg = ReadWithDeadline(progress_pipe[0], &progress, 1, 2000);
   EXPECT_EQ(pg, 1);
 
   // Pre-signal: snap_pipe has no data and child has not exited.
@@ -1094,8 +1089,7 @@ TEST(OdinCliServerUnitTest, T7GracefulShutdownCleanupAndHandlers) {
     ADD_FAILURE() << "listener still accepting while child paused";
   }
   uint8_t idle_byte = 0;
-  const ssize_t r =
-      ReadWithDeadline(idle_client, &idle_byte, 1, 1000);
+  const ssize_t r = ReadWithDeadline(idle_client, &idle_byte, 1, 1000);
   EXPECT_LE(r, 0);
   close(idle_client);
 
@@ -1114,8 +1108,7 @@ TEST(OdinCliServerUnitTest, T7GracefulShutdownCleanupAndHandlers) {
     }
     rest.append(buf, static_cast<size_t>(n));
   }
-  EXPECT_EQ(rest.find("startup failed"), std::string::npos)
-      << "extra=" << rest;
+  EXPECT_EQ(rest.find("startup failed"), std::string::npos) << "extra=" << rest;
   close(stderr_pipe[0]);
   close(progress_pipe[0]);
   close(snap_pipe[0]);

@@ -86,7 +86,7 @@ struct ServerRuntimeState {
 };
 
 class FilterState {
- public:
+public:
   FilterState() { std::memset(&last_addr_, 0, sizeof(last_addr_)); }
 
   void Record(const struct sockaddr *addr) {
@@ -98,7 +98,7 @@ class FilterState {
 
   const struct sockaddr_in &last_addr() const { return last_addr_; }
 
- private:
+private:
   std::atomic<int> calls_{0};
   struct sockaddr_in last_addr_;
 };
@@ -107,8 +107,7 @@ void OnRuntimeError(odin_server_runtime_t *rt, int err, void *user_data) {
   ServerRuntimeState *s = static_cast<ServerRuntimeState *>(user_data);
   s->on_runtime_error_calls += 1;
   s->on_runtime_error_err = err;
-  s->is_terminal_observed_in_cb =
-      odin_server_runtime_test_is_terminal(rt) != 0;
+  s->is_terminal_observed_in_cb = odin_server_runtime_test_is_terminal(rt) != 0;
   if (s->destroy_in_cb) {
     odin_server_runtime_destroy(rt);
   }
@@ -143,8 +142,7 @@ void SetNonblock(int fd) {
 void SetBlocking(int fd) {
   const int flags = fcntl(fd, F_GETFL, 0);
   ASSERT_NE(flags, -1) << std::strerror(errno);
-  ASSERT_EQ(fcntl(fd, F_SETFL, flags & ~O_NONBLOCK), 0)
-      << std::strerror(errno);
+  ASSERT_EQ(fcntl(fd, F_SETFL, flags & ~O_NONBLOCK), 0) << std::strerror(errno);
 }
 
 void SetRecvTimeout200ms(int fd) {
@@ -582,8 +580,7 @@ int DestroyFromFilterCb(const struct sockaddr *addr, socklen_t addrlen,
                         void *user_data) {
   (void)addr;
   (void)addrlen;
-  DestroyFromFilterState *s =
-      static_cast<DestroyFromFilterState *>(user_data);
+  DestroyFromFilterState *s = static_cast<DestroyFromFilterState *>(user_data);
   s->filter_calls.fetch_add(1);
   odin_server_runtime_destroy(s->rt);
   s->destroy_done.store(true);
@@ -622,9 +619,8 @@ TEST(OdinServerRuntimeTest, T1) {
 
     ServerRuntimeState state;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0)
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0)
         << std::strerror(errno);
     ASSERT_EQ(odin_event_loop_test_liveness(&liv_post), 0);
     EXPECT_EQ(liv_post.io_handles - liv_pre.io_handles, 1u);
@@ -660,9 +656,8 @@ TEST(OdinServerRuntimeTest, T2) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     StartPeerExchangeThread(listen_port, upstream_port, "downstream-hello",
                             "upstream-hello", &state.peer_done);
@@ -723,9 +718,8 @@ TEST(OdinServerRuntimeTest, T3) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     std::thread([listen_port, upstream_port, &state] {
       std::atomic<int> peers_done{0};
@@ -802,9 +796,8 @@ TEST(OdinServerRuntimeTest, T4) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     const int peer1 = OpenLoopbackClient(listen_port);
     const int peer2 = OpenLoopbackClient(listen_port);
@@ -865,9 +858,8 @@ TEST(OdinServerRuntimeTest, T5) {
     state.destroy_in_cb = true;
     state.stop_in_error = true;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     const int peer1 = OpenLoopbackClient(listen_port);
     ASSERT_GE(peer1, 0);
@@ -925,9 +917,8 @@ TEST(OdinServerRuntimeTest, T6) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     std::thread([listen_port, upstream_port, &state] {
       const int peer = OpenLoopbackClient(listen_port);
@@ -962,10 +953,9 @@ TEST(OdinServerRuntimeTest, T6) {
                                      &poll_timer),
               0);
     odin_event_timer_t *stop_timer = nullptr;
-    ASSERT_EQ(
-        odin_event_timer_start(loop, 400000, 0, WatchdogCb, &state,
-                               &stop_timer),
-        0);
+    ASSERT_EQ(odin_event_timer_start(loop, 400000, 0, WatchdogCb, &state,
+                                     &stop_timer),
+              0);
     odin_event_timer_t *watchdog = nullptr;
     ASSERT_EQ(
         odin_event_timer_start(loop, 500000, 0, WatchdogCb, &state, &watchdog),
@@ -1008,9 +998,8 @@ TEST(OdinServerRuntimeTest, T7) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
     FilterState filter_state;
     odin_server_runtime_set_dial_filter(rt, DenyLoopbackCb, &filter_state);
 
@@ -1072,9 +1061,8 @@ TEST(OdinServerRuntimeTest, T8) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
     FilterState filter_a;
     FilterState filter_b;
     odin_server_runtime_set_dial_filter(rt, DenyAllRecordingCb, &filter_a);
@@ -1155,9 +1143,8 @@ TEST(OdinServerRuntimeTest, T9) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
     ASSERT_EQ(odin_server_runtime_test_fail_next_session_create(rt), 0);
 
     const int peer1 = OpenLoopbackClient(listen_port);
@@ -1173,8 +1160,8 @@ TEST(OdinServerRuntimeTest, T9) {
     peer2_ctx.downstream_msg = "downstream-T9-2";
     peer2_ctx.upstream_msg = "upstream-T9-2";
     odin_event_timer_t *peer2_timer = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, StartPeer2Cb,
-                                     &peer2_ctx, &peer2_timer),
+    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, StartPeer2Cb, &peer2_ctx,
+                                     &peer2_timer),
               0);
     PollFlagCtx poll_ctx;
     poll_ctx.flag = &state.peer2_done;
@@ -1224,9 +1211,8 @@ TEST(OdinServerRuntimeTest, T10) {
     void *sentinel = &sentinel_storage;
     odin_server_runtime_t *rt = static_cast<odin_server_runtime_t *>(sentinel);
     errno = 0;
-    EXPECT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              -1);
+    EXPECT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), -1);
     EXPECT_EQ(errno, EEXIST);
     EXPECT_EQ(rt, static_cast<odin_server_runtime_t *>(sentinel));
     EXPECT_EQ(state.on_runtime_error_calls, 0);
@@ -1256,9 +1242,8 @@ TEST(OdinServerRuntimeTest, T11) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     const int peer1 = OpenLoopbackClient(listen_port);
     ASSERT_GE(peer1, 0);
@@ -1323,9 +1308,8 @@ TEST(OdinServerRuntimeTest, T12) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
     ASSERT_EQ(odin_server_runtime_test_fail_next_entry_alloc(rt), 0);
 
     const int peer1 = OpenLoopbackClient(listen_port);
@@ -1341,8 +1325,8 @@ TEST(OdinServerRuntimeTest, T12) {
     peer2_ctx.downstream_msg = "downstream-T12-2";
     peer2_ctx.upstream_msg = "upstream-T12-2";
     odin_event_timer_t *peer2_timer = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, StartPeer2Cb,
-                                     &peer2_ctx, &peer2_timer),
+    ASSERT_EQ(odin_event_timer_start(loop, 100000, 0, StartPeer2Cb, &peer2_ctx,
+                                     &peer2_timer),
               0);
     PollFlagCtx poll_ctx;
     poll_ctx.flag = &state.peer2_done;
@@ -1387,14 +1371,12 @@ TEST(OdinServerRuntimeTest, T13) {
     ServerRuntimeState state;
     state.loop = loop;
     odin_server_runtime_t *rt = nullptr;
-    ASSERT_EQ(odin_server_runtime_create(loop, lfd, OnRuntimeError, &state,
-                                         &rt),
-              0);
+    ASSERT_EQ(
+        odin_server_runtime_create(loop, lfd, OnRuntimeError, &state, &rt), 0);
 
     DestroyFromFilterState filter_state;
     filter_state.rt = rt;
-    odin_server_runtime_set_dial_filter(rt, DestroyFromFilterCb,
-                                        &filter_state);
+    odin_server_runtime_set_dial_filter(rt, DestroyFromFilterCb, &filter_state);
 
     const int peer1 = OpenLoopbackClient(listen_port);
     ASSERT_GE(peer1, 0);

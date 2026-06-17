@@ -48,10 +48,8 @@ static void finish_destroy(odin_server_runtime_t *rt);
 
 int odin_server_runtime_create(odin_event_loop_t *loop, int listen_fd,
                                odin_server_runtime_error_cb on_runtime_error,
-                               void *user_data,
-                               odin_server_runtime_t **out) {
-  odin_server_runtime_t *rt =
-      (odin_server_runtime_t *)calloc(1, sizeof(*rt));
+                               void *user_data, odin_server_runtime_t **out) {
+  odin_server_runtime_t *rt = (odin_server_runtime_t *)calloc(1, sizeof(*rt));
   if (rt == NULL) {
     errno = ENOMEM;
     return -1;
@@ -78,9 +76,9 @@ int odin_server_runtime_create(odin_event_loop_t *loop, int listen_fd,
   return 0;
 }
 
-void odin_server_runtime_set_dial_filter(
-    odin_server_runtime_t *rt, odin_server_session_dial_filter_cb cb,
-    void *user_data) {
+void odin_server_runtime_set_dial_filter(odin_server_runtime_t *rt,
+                                         odin_server_session_dial_filter_cb cb,
+                                         void *user_data) {
   if (rt == NULL) {
     return;
   }
@@ -138,8 +136,7 @@ static void runtime_on_accept(odin_accept_loop_t *al, int conn_fd,
     rt->head->prev = entry;
   }
   rt->head = entry;
-  odin_server_session_set_dial_filter(ss, rt->dial_filter,
-                                      rt->dial_filter_ud);
+  odin_server_session_set_dial_filter(ss, rt->dial_filter, rt->dial_filter_ud);
 }
 
 static void runtime_on_accept_error(odin_accept_loop_t *al, int err,

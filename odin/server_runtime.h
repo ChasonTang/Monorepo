@@ -45,12 +45,11 @@ typedef void (*odin_server_runtime_error_cb)(odin_server_runtime_t *rt, int err,
 
 int odin_server_runtime_create(odin_event_loop_t *loop, int listen_fd,
                                odin_server_runtime_error_cb on_runtime_error,
-                               void *user_data,
-                               odin_server_runtime_t **out);
+                               void *user_data, odin_server_runtime_t **out);
 
-void odin_server_runtime_set_dial_filter(
-    odin_server_runtime_t *rt, odin_server_session_dial_filter_cb cb,
-    void *user_data);
+void odin_server_runtime_set_dial_filter(odin_server_runtime_t *rt,
+                                         odin_server_session_dial_filter_cb cb,
+                                         void *user_data);
 
 void odin_server_runtime_destroy(odin_server_runtime_t *rt);
 

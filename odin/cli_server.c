@@ -85,7 +85,8 @@ static int range_match(uint32_t ip, uint32_t base, int prefix) {
   return (ip & mask) == (base & mask);
 }
 
-static int default_filter_check(const struct sockaddr *addr, socklen_t addrlen) {
+static int default_filter_check(const struct sockaddr *addr,
+                                socklen_t addrlen) {
   if (addr == NULL || addrlen < (socklen_t)sizeof(struct sockaddr_in)) {
     return EAFNOSUPPORT;
   }
@@ -113,8 +114,7 @@ static int odin_cli_default_server_dial_filter(const struct sockaddr *addr,
   return default_filter_check(addr, addrlen);
 }
 
-static int startup_fail(cli_server_state_t *state, FILE *err,
-                        const char *step);
+static int startup_fail(cli_server_state_t *state, FILE *err, const char *step);
 
 static void cli_runtime_on_error(odin_server_runtime_t *rt, int err,
                                  void *user_data) {
@@ -162,8 +162,7 @@ static const char *install_signal_handlers(cli_server_state_t *state) {
   sa.sa_handler = cli_signal_handler;
   sigemptyset(&sa.sa_mask);
 #if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGINT) !=
-      0) {
+  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGINT) != 0) {
     return "sigaction(SIGINT)";
   }
 #endif
@@ -258,8 +257,8 @@ int odin_cli_run_server(uint16_t listen_port, FILE *err) {
 
   const int reuse = 1;
 #if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(
-          ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR) != 0) {
+  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR) !=
+      0) {
     return startup_fail(&state, err, "setsockopt(SO_REUSEADDR)");
   }
 #endif
@@ -334,8 +333,8 @@ int odin_cli_run_server(uint16_t listen_port, FILE *err) {
   }
 
 #if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(
-          ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE) != 0) {
+  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE) !=
+      0) {
     return startup_fail(&state, err, "server_runtime_create");
   }
 #endif
@@ -362,11 +361,10 @@ int odin_cli_run_server(uint16_t listen_port, FILE *err) {
     return startup_fail(&state, err, "signal_timer_start");
   }
 #endif
-  if (odin_event_timer_start(state.loop,
-                             ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US,
-                             ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US,
-                             cli_signal_poll_timer, &state,
-                             &state.signal_timer) != 0) {
+  if (odin_event_timer_start(
+          state.loop, ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US,
+          ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US, cli_signal_poll_timer,
+          &state, &state.signal_timer) != 0) {
     return startup_fail(&state, err, "signal_timer_start");
   }
 
