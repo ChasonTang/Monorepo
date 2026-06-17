@@ -20,5 +20,5 @@ group("default") {
 # builds don't drag in test code; build with `ninja -C out/Default tests`.
 group("tests") {
   testonly = true
-  deps = [ "//odin:odin_unittests" ]
+  deps = [ "//odin/testing:odin_unittests" ]
 }
