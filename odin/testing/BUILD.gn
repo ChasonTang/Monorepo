@@ -20,6 +20,10 @@ config("odin_cli_server_testing_config") {
   defines = [ "ODIN_CLI_SERVER_TESTING" ]
 }
 
+config("odin_client_session_testing_config") {
+  defines = [ "ODIN_CLIENT_SESSION_TESTING" ]
+}
+
 config("odin_dial_testing_config") {
   defines = [ "ODIN_DIAL_TESTING" ]
 }
@@ -70,6 +74,7 @@ executable("odin_unittests") {
   sources = [
     "../accept_loop.h",
     "../cli_server.h",
+    "../client_session.h",
     "../connect_session.h",
     "../dial.h",
     "../relay.h",
@@ -88,6 +93,9 @@ executable("odin_unittests") {
     "cli_server_unittests.cpp",
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
+    "client_session_internal_test.h",
+    "client_session_testing.c",
+    "client_session_unittests.cpp",
     "connect_session_testing.c",
     "connect_session_unittests.cpp",
     "dial_internal_test.h",
@@ -134,6 +142,7 @@ executable("odin_unittests") {
   configs += [
     ":odin_accept_loop_testing_config",
     ":odin_cli_server_testing_config",
+    ":odin_client_session_testing_config",
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_server_runtime_testing_config",

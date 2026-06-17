@@ -37,6 +37,7 @@ source_set("odin_core") {
 source_set("odin") {
   deps = [
     ":odin_accept_loop",
+    ":odin_client_session",
     ":odin_cli_server",
     ":odin_connect_session",
     ":odin_core",
@@ -50,6 +51,23 @@ source_set("odin") {
     ":odin_transport_xqc",
     ":odin_udp",
     ":odin_xqc_udp",
+  ]
+}
+
+source_set("odin_client_session") {
+  sources = [
+    "client_session.c",
+    "client_session.h",
+  ]
+
+  public_deps = [
+    ":odin_connect_session",
+    ":odin_core",
+    ":odin_dial",
+    ":odin_event_loop",
+    ":odin_relay",
+    ":odin_transport",
+    ":odin_transport_fd",
   ]
 }
 
