@@ -8,6 +8,9 @@
 #                                the runtime artifacts T9 spawns. _GNU_SOURCE
 #                                is set on Linux only — T8's fmemopen is
 #                                hidden behind that feature macro by glibc.
+#   :cli_client_loopback_alias_unittests
+#                              — standalone RFC-024 T2 process test that
+#                                requires 127.0.0.2 on loopback on macOS.
 #   :odin_event_loop_testing   — source_set exposing event_loop internals
 #                                under ODIN_EVENT_LOOP_TESTING for tests that
 #                                drive the event loop directly.
@@ -168,4 +171,19 @@ executable("odin_unittests") {
     configs -= [ "//build:visibility_hidden" ]
     configs += [ "//build:visibility_default" ]
   }
+}
+
+executable("cli_client_loopback_alias_unittests") {
+  testonly = true
+
+  sources = [ "cli_client_loopback_alias_unittests.cpp" ]
+
+  deps = [
+    "//googletest:gtest",
+    "//odin",
+  ]
+
+  data_deps = [ "//odin:odin_cli_artifacts" ]
+
+  configs += [ "//build:cxx17" ]
 }

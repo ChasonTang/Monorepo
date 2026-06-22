@@ -1,64 +1,5 @@
 # RFC-024: CLI Client Runtime Wiring
 
-## Revision Notes (delete before merge)
-
-### Cycle 1 — 2026-06-18
-
-Addressed Finding 1 Major at §5 T2 by requiring two sequential successful CONNECTs through one client process after the first session closes.
-Addressed Findings 2–4 Major at §3.2.4 / §5 T3,T6 by adding an integrated `odin_client_session_create` failure hook, real accept-loop/event-loop runtime triggers, and in-flight cleanup assertions.
-Addressed Finding 5 Major at §4 by adding the local CONNECT target trust boundary and server-side policy delegation; accepted the Minor by adding the missing §5 post-syscall bind-failure matrix cell.
-
-### Cycle 2 — 2026-06-18
-
-Addressed the reopened Major at §5 T6 and §6 P2 by mirroring T5's post-return snapshot/release fixture for the then-current runtime-failure subcases.
-Added explicit T6 signal-handler restoration, child-paused listener-refusal, EOF/reset, and liveness observation mechanics so cleanup assertions are executable before child exit.
-
-### Cycle 3 — 2026-06-18
-
-Addressed the Major at §5.0 / T5 / T6 by requiring two simultaneous in-flight sessions for graceful and runtime-failure cleanup, with `last_cleanup_sessions >= 2`.
-Addressed the Major at §5.0 / T5 by making T5 cover both SIGINT and SIGTERM runtime shutdown behavior.
-Addressed the Major at §5 T3 / §3.2.4 by adding an owner-thread idle snapshot pipe after successful `on_close`, before any signal-driven cleanup.
-
-### Cycle 4 — 2026-06-18
-
-Addressed the reopened Major at §5 T3 / §3.2.4 by driving successful B relay completion before reading the owner-thread idle snapshot.
-Rewrote T3 setup and expected results to half-close the B downstream and fake upstream sides, deadline-wait for EOF/reset, and assert the idle snapshot before `SIGTERM`.
-
-### Cycle 5 — 2026-06-18
-
-Addressed the Major at §3.2.2 / §3.2.4 / §5 T6 / §6 by adding macOS-only accept OK then `fcntl(F_GETFL)` / `fcntl(F_SETFL)` runtime-error subcases through `odin_accept_loop_test_fail_next_fcntl`.
-Addressed the Major at §3.2.1 / §3.2.4 / §5 T6 / §6 by adding `ODIN_CLI_CLIENT_TEST_TRIGGER_UNEXPECTED_STOP` coverage for `run_rc == 0 && !state.shutdown_requested`.
-
-### Cycle 6 — 2026-06-18
-
-Addressed Finding 1 Major at §5 T2 / §6 by moving the successful fake Odin server to distinct loopback literal `127.0.0.2` and adding a `127.0.0.1` sentry assertion.
-Addressed Finding 2 Major at §5 T7 / §6 by adding a `SIGNAL_TIMER_START` startup-failure subcase that proves both preinstalled handlers are restored.
-Addressed Finding 3 Major at §3.2.4 / §6 by adding C++ linkage guards and pinning event-loop / accept-loop internal-test includes plus the non-Linux `fcntl` hook guard.
-Addressed Finding 4 Major at §3.2.1 / §6 by requiring every client startup/runtime failure print helper to `fflush(err)` before returning through the direct client branch.
-
-### Cycle 7 — 2026-06-18
-
-Addressed the Major at §5 T7 / §5.0 / §6 by adding a production-path bind-collision subcase that asserts the real `bind(2)` failure line and preserves the parent listener.
-Addressed the Major at §4 S3 / §5 T2 / §6 by adding a peer CONNECT-target sentry so local target dials are detected separately from configured-server dials.
-Addressed the Major at §3.2.1 / §6 P1 by preserving the existing Server arm `rc = odin_cli_run_server(...)` plus final-flush control flow.
-Accepted the Minor at §5 narrative / §6 P2 by making T4 consistently a forked test-binary child rather than a spawned `odin-client` artifact.
-
-### Cycle 8 — 2026-06-18
-
-Accepted the Minor at §3.2.2 by refreshing stale source citations for `fire_terminal`, `odin_client_session_destroy` / `finish_destroy`, and `accept_one`.
-Touched only §3.2.2 citation text; no behavioral, test-matrix, or implementation-plan changes.
-
-### Cycle 9 — 2026-06-18
-
-Addressed Finding 1 Major at §3.2.4 / §5 T6 / §6 by adding a parent-controlled runtime trigger pipe so failpoints fire only after both CONNECT_REQ frames are decoded.
-Addressed Finding 2 Major at §4 S3 / §5 T2 / §6 by scoping S3 to client-runner no-local-dial behavior and citing the existing server-side dial-filter regression tests.
-Accepted the Minor at §3.2.4 / §5 T3,T6,T7 by splitting no-errno runtime triggers into `odin_cli_client_test_trigger_next`, naming concrete errno arguments for errno-bearing failpoints, and adding invalid-helper assertions.
-
-### Cycle 10 — 2026-06-18
-
-Addressed Finding 1 Major at §5 narrative and T1,T2,T3,T5,T6,T7 by requiring a bounded child-wait helper, deadlined release-pipe writes, and explicit release-plus-wait sequencing.
-Addressed Finding 2 Major at §5 T7 / §5.0 by expanding invalid-hook assertions to cover progress fd, idle-snapshot fd, and `odin_client_session_test_fail_next_create(0)` EINVAL branches.
-
 ## 1. Summary
 
 Wire successful `odin-client` invocations to a long-running loopback HTTPS_PROXY runtime that accepts local TCP clients, creates RFC-023 client sessions for each accepted connection, and shuts down cleanly on `SIGINT` / `SIGTERM`.
@@ -632,6 +573,8 @@ Satisfies: G1 via bind-address capture and post-banner readiness tests; G2 via a
   - **Enforcement:** §5 row T2 asserts the client-runner mitigation: peer-supplied CONNECT targets are forwarded byte-for-byte to the fake Odin server as `CONNECT_REQ` frames, and one live local target sentry accepts zero connections. The delegated server-side policy is not a new T-row in this RFC; §6 keeps these existing regression tests green by exact name: `OdinCliServerProcessTest.T4DenyLoopbackUpstream`, `OdinCliServerUnitTest.T5DefaultFilterDenyAllowMatrix`, `OdinServerRuntimeTest.T7`, and `OdinServerSessionTest.T19`.
 
 ## 5. Testing Strategy
+
+Current target layout: T2 runs in the standalone `cli_client_loopback_alias_unittests` binary because it needs `127.0.0.2` configured on loopback on macOS (`sudo ifconfig lo0 alias 127.0.0.2/32`). T1 and T3-T7 remain in `odin_unittests`.
 
 Rows T1 and T2 spawn the host `odin-client` artifact when black-box process behavior is the contract; T7 includes one production bind-collision subcase that also spawns the host artifact. Rows that need test-only failpoints, including T4, fork `odin_unittests` children that call `odin_cli_main` with `argv[0] == "odin-client"` so the child links `cli_client_testing.c`. Every fixture that may write after peer close installs `signal(SIGPIPE, SIG_IGN)` before the write. Every stderr pipe, progress pipe, snapshot pipe, client socket, fake Odin server socket, and accepted upstream socket is read with `poll` / `select` deadlines or socket receive timeouts; no row relies on `waitpid` alone while the parent is blocked in a plain `read`, `accept`, or socket receive. Every child reap uses the shared bounded wait helper: poll `waitpid(pid, &status, WNOHANG)` until the per-row deadline, and on timeout send `SIGKILL`, reap the child with the same helper, and fail the assertion with the last observed step. Any parent write to a child release pipe is also deadlined; after a successful release write, the parent immediately waits through the same bounded wait helper. Existing parser, help, usage, error, symlink-help, server-runtime, server-session, and server CLI test suites remain regression gates in §6, but they are not new `T#` rows because their assertions are intentionally unchanged and therefore cannot provide a new red-to-green transition.
 
