@@ -316,11 +316,6 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
     int expected_return;
   };
   const std::vector<Row> rows = {
-      // OK CLIENT
-      {{"odin-client", "-l", "8080", "-s", "S"},
-       "",
-       "odin: mode=client listen=8080 server=S:4433\n",
-       0},
       // HELP CLIENT
       {{"odin-client", "--help"}, std::string(kUC) + "\n", "", 0},
       // HELP SERVER
@@ -370,7 +365,7 @@ TEST(OdinCliTest, T8MainByteExactMapping) {
 
 // T9 — out/odin-client symlink dispatch + exec end-to-end. Proves the
 // relative symlink resolves to out/odin and odin_cli_main returns 0 on
-// the success arm; byte-exact stdout/stderr assertions stay in T8.
+// the help arm; byte-exact stdout/stderr assertions stay in T8.
 TEST(OdinCliTest, T9SymlinkDispatchExec) {
   ASSERT_FALSE(g_test_argv0.empty());
   const std::string bindir = Dirname(g_test_argv0);
@@ -379,8 +374,7 @@ TEST(OdinCliTest, T9SymlinkDispatchExec) {
   const pid_t pid = fork();
   ASSERT_NE(pid, -1) << "fork failed: " << std::strerror(errno);
   if (pid == 0) {
-    MutableArgv child_argv(
-        {client_path.c_str(), "--listen", "8080", "--server", "S"});
+    MutableArgv child_argv({client_path.c_str(), "--help"});
     execve(client_path.c_str(), child_argv.argv_terminated(), environ);
     // execve only returns on failure.
     _exit(127);
@@ -541,12 +535,6 @@ TEST(OdinCliListenPortTest, T7MainBannerPrintsParsedPort) {
     int expected_return;
   };
   const std::vector<Row> rows = {
-      {{"odin-client", "-l", "8443", "-s", "S"},
-       "odin: mode=client listen=8443 server=S:4433\n",
-       0},
-      {{"odin-client", "-s", "S"},
-       "odin: mode=client listen=8080 server=S:4433\n",
-       0},
       {{"odin-server", "-l", "abc"},
        std::string("odin: invalid --listen port\n") + kUS + "\n",
        2},
@@ -659,15 +647,6 @@ TEST(OdinCliServerHostTest, T8MainBannerServerHostPort) {
     int expected_return;
   };
   const std::vector<Row> rows = {
-      {{"odin-client", "-l", "8080", "-s", "example.com:443"},
-       "odin: mode=client listen=8080 server=example.com:443\n",
-       0},
-      {{"odin-client", "-l", "8080", "-s", "example.com"},
-       "odin: mode=client listen=8080 server=example.com:4433\n",
-       0},
-      {{"odin-client", "-l", "8080", "-s", "[::1]:8080"},
-       "odin: mode=client listen=8080 server=[::1]:8080\n",
-       0},
       {{"odin-client", "-l", "8080", "-s", "bad:99999"},
        std::string("odin: invalid --server\n") + kUC + "\n",
        2},

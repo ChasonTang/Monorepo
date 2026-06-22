@@ -20,6 +20,10 @@ config("odin_cli_server_testing_config") {
   defines = [ "ODIN_CLI_SERVER_TESTING" ]
 }
 
+config("odin_cli_client_testing_config") {
+  defines = [ "ODIN_CLI_CLIENT_TESTING" ]
+}
+
 config("odin_client_session_testing_config") {
   defines = [ "ODIN_CLIENT_SESSION_TESTING" ]
 }
@@ -73,6 +77,7 @@ executable("odin_unittests") {
 
   sources = [
     "../accept_loop.h",
+    "../cli_client.h",
     "../cli_server.h",
     "../client_session.h",
     "../connect_session.h",
@@ -88,6 +93,9 @@ executable("odin_unittests") {
     "accept_loop_internal_test.h",
     "accept_loop_testing.c",
     "accept_loop_unittests.cpp",
+    "cli_client_internal_test.h",
+    "cli_client_testing.c",
+    "cli_client_unittests.cpp",
     "cli_server_internal_test.h",
     "cli_server_testing.c",
     "cli_server_unittests.cpp",
@@ -141,6 +149,7 @@ executable("odin_unittests") {
 
   configs += [
     ":odin_accept_loop_testing_config",
+    ":odin_cli_client_testing_config",
     ":odin_cli_server_testing_config",
     ":odin_client_session_testing_config",
     ":odin_dial_testing_config",

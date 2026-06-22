@@ -22,6 +22,8 @@
 #if defined(ODIN_CLIENT_SESSION_TESTING)
 #include "odin/testing/client_session_internal_test.h"
 #include "odin/testing/event_loop_internal_test.h"
+
+static int g_client_session_fail_next_create_errno;
 #endif
 
 enum {
@@ -127,6 +129,14 @@ int odin_client_session_create(odin_event_loop_t *loop, int conn_fd,
                                odin_client_session_close_cb on_close,
                                void *user_data,
                                odin_client_session_t **out) {
+#if defined(ODIN_CLIENT_SESSION_TESTING)
+  if (g_client_session_fail_next_create_errno != 0) {
+    const int err = g_client_session_fail_next_create_errno;
+    g_client_session_fail_next_create_errno = 0;
+    errno = err;
+    return -1;
+  }
+#endif
   if (server_host_len == 0 || server_host_len > ODIN_PROTO_HOST_MAX) {
     errno = EINVAL;
     return -1;
@@ -753,6 +763,15 @@ int odin_client_session_test_state(const odin_client_session_t *cs) {
     return 0;
   }
   return cs->state;
+}
+
+int odin_client_session_test_fail_next_create(int errnum) {
+  if (errnum <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  g_client_session_fail_next_create_errno = errnum;
+  return 0;
 }
 
 #endif /* defined(ODIN_CLIENT_SESSION_TESTING) */

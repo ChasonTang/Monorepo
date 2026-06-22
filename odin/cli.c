@@ -34,6 +34,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "odin/cli_client.h"
 #include "odin/cli_server.h"
 #include "odin/host_addr.h"
 #include "odin/parse_util.h"
@@ -258,16 +259,9 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   switch (status) {
   case ODIN_CLI_OK:
     if (args.mode == ODIN_CLI_MODE_CLIENT) {
-      const int host_has_colon =
-          memchr(args.server_host, ':', args.server_host_len) != NULL;
-      const char *fmt = host_has_colon
-                            ? "odin: mode=client listen=%u server=[%.*s]:%u\n"
-                            : "odin: mode=client listen=%u server=%.*s:%u\n";
-      // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-      (void)fprintf(err, fmt, (unsigned)args.listen_port,
-                    (int)args.server_host_len, args.server_host,
-                    (unsigned)args.server_port);
-      rc = 0;
+      (void)fflush(out);
+      return odin_cli_run_client(args.listen_port, args.server_host,
+                                 args.server_host_len, args.server_port, err);
     } else {
       (void)fflush(out);
       rc = odin_cli_run_server(args.listen_port, err);
