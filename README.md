@@ -32,12 +32,14 @@ needs:
 ## Cross-compilation
 
 One bundled LLVM toolchain (`./tool/clang`, mac-amd64 or mac-arm64) drives
-every supported target — mac↔mac and mac→linux. Switching arch/OS is just
-`--target=` plus the right platform layer; `libc++` is statically linked, so
-the C++ runtime travels with the binary regardless of target OS.
+every supported target — mac↔mac and mac→linux/iOS. Switching arch/OS is just
+`--target=` plus the right platform layer.
 
 - **macOS (x64 / arm64):** the SDK's TBD stubs plus fat `libc++.a` /
   `libclang_rt.osx.a` cover both arches; `--target=` alone switches.
+- **iOS device / simulator:** `iPhoneOS.sdk` / `iPhoneSimulator.sdk` supply the
+  platform stubs; libc++ is linked dynamically from the selected SDK with
+  `-lc++`.
 - **Linux x86_64:** `sync_linux_sysroot.sh` supplies the system layer (libc
   headers + stub `.so`s); `tool/clang/lib/x86_64-unknown-linux-gnu/` ships
   `libc++.a` / `libunwind.a` / compiler-rt, picked up via
@@ -47,18 +49,21 @@ the C++ runtime travels with the binary regardless of target OS.
 ./tool/gn gen out/mac_arm64  --args='target_cpu="arm64"'                  # Apple Silicon
 ./tool/gn gen out/mac_x64    --args='target_cpu="x64"'                    # Intel mac
 ./tool/gn gen out/linux_x64  --args='target_os="linux" target_cpu="x64"'  # Linux (sysroot first)
+./tool/gn gen out/ios_device --args='target_os="ios" target_environment="device" target_cpu="arm64"'
+./tool/gn gen out/ios_sim    --args='target_os="ios" target_environment="simulator" target_cpu="arm64"'
 ```
 
 ## Build Arguments
 
 Set via `--args=` on `gn gen`. See `build/BUILDCONFIG.gn`.
 
-| Arg          | Default | Effect                                                  |
-| ------------ | ------- | ------------------------------------------------------- |
-| `is_debug`   | `true`  | Debug build; release enables ThinLTO.                   |
-| `is_asan`    | `false` | Enable AddressSanitizer.                                |
-| `target_os`  | host    | `mac` or `linux` (`linux` requires `target_cpu="x64"`). |
-| `target_cpu` | host    | `x64` or `arm64` (arm64 only valid for `mac`).          |
+| Arg                  | Default | Effect                                                          |
+| -------------------- | ------- | --------------------------------------------------------------- |
+| `is_debug`           | `true`  | Debug build; release enables ThinLTO.                           |
+| `is_asan`            | `false` | Enable AddressSanitizer.                                        |
+| `target_os`          | host    | `mac`, `linux`, or `ios` (`linux` requires `target_cpu="x64"`). |
+| `target_cpu`         | host    | `x64` or `arm64` depending on target OS/environment.             |
+| `target_environment` | `""`    | For `ios`: `device` or `simulator`.                             |
 
 ## Layout
 

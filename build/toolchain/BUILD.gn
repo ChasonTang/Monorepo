@@ -4,9 +4,8 @@
 #
 #   - Apple Mach-O (mac, ios device, ios simulator) — is_apple=true:
 #     ObjC/ObjC++ tools are defined, ld64.lld is driven with @rpath /
-#     @loader_path / @executable_path install names, the bundled static
-#     libc++.a is linked explicitly via -nostdlib++, no -fPIC needed
-#     (Mach-O is PIC by construction).
+#     @loader_path / @executable_path install names, libc++ linkage is selected
+#     by use_sdk_libcxx, no -fPIC needed (Mach-O is PIC by construction).
 #
 #   - ELF (linux) — is_apple=false:
 #     no ObjC tools, ld.lld is driven with DT_SONAME / $ORIGIN, libc++ and
@@ -32,6 +31,8 @@
 #                          current_os, and (for dual-CPU toolchains)
 #                          current_cpu = target_cpu so secondary references
 #                          don't silently fall back to host_cpu.
+#   use_sdk_libcxx       — Apple-only. When true, link the SDK's dynamic libc++
+#                          with -lc++; otherwise link //tool/clang/lib/libc++.a.
 template("clang_toolchain") {
   toolchain(target_name) {
     forward_variables_from(invoker,
@@ -69,11 +70,6 @@ template("clang_toolchain") {
     }
 
     if (is_apple) {
-      # clang_lib only feeds the explicit libc++.a in Apple solink/link
-      # (-nostdlib++ suppresses the driver's auto -lc++). The ELF driver
-      # finds libc++.a itself via -static-libstdc++, so it's Apple-only.
-      clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
-
       # -isysroot is needed by both the frontend (header search) and the
       # linker (-syslibroot), so it lives in the shared compile_flags.
       # --target= must be in both compile and link flags so the driver picks
@@ -82,11 +78,20 @@ template("clang_toolchain") {
 
       # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld
       # (Xcode's ld64), so the link is fully hermetic and faster.
-      # -nostdlib++ suppresses the driver's automatic -lc++ (which would
-      # resolve to the SDK's libc++.dylib); we link the bundled static
-      # libc++.a explicitly in solink/link so binaries don't depend on the
-      # host's libc++ ABI.
+      # -nostdlib++ suppresses the driver's automatic C++ runtime selection;
+      # solink/link add the intended libc++ explicitly via cxx_runtime_lib.
       link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
+
+      if (defined(invoker.use_sdk_libcxx) && invoker.use_sdk_libcxx) {
+        # iOS SDKs ship libc++ as a dynamic library stub. Resolve -lc++ through
+        # the active sysroot so device and simulator get the matching SDK slice.
+        cxx_runtime_lib = "-lc++"
+      } else {
+        # The bundled libc++.a is currently macOS-only. Keep macOS static, but
+        # do not use this path for iOS / iOS Simulator.
+        clang_lib = rebase_path("//tool/clang/lib", root_build_dir)
+        cxx_runtime_lib = "$clang_lib/libc++.a"
+      }
     } else {
       # -fPIC is required for code that ends up in a .so. Mach-O is PIC by
       # construction so the Apple toolchains don't need this; ELF defaults
@@ -192,7 +197,7 @@ template("clang_toolchain") {
         # -rpath @loader_path lets a dylib find its sibling dylibs in its
         # own directory regardless of which binary loaded it, instead of
         # relying on the consumer's rpath being set up correctly.
-        command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
+        command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} $cxx_runtime_lib"
         rspfile_content = "{{inputs}}"
         default_output_extension = ".dylib"
         output_prefix = "lib"
@@ -208,7 +213,7 @@ template("clang_toolchain") {
 
         # -rpath @executable_path lets the binary resolve sibling dylibs
         # whose install names start with @rpath/.
-        command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $clang_lib/libc++.a"
+        command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} $cxx_runtime_lib"
         rspfile_content = "{{inputs}}"
         outputs = [ outfile ]
       }
@@ -276,6 +281,7 @@ clang_toolchain("clang_linux_x64") {
 # (LLVM ≥11 prefers triple-embedded versions over -mios-version-min flags).
 clang_toolchain("clang_ios_device") {
   is_apple = true
+  use_sdk_libcxx = true
   target_triple = "arm64-apple-ios15.0"
   sysroot_path = "//build/sdk/iPhoneOS.sdk"
   toolchain_args = {
@@ -290,6 +296,7 @@ clang_toolchain("clang_ios_device") {
 # driver pick libclang_rt.iossim.a instead of libclang_rt.ios.a.
 clang_toolchain("clang_ios_sim") {
   is_apple = true
+  use_sdk_libcxx = true
   target_triple_x64 = "x86_64-apple-ios15.0-simulator"
   target_triple_arm64 = "arm64-apple-ios15.0-simulator"
   sysroot_path = "//build/sdk/iPhoneSimulator.sdk"

@@ -16,9 +16,9 @@ config("compiler_defaults") {
   ]
 }
 
-# Hidden by default so the per-dylib libc++ copies we statically link don't
-# leak and collide across modules, and dyld/ld.so see a smaller dynamic symbol
-# table. APIs that must cross module boundaries need
+# Hidden by default so C++ template / inline symbols don't leak and collide
+# across modules, and dyld/ld.so see a smaller dynamic symbol table. APIs that
+# must cross module boundaries need
 # __attribute__((visibility("default"))).
 config("visibility_hidden") {
   cflags = [ "-fvisibility=hidden" ]
@@ -28,14 +28,13 @@ config("visibility_hidden") {
   cflags_cc = [ "-fvisibility-inlines-hidden" ]
 }
 
-# No RTTI: drops typeinfo from the binary and removes the cross-dylib RTTI ABI
-# risk of embedding libc++ into every module.
+# No RTTI: drops typeinfo from the binary and removes cross-dylib RTTI ABI risk.
 config("no_rtti") {
   cflags_cc = [ "-fno-rtti" ]
 }
 
 # No exceptions: drops .eh_frame / __unwind_info from the binary and removes
-# the cross-dylib exception ABI risk of embedding libc++ into every module.
+# cross-dylib exception ABI risk.
 config("no_exceptions") {
   cflags_cc = [ "-fno-exceptions" ]
 }
