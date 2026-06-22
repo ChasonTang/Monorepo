@@ -28,6 +28,7 @@ int odin_server_session_test_fail_next_relay_start(odin_server_session_t *ss,
                                                    int errnum);
 int odin_server_session_test_inject_session_error_on_dial(
     odin_server_session_t *ss, int errnum);
+unsigned int odin_server_session_test_live_count(void);
 
 /* Returns the current phase constant; never mutates ss. */
 int odin_server_session_test_state(const odin_server_session_t *ss);

@@ -30,6 +30,8 @@ typedef struct odin_xqc_stream_transport_t {
 
 #if defined(ODIN_TRANSPORT_XQC_TESTING)
 static odin_xqc_stream_transport_test_ops_t odin_xqc_test_ops;
+static int odin_xqc_test_fail_next_create_armed;
+static int odin_xqc_test_fail_next_create_errno;
 
 void odin_xqc_stream_transport_test_set_ops(
     const odin_xqc_stream_transport_test_ops_t *ops) {
@@ -45,6 +47,12 @@ void odin_xqc_stream_transport_test_set_ops(
 unsigned int odin_xqc_stream_transport_test_interest(odin_transport_t *t) {
   odin_xqc_stream_transport_t *s = (odin_xqc_stream_transport_t *)t;
   return s->interest;
+}
+
+int odin_xqc_stream_transport_test_fail_next_create(int errnum) {
+  odin_xqc_test_fail_next_create_armed = 1;
+  odin_xqc_test_fail_next_create_errno = errnum;
+  return 0;
 }
 #endif
 
@@ -272,6 +280,15 @@ static const odin_transport_vtable_t odin_xqc_stream_transport_vtable = {
 int odin_xqc_stream_transport_create(xqc_stream_t *stream,
                                      odin_transport_ready_cb on_ready,
                                      void *user_data, odin_transport_t **out) {
+#if defined(ODIN_TRANSPORT_XQC_TESTING)
+  if (odin_xqc_test_fail_next_create_armed) {
+    const int errnum = odin_xqc_test_fail_next_create_errno;
+    odin_xqc_test_fail_next_create_armed = 0;
+    odin_xqc_test_fail_next_create_errno = 0;
+    errno = errnum;
+    return -1;
+  }
+#endif
   odin_xqc_stream_transport_t *s =
       (odin_xqc_stream_transport_t *)calloc(1, sizeof(*s));
   if (s == NULL) {

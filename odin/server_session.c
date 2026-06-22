@@ -50,6 +50,9 @@ struct odin_server_session_t {
   int active_depth;
   int destroy_pending;
   int on_close_fired;
+  unsigned int connect_drive_depth;
+  unsigned int pending_downstream_interest;
+  int pending_downstream_interest_armed;
   odin_server_session_close_cb on_close;
   void *user_data;
   odin_server_session_dial_filter_cb dial_filter;
@@ -90,6 +93,10 @@ static void relay_on_done(odin_relay_t *relay, odin_relay_status_t status,
 static void handle_dial_result(odin_server_session_t *ss, int err);
 static void fire_terminal(odin_server_session_t *ss, int err);
 static void finish_destroy(odin_server_session_t *ss);
+
+#if defined(ODIN_SERVER_SESSION_TESTING)
+static unsigned int g_server_session_live_count;
+#endif
 
 static uint16_t map_dial_errno_to_resp_code(int err) {
   switch (err) {
@@ -151,6 +158,61 @@ int odin_server_session_create(odin_event_loop_t *loop, int conn_fd,
     errno = saved;
     return -1;
   }
+#if defined(ODIN_SERVER_SESSION_TESTING)
+  g_server_session_live_count += 1;
+#endif
+  *out = ss;
+  return 0;
+}
+
+int odin_server_session_create_with_transport(
+    odin_event_loop_t *loop,
+    odin_server_session_transport_factory_cb create_downstream,
+    void *factory_user_data, odin_server_session_close_cb on_close,
+    void *user_data, odin_server_session_t **out) {
+  if (loop == NULL || create_downstream == NULL || on_close == NULL ||
+      out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  odin_server_session_t *ss = (odin_server_session_t *)calloc(1, sizeof(*ss));
+  if (ss == NULL) {
+    errno = ENOMEM;
+    return -1;
+  }
+  ss->loop = loop;
+  ss->conn_fd = -1;
+  ss->dial_fd = -1;
+  ss->state = ODIN_SERVER_SESSION_S_HANDSHAKE;
+  ss->on_close = on_close;
+  ss->user_data = user_data;
+
+  if (create_downstream(server_session_ready, ss, factory_user_data,
+                        &ss->downstream_t) != 0) {
+    const int saved = errno;
+    free(ss);
+    errno = saved;
+    return -1;
+  }
+  if (odin_connect_session_create_server(session_on_req_decoded,
+                                         session_on_done, ss, &ss->s) != 0) {
+    const int saved = errno;
+    odin_transport_destroy(ss->downstream_t);
+    free(ss);
+    errno = saved;
+    return -1;
+  }
+  if (odin_transport_set_interest(ss->downstream_t, ODIN_TRANSPORT_READ) != 0) {
+    const int saved = errno;
+    odin_connect_session_destroy(ss->s);
+    odin_transport_destroy(ss->downstream_t);
+    free(ss);
+    errno = saved;
+    return -1;
+  }
+#if defined(ODIN_SERVER_SESSION_TESTING)
+  g_server_session_live_count += 1;
+#endif
   *out = ss;
   return 0;
 }
@@ -205,6 +267,9 @@ static void finish_destroy(odin_server_session_t *ss) {
     (void)close(ss->conn_fd);
     ss->conn_fd = -1;
   }
+#if defined(ODIN_SERVER_SESSION_TESTING)
+  g_server_session_live_count -= 1;
+#endif
   free(ss);
 }
 
@@ -217,10 +282,20 @@ static void server_session_ready(odin_transport_t *t, unsigned int events,
     return;
   }
   if (ss->s != NULL) {
+    ss->connect_drive_depth += 1;
     const odin_connect_session_drive_t d =
         odin_connect_session_drive(ss->s, t, events);
+    ss->connect_drive_depth -= 1;
     if (ss->s != NULL && d == ODIN_CONNECT_SESSION_DRIVE_CONTINUE) {
-      (void)odin_transport_set_interest(t, odin_connect_session_wants(ss->s));
+      unsigned int mask = 0;
+      if (ss->pending_downstream_interest_armed) {
+        mask = ss->pending_downstream_interest;
+        ss->pending_downstream_interest = 0;
+        ss->pending_downstream_interest_armed = 0;
+      } else {
+        mask = odin_connect_session_wants(ss->s);
+      }
+      (void)odin_transport_set_interest(t, mask);
     }
     ss_leave(ss);
     return;
@@ -373,8 +448,13 @@ static void handle_dial_result(odin_server_session_t *ss, int err) {
     odin_connect_session_server_set_error_code(
         ss->s, map_dial_errno_to_resp_code(err));
   }
-  (void)odin_transport_set_interest(ss->downstream_t,
-                                    odin_connect_session_wants(ss->s));
+  const unsigned int mask = odin_connect_session_wants(ss->s);
+  if (ss->connect_drive_depth != 0) {
+    ss->pending_downstream_interest = mask;
+    ss->pending_downstream_interest_armed = 1;
+    return;
+  }
+  (void)odin_transport_set_interest(ss->downstream_t, mask);
 }
 
 static void session_on_done(odin_connect_session_t *s,
@@ -584,6 +664,10 @@ int odin_server_session_test_state(const odin_server_session_t *ss) {
     return 0;
   }
   return ss->state;
+}
+
+unsigned int odin_server_session_test_live_count(void) {
+  return g_server_session_live_count;
 }
 
 #endif /* defined(ODIN_SERVER_SESSION_TESTING) */

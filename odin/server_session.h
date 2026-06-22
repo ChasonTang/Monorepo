@@ -48,6 +48,7 @@
 #include <sys/socket.h>
 
 #include "odin/event_loop.h"
+#include "odin/transport.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,9 +69,19 @@ typedef int (*odin_server_session_dial_filter_cb)(const struct sockaddr *addr,
                                                   socklen_t addrlen,
                                                   void *user_data);
 
+typedef int (*odin_server_session_transport_factory_cb)(
+    odin_transport_ready_cb on_ready, void *ready_user_data,
+    void *factory_user_data, odin_transport_t **out);
+
 int odin_server_session_create(odin_event_loop_t *loop, int conn_fd,
                                odin_server_session_close_cb on_close,
                                void *user_data, odin_server_session_t **out);
+
+int odin_server_session_create_with_transport(
+    odin_event_loop_t *loop,
+    odin_server_session_transport_factory_cb create_downstream,
+    void *factory_user_data, odin_server_session_close_cb on_close,
+    void *user_data, odin_server_session_t **out);
 
 void odin_server_session_set_dial_filter(odin_server_session_t *ss,
                                          odin_server_session_dial_filter_cb cb,

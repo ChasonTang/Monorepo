@@ -43,6 +43,10 @@ config("odin_server_runtime_testing_config") {
   defines = [ "ODIN_SERVER_RUNTIME_TESTING" ]
 }
 
+config("odin_xqc_server_runtime_testing_config") {
+  defines = [ "ODIN_XQC_SERVER_RUNTIME_TESTING" ]
+}
+
 config("odin_server_session_testing_config") {
   defines = [ "ODIN_SERVER_SESSION_TESTING" ]
 }
@@ -61,6 +65,10 @@ config("odin_udp_testing_config") {
 
 config("odin_xqc_udp_testing_config") {
   defines = [ "ODIN_XQC_UDP_TESTING" ]
+}
+
+config("odin_connect_session_testing_config") {
+  defines = [ "ODIN_CONNECT_SESSION_TESTING" ]
 }
 
 source_set("odin_event_loop_testing") {
@@ -87,6 +95,7 @@ executable("odin_unittests") {
     "../dial.h",
     "../relay.h",
     "../server_runtime.h",
+    "../server_xqc_runtime.h",
     "../server_session.h",
     "../transport.h",
     "../transport_fd.h",
@@ -108,6 +117,7 @@ executable("odin_unittests") {
     "client_session_testing.c",
     "client_session_unittests.cpp",
     "connect_session_testing.c",
+    "connect_session_internal_test.h",
     "connect_session_unittests.cpp",
     "dial_internal_test.h",
     "dial_testing.c",
@@ -125,6 +135,9 @@ executable("odin_unittests") {
     "server_session_internal_test.h",
     "server_session_testing.c",
     "server_session_unittests.cpp",
+    "server_xqc_runtime_internal_test.h",
+    "server_xqc_runtime_testing.c",
+    "server_xqc_runtime_unittests.cpp",
     "transport_fd_internal_test.h",
     "transport_fd_testing.c",
     "transport_fd_unittests.cpp",
@@ -155,9 +168,11 @@ executable("odin_unittests") {
     ":odin_cli_client_testing_config",
     ":odin_cli_server_testing_config",
     ":odin_client_session_testing_config",
+    ":odin_connect_session_testing_config",
     ":odin_dial_testing_config",
     ":odin_event_loop_testing_config",
     ":odin_server_runtime_testing_config",
+    ":odin_xqc_server_runtime_testing_config",
     ":odin_server_session_testing_config",
     ":odin_transport_fd_testing_config",
     ":odin_transport_xqc_testing_config",

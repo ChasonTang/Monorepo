@@ -27,6 +27,7 @@ typedef struct odin_xqc_stream_transport_test_ops_t {
 void odin_xqc_stream_transport_test_set_ops(
     const odin_xqc_stream_transport_test_ops_t *ops);
 unsigned int odin_xqc_stream_transport_test_interest(odin_transport_t *t);
+int odin_xqc_stream_transport_test_fail_next_create(int errnum);
 
 #ifdef __cplusplus
 }

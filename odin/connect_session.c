@@ -21,6 +21,10 @@
 #include "odin/protocol.h"
 #include "odin/transport.h"
 
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+#include "odin/testing/connect_session_internal_test.h"
+#endif
+
 enum odin_connect_session_mode_t {
   ODIN_CONNECT_SESSION_MODE_CLIENT = 0,
   ODIN_CONNECT_SESSION_MODE_SERVER,
@@ -63,6 +67,12 @@ struct odin_connect_session_t {
   int err;
   int on_done_fired;
 };
+
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+static unsigned int g_connect_session_live_count;
+static int g_fail_next_create_server_armed;
+static int g_fail_next_create_server_errno;
+#endif
 
 static void aggregate_error(odin_connect_session_t *s, int err) {
   if (s->state == ODIN_CONNECT_SESSION_ERROR_STATE) {
@@ -125,6 +135,9 @@ int odin_connect_session_create_client(const char *host, size_t host_len,
   s->write_total = off;
   s->write_off = 0;
 
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+  g_connect_session_live_count += 1;
+#endif
   *out = s;
   return 0;
 }
@@ -133,6 +146,15 @@ int odin_connect_session_create_server(
     odin_connect_session_req_decoded_cb on_req_decoded,
     odin_connect_session_done_cb on_done, void *user_data,
     odin_connect_session_t **out) {
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+  if (g_fail_next_create_server_armed) {
+    const int errnum = g_fail_next_create_server_errno;
+    g_fail_next_create_server_armed = 0;
+    g_fail_next_create_server_errno = 0;
+    errno = errnum;
+    return -1;
+  }
+#endif
   odin_connect_session_t *s = (odin_connect_session_t *)calloc(1, sizeof(*s));
   if (s == NULL) {
     errno = ENOMEM;
@@ -143,6 +165,9 @@ int odin_connect_session_create_server(
   s->on_req_decoded = on_req_decoded;
   s->on_done = on_done;
   s->user_data = user_data;
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+  g_connect_session_live_count += 1;
+#endif
   *out = s;
   return 0;
 }
@@ -415,5 +440,20 @@ void odin_connect_session_destroy(odin_connect_session_t *s) {
   if (s == NULL) {
     return;
   }
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+  g_connect_session_live_count -= 1;
+#endif
   free(s);
 }
+
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+int odin_connect_session_test_fail_next_create_server(int errnum) {
+  g_fail_next_create_server_armed = 1;
+  g_fail_next_create_server_errno = errnum;
+  return 0;
+}
+
+unsigned int odin_connect_session_test_live_count(void) {
+  return g_connect_session_live_count;
+}
+#endif
