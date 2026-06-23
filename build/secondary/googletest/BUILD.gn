@@ -18,9 +18,8 @@
 # defaults are fine — gtest compiles with GTEST_HAS_RTTI=0 /
 # GTEST_HAS_EXCEPTIONS=0 and the affected matchers fall back to non-RTTI paths.
 #
-# pthread / dl: the Linux toolchain auto-links both (see
-# //build/toolchain:clang_linux_x64), and on macOS pthread is part of
-# libSystem. No `libs` needed here.
+# Linux: gtest uses libm functions in floating-point matchers and pthread in
+# gtest-port.h. macOS/iOS provide pthread through libSystem.
 
 # Public-facing config: anything depending on //googletest:gtest gets the
 # include dir so it can resolve <gtest/gtest.h>.
@@ -70,6 +69,10 @@ source_set("gtest") {
   testonly = true
 
   public_configs = [ ":gtest_public_config" ]
+  public_deps = [
+    "//llvm-project/libcxx",
+    "//llvm-project/libcxxabi",
+  ]
   configs += [
     ":gtest_internal_config",
     "//build:cxx17",
@@ -104,6 +107,13 @@ source_set("gtest") {
     "//googletest/googletest/include/gtest/gtest_pred_impl.h",
     "//googletest/googletest/include/gtest/gtest_prod.h",
   ]
+
+  if (target_os == "linux") {
+    libs = [
+      "m",
+      "pthread",
+    ]
+  }
 }
 
 source_set("gtest_main") {
@@ -124,6 +134,11 @@ source_set("gmock") {
   testonly = true
 
   public_configs = [ ":gmock_public_config" ]
+  public_deps = [
+    ":gtest",
+    "//llvm-project/libcxx",
+    "//llvm-project/libcxxabi",
+  ]
   configs += [
     ":gmock_internal_config",
     "//build:cxx17",
@@ -148,8 +163,6 @@ source_set("gmock") {
     "//googletest/googlemock/include/gmock/gmock-spec-builders.h",
     "//googletest/googlemock/include/gmock/gmock.h",
   ]
-
-  public_deps = [ ":gtest" ]
 }
 
 source_set("gmock_main") {

@@ -176,4 +176,11 @@ component("cares") {
   # Resolver routines (res_*, inet_net_pton) live in libresolv on both
   # macOS (/usr/lib/libresolv.dylib) and glibc Linux (libresolv.so.2).
   libs = [ "resolv" ]
+
+  if (target_os == "linux") {
+    libs += [
+      "dl",
+      "pthread",
+    ]
+  }
 }

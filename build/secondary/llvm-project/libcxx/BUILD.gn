@@ -1,0 +1,108 @@
+import("//build/component.gni")
+
+config("libcxx_config") {
+  include_dirs = [
+    "//build/secondary/llvm-project/libcxx/config",
+    "//llvm-project/libcxx/include",
+    "//llvm-project/libcxxabi/include",
+  ]
+}
+
+config("src_include") {
+  include_dirs = [ "//llvm-project/libcxx/src" ]
+}
+
+config("llvm_libc_shared_headers") {
+  include_dirs = [ "//llvm-project/libc" ]
+  defines = [ "LIBC_NAMESPACE=__llvm_libc_monorepo" ]
+}
+
+component("libcxx") {
+  output_name = "c++"
+
+  sources = [
+    "//llvm-project/libcxx/src/algorithm.cpp",
+    "//llvm-project/libcxx/src/any.cpp",
+    "//llvm-project/libcxx/src/atomic.cpp",
+    "//llvm-project/libcxx/src/barrier.cpp",
+    "//llvm-project/libcxx/src/bind.cpp",
+    "//llvm-project/libcxx/src/call_once.cpp",
+    "//llvm-project/libcxx/src/charconv.cpp",
+    "//llvm-project/libcxx/src/chrono.cpp",
+    "//llvm-project/libcxx/src/condition_variable.cpp",
+    "//llvm-project/libcxx/src/condition_variable_destructor.cpp",
+    "//llvm-project/libcxx/src/error_category.cpp",
+    "//llvm-project/libcxx/src/exception.cpp",
+    "//llvm-project/libcxx/src/expected.cpp",
+    "//llvm-project/libcxx/src/filesystem/directory_entry.cpp",
+    "//llvm-project/libcxx/src/filesystem/directory_iterator.cpp",
+    "//llvm-project/libcxx/src/filesystem/filesystem_clock.cpp",
+    "//llvm-project/libcxx/src/filesystem/filesystem_error.cpp",
+    "//llvm-project/libcxx/src/filesystem/int128_builtins.cpp",
+    "//llvm-project/libcxx/src/filesystem/operations.cpp",
+    "//llvm-project/libcxx/src/filesystem/path.cpp",
+    "//llvm-project/libcxx/src/fstream.cpp",
+    "//llvm-project/libcxx/src/functional.cpp",
+    "//llvm-project/libcxx/src/future.cpp",
+    "//llvm-project/libcxx/src/hash.cpp",
+    "//llvm-project/libcxx/src/ios.cpp",
+    "//llvm-project/libcxx/src/ios.instantiations.cpp",
+    "//llvm-project/libcxx/src/iostream.cpp",
+    "//llvm-project/libcxx/src/locale.cpp",
+    "//llvm-project/libcxx/src/memory.cpp",
+    "//llvm-project/libcxx/src/memory_resource.cpp",
+    "//llvm-project/libcxx/src/mutex.cpp",
+    "//llvm-project/libcxx/src/mutex_destructor.cpp",
+    "//llvm-project/libcxx/src/new_handler.cpp",
+    "//llvm-project/libcxx/src/new_helpers.cpp",
+    "//llvm-project/libcxx/src/optional.cpp",
+    "//llvm-project/libcxx/src/ostream.cpp",
+    "//llvm-project/libcxx/src/print.cpp",
+    "//llvm-project/libcxx/src/random.cpp",
+    "//llvm-project/libcxx/src/random_shuffle.cpp",
+    "//llvm-project/libcxx/src/regex.cpp",
+    "//llvm-project/libcxx/src/ryu/d2fixed.cpp",
+    "//llvm-project/libcxx/src/ryu/d2s.cpp",
+    "//llvm-project/libcxx/src/ryu/f2s.cpp",
+    "//llvm-project/libcxx/src/shared_mutex.cpp",
+    "//llvm-project/libcxx/src/stdexcept.cpp",
+    "//llvm-project/libcxx/src/string.cpp",
+    "//llvm-project/libcxx/src/strstream.cpp",
+    "//llvm-project/libcxx/src/system_error.cpp",
+    "//llvm-project/libcxx/src/thread.cpp",
+    "//llvm-project/libcxx/src/typeinfo.cpp",
+    "//llvm-project/libcxx/src/valarray.cpp",
+    "//llvm-project/libcxx/src/variant.cpp",
+    "//llvm-project/libcxx/src/vector.cpp",
+    "//llvm-project/libcxx/src/verbose_abort.cpp",
+  ]
+
+  deps = [ "//llvm-project/libcxxabi" ]
+
+  public_configs = [
+    ":libcxx_config",
+    "//llvm-project/libcxxabi:libcxxabi_public_config",
+  ]
+
+  defines = [
+    "_LIBCPP_NO_EXCEPTIONS",
+    "_LIBCPP_NO_RTTI",
+    "_LIBCPP_BUILDING_LIBRARY",
+    "LIBCXX_BUILDING_LIBCXXABI",
+  ]
+
+  cflags_cc = [
+    "-std=c++23",
+    "-Wno-covered-switch-default",
+    "-Wno-nullability-completeness",
+    "-Wno-unused-parameter",
+    "-Wno-thread-safety-analysis",
+    "-Wno-user-defined-literals",
+  ]
+
+  configs += [
+    ":src_include",
+    ":libcxx_config",
+    ":llvm_libc_shared_headers",
+  ]
+}

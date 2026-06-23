@@ -1,0 +1,58 @@
+import("//build/component.gni")
+
+config("libcxxabi_public_config") {
+  include_dirs = [ "//llvm-project/libcxxabi/include" ]
+}
+
+config("libcxxabi_config") {
+  include_dirs = [
+    "//llvm-project/libcxxabi/include",
+
+    # Some libc++abi translation units include libc++ private headers.
+    "//llvm-project/libcxx/src",
+  ]
+
+  cflags_cc = [ "-std=c++23" ]
+
+  defines = [
+    "_LIBCXXABI_BUILDING_LIBRARY",
+    "_LIBCPP_BUILDING_LIBRARY",
+  ]
+}
+
+component("libcxxabi") {
+  output_name = "c++abi"
+
+  public_configs = [ ":libcxxabi_public_config" ]
+
+  defines = [
+    "_LIBCXXABI_BUILDING_LIBRARY",
+    "_LIBCPP_BUILDING_LIBRARY",
+  ]
+
+  sources = [
+    "//llvm-project/libcxxabi/src/abort_message.cpp",
+    "//llvm-project/libcxxabi/src/cxa_aux_runtime.cpp",
+    "//llvm-project/libcxxabi/src/cxa_default_handlers.cpp",
+    "//llvm-project/libcxxabi/src/cxa_demangle.cpp",
+    "//llvm-project/libcxxabi/src/cxa_exception_storage.cpp",
+    "//llvm-project/libcxxabi/src/cxa_guard.cpp",
+    "//llvm-project/libcxxabi/src/cxa_handlers.cpp",
+    "//llvm-project/libcxxabi/src/cxa_noexception.cpp",
+    "//llvm-project/libcxxabi/src/cxa_vector.cpp",
+    "//llvm-project/libcxxabi/src/cxa_virtual.cpp",
+    "//llvm-project/libcxxabi/src/fallback_malloc.cpp",
+    "//llvm-project/libcxxabi/src/stdlib_exception.cpp",
+    "//llvm-project/libcxxabi/src/stdlib_new_delete.cpp",
+    "//llvm-project/libcxxabi/src/stdlib_stdexcept.cpp",
+    "//llvm-project/libcxxabi/src/stdlib_typeinfo.cpp",
+  ]
+
+  public = [ "//llvm-project/libcxxabi/include/cxxabi.h" ]
+
+  if (current_os == "linux") {
+    sources += [ "//llvm-project/libcxxabi/src/cxa_thread_atexit.cpp" ]
+  }
+
+  configs += [ ":libcxxabi_config" ]
+}

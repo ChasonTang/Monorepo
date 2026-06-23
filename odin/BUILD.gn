@@ -37,17 +37,17 @@ source_set("odin_core") {
 source_set("odin") {
   deps = [
     ":odin_accept_loop",
-    ":odin_client_session",
     ":odin_cli_client",
     ":odin_cli_server",
+    ":odin_client_session",
     ":odin_connect_session",
     ":odin_core",
     ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
     ":odin_server_runtime",
-    ":odin_server_xqc_runtime",
     ":odin_server_session",
+    ":odin_server_xqc_runtime",
     ":odin_transport",
     ":odin_transport_fd",
     ":odin_transport_xqc",
@@ -105,6 +105,10 @@ source_set("odin_event_loop") {
     "event_loop.c",
     "event_loop.h",
   ]
+
+  if (target_os == "linux") {
+    libs = [ "pthread" ]
+  }
 }
 
 source_set("odin_udp") {

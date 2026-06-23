@@ -16,6 +16,10 @@ config("boringssl_config") {
 
 component("crypto") {
   public_configs = [ ":boringssl_public_config" ]
+  public_deps = [
+    "//llvm-project/libcxx",
+    "//llvm-project/libcxxabi",
+  ]
 
   configs += [
     ":boringssl_config",
@@ -660,10 +664,18 @@ component("crypto") {
     "include/openssl/x509v3_errors.h",
     "include/openssl/xwing.h",
   ]
+
+  if (target_os == "linux") {
+    libs = [ "pthread" ]
+  }
 }
 
 component("ssl") {
   public_configs = [ ":boringssl_public_config" ]
+  public_deps = [
+    "//llvm-project/libcxx",
+    "//llvm-project/libcxxabi",
+  ]
 
   configs += [
     ":boringssl_config",

@@ -35,15 +35,16 @@ One bundled LLVM toolchain (`./tool/clang`, mac-amd64 or mac-arm64) drives
 every supported target — mac↔mac and mac→linux/iOS. Switching arch/OS is just
 `--target=` plus the right platform layer.
 
-- **macOS (x64 / arm64):** the SDK's TBD stubs plus fat `libc++.a` /
-  `libclang_rt.osx.a` cover both arches; `--target=` alone switches.
+- **macOS (x64 / arm64):** the SDK's TBD stubs plus compiler-rt cover the
+  platform layer; libc++ / libc++abi are built from the matching
+  `llvm-project` checkout via `component()`.
 - **iOS device / simulator:** `iPhoneOS.sdk` / `iPhoneSimulator.sdk` supply the
-  platform stubs; libc++ is linked dynamically from the selected SDK with
-  `-lc++`.
+  platform stubs; libc++ / libc++abi come from the same source-built runtime
+  components instead of the SDK `libc++.tbd`.
 - **Linux x86_64:** `sync_linux_sysroot.sh` supplies the system layer (libc
-  headers + stub `.so`s); `tool/clang/lib/x86_64-unknown-linux-gnu/` ships
-  `libc++.a` / `libunwind.a` / compiler-rt, picked up via
-  `-static-libstdc++ -unwindlib=libunwind`.
+  headers + stub `.so`s); libc++ / libc++abi / libunwind are built from
+  `llvm-project`, while clang still supplies CRT objects and compiler-rt
+  builtins.
 
 ```bash
 ./tool/gn gen out/mac_arm64  --args='target_cpu="arm64"'                  # Apple Silicon
