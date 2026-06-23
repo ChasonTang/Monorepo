@@ -31,8 +31,9 @@
 #                          current_os, and (for dual-CPU toolchains)
 #                          current_cpu = target_cpu so secondary references
 #                          don't silently fall back to host_cpu.
-#   use_sdk_libcxx       — Apple-only. When true, link the SDK's dynamic libc++
-#                          with -lc++; otherwise link //tool/clang/lib/libc++.a.
+#   use_sdk_libcxx       — Apple-only. When true, compile against and link the
+#                          SDK's dynamic libc++; otherwise use the bundled
+#                          toolchain libc++ headers and //tool/clang/lib/libc++.a.
 template("clang_toolchain") {
   toolchain(target_name) {
     forward_variables_from(invoker,
@@ -45,6 +46,7 @@ template("clang_toolchain") {
 
     prefix = rebase_path("//tool/clang/bin", root_build_dir)
     sysroot = rebase_path(sysroot_path, root_build_dir)
+    cxx_header_flags = ""
 
     # --target= tells clang which backend / Mach-O slice / ELF machine to
     # emit, and tells the lld driver which slice to pull from any universal
@@ -83,8 +85,13 @@ template("clang_toolchain") {
       link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
 
       if (defined(invoker.use_sdk_libcxx) && invoker.use_sdk_libcxx) {
-        # iOS SDKs ship libc++ as a dynamic library stub. Resolve -lc++ through
-        # the active sysroot so device and simulator get the matching SDK slice.
+        # iOS SDKs ship libc++ headers plus a dynamic library stub. Keep the
+        # compile-time ABI surface and the linked dylib slice from the same SDK
+        # instead of mixing bundled clang headers with SDK libc++.
+        cxx_header_flags = "-nostdinc++ -isystem $sysroot/usr/include/c++/v1"
+
+        # Resolve -lc++ through the active sysroot so device and simulator get
+        # the matching SDK slice.
         cxx_runtime_lib = "-lc++"
       } else {
         # The bundled libc++.a is currently macOS-only. Keep macOS static, but
@@ -130,7 +137,7 @@ template("clang_toolchain") {
 
     tool("cxx") {
       depfile = "{{output}}.d"
-      command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
+      command = "$cxx $compile_flags $cxx_header_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
     }
@@ -180,7 +187,7 @@ template("clang_toolchain") {
 
       tool("objcxx") {
         depfile = "{{output}}.d"
-        command = "$cxx $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -fobjc-arc -c {{source}} -o {{output}}"
+        command = "$cxx $compile_flags $cxx_header_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -fobjc-arc -c {{source}} -o {{output}}"
         depsformat = "gcc"
         outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
       }

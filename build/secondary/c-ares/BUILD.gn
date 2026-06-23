@@ -2,18 +2,21 @@
 #
 # Source list mirrors c-ares/src/lib/Makefile.inc. Configuration headers
 # (ares_config.h, ares_build.h) are hand-tailored per platform and live
-# under //build/secondary/c-ares/config/{mac,linux} so the upstream tree is
-# untouched and the GN build does not depend on the autotools/cmake configure
-# step. Each subdir mirrors what `cmake -DCARES_THREADS=ON` would generate
-# against that platform's sysroot.
+# under //build/secondary/c-ares/config/{mac,ios,linux} so the upstream tree
+# is untouched and the GN build does not depend on the autotools/cmake
+# configure step. Each subdir mirrors what `cmake -DCARES_THREADS=ON` would
+# generate against that platform's sysroot.
 
 import("//build/component.gni")
 
 # Per-platform config dir holds the hand-tailored ares_config.h / ares_build.h.
-# Linux/macOS differ on epoll vs kqueue, getrandom vs arc4random, libresolv
-# usage, MSG_NOSIGNAL availability, and the *_R_ARGS counts.
+# Linux/Darwin/iOS differ on epoll vs kqueue, getrandom vs arc4random,
+# sys/random.h availability, libresolv usage, MSG_NOSIGNAL availability, and
+# the *_R_ARGS counts.
 if (current_os == "mac") {
   _cares_config_dir = "//build/secondary/c-ares/config/mac"
+} else if (current_os == "ios") {
+  _cares_config_dir = "//build/secondary/c-ares/config/ios"
 } else {
   _cares_config_dir = "//build/secondary/c-ares/config/linux"
 }
@@ -35,8 +38,8 @@ config("cares_internal_config") {
   ]
 
   # Source-feature macro for the libc:
-  #   _DARWIN_C_SOURCE — exposes BSD/Darwin extensions (kqueue, connectx,
-  #                      MSG_NOSIGNAL on macOS, sys/sockio.h, ...).
+  #   _DARWIN_C_SOURCE — exposes BSD/Darwin extensions on macOS, matching
+  #                      c-ares' CMAKE_SYSTEM_NAME=="Darwin" branch.
   #   _GNU_SOURCE      — exposes glibc extensions (epoll, getrandom in
   #                      <sys/random.h>, pipe2, MSG_NOSIGNAL, ...).
   if (current_os == "mac") {
