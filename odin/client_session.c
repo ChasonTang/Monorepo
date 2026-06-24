@@ -127,8 +127,7 @@ int odin_client_session_create(odin_event_loop_t *loop, int conn_fd,
                                const char *server_host, size_t server_host_len,
                                uint16_t server_port,
                                odin_client_session_close_cb on_close,
-                               void *user_data,
-                               odin_client_session_t **out) {
+                               void *user_data, odin_client_session_t **out) {
 #if defined(ODIN_CLIENT_SESSION_TESTING)
   if (g_client_session_fail_next_create_errno != 0) {
     const int err = g_client_session_fail_next_create_errno;
@@ -155,8 +154,7 @@ int odin_client_session_create(odin_event_loop_t *loop, int conn_fd,
     return -1;
   }
 
-  odin_client_session_t *cs =
-      (odin_client_session_t *)calloc(1, sizeof(*cs));
+  odin_client_session_t *cs = (odin_client_session_t *)calloc(1, sizeof(*cs));
   if (cs == NULL) {
     errno = ENOMEM;
     return -1;
@@ -291,9 +289,9 @@ static void drive_parse_http(odin_client_session_t *cs, unsigned int events) {
 
   for (;;) {
     size_t n = 0;
-    const odin_transport_io_t io = odin_transport_read(
-        cs->downstream_t, cs->http_buf + cs->http_buf_used,
-        ODIN_HTTP_REQUEST_MAX - cs->http_buf_used, &n);
+    const odin_transport_io_t io =
+        odin_transport_read(cs->downstream_t, cs->http_buf + cs->http_buf_used,
+                            ODIN_HTTP_REQUEST_MAX - cs->http_buf_used, &n);
     switch (io) {
     case ODIN_TRANSPORT_OK:
       cs->http_buf_used += n;
@@ -312,9 +310,8 @@ static void drive_parse_http(odin_client_session_t *cs, unsigned int events) {
 
     odin_http_connect_t view;
     size_t consumed = 0;
-    const odin_http_status_t st =
-        odin_http_parse_connect(cs->http_buf, cs->http_buf_used, &consumed,
-                                &view);
+    const odin_http_status_t st = odin_http_parse_connect(
+        cs->http_buf, cs->http_buf_used, &consumed, &view);
     if (st == ODIN_HTTP_OK) {
       cs->http_consumed = consumed;
       cs->http_view = view;

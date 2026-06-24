@@ -72,6 +72,11 @@ typedef enum odin_cli_mode_t {
   ODIN_CLI_MODE_SERVER,
 } odin_cli_mode_t;
 
+typedef enum odin_cli_server_transport_t {
+  ODIN_CLI_SERVER_TRANSPORT_TCP = 0,
+  ODIN_CLI_SERVER_TRANSPORT_QUIC,
+} odin_cli_server_transport_t;
+
 typedef enum odin_cli_status_t {
   ODIN_CLI_OK = 0,
   ODIN_CLI_HELP,
@@ -80,6 +85,8 @@ typedef enum odin_cli_status_t {
   ODIN_CLI_ERR_UNKNOWN_FLAG,
   ODIN_CLI_ERR_BAD_LISTEN_PORT,
   ODIN_CLI_ERR_BAD_SERVER,
+  ODIN_CLI_ERR_BAD_TRANSPORT,
+  ODIN_CLI_ERR_BAD_QUIC_TLS,
 } odin_cli_status_t;
 
 typedef struct odin_cli_args_t {
@@ -88,6 +95,9 @@ typedef struct odin_cli_args_t {
   const char *server_host;
   size_t server_host_len;
   uint16_t server_port;
+  odin_cli_server_transport_t server_transport;
+  const char *quic_cert_file;
+  const char *quic_key_file;
 } odin_cli_args_t;
 
 odin_cli_status_t odin_cli_parse(int argc, char *const *argv,

@@ -47,8 +47,7 @@ int odin_cli_client_test_trigger_next(odin_cli_client_test_failpoint_t fp);
 void odin_cli_client_test_reset_liveness(void);
 int odin_cli_client_test_liveness(odin_cli_client_test_liveness_t *out);
 int odin_cli_client_test_last_bind_addr(struct sockaddr_in *out);
-int odin_cli_client_test_set_progress_fd(int fd,
-                                         size_t min_inflight_sessions);
+int odin_cli_client_test_set_progress_fd(int fd, size_t min_inflight_sessions);
 int odin_cli_client_test_set_runtime_trigger_fd(int fd);
 int odin_cli_client_test_set_idle_snapshot_fd(int fd,
                                               size_t min_closed_sessions);

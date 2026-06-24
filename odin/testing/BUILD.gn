@@ -109,6 +109,7 @@ executable("odin_unittests") {
     "cli_client_testing.c",
     "cli_client_unittests.cpp",
     "cli_server_internal_test.h",
+    "cli_server_quic_unittests.cpp",
     "cli_server_testing.c",
     "cli_server_unittests.cpp",
     "cli_unittests.cpp",

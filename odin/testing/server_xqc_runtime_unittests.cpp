@@ -61,8 +61,8 @@ odin_transport_io_t FakeTransportRead(odin_transport_t *, void *, size_t,
   return ODIN_TRANSPORT_AGAIN;
 }
 
-odin_transport_io_t FakeTransportWrite(odin_transport_t *, const void *,
-                                       size_t, size_t *) {
+odin_transport_io_t FakeTransportWrite(odin_transport_t *, const void *, size_t,
+                                       size_t *) {
   return ODIN_TRANSPORT_AGAIN;
 }
 
@@ -86,7 +86,7 @@ void FakeTransportDestroy(odin_transport_t *t) {
 }
 
 const odin_transport_vtable_t kFakeTransportVtable = {
-    FakeTransportRead,  FakeTransportWrite, FakeTransportShutdownWrite,
+    FakeTransportRead,        FakeTransportWrite, FakeTransportShutdownWrite,
     FakeTransportSetInterest, FakeTransportError, FakeTransportDestroy,
 };
 
@@ -228,8 +228,8 @@ ssize_t FakeRecv(xqc_stream_t *stream, unsigned char *recv_buf,
   const size_t copy =
       std::min(step.data.size(), static_cast<size_t>(recv_buf_size));
   if (copy != 0) {
-    std::copy_n(reinterpret_cast<const unsigned char *>(step.data.data()),
-                copy, recv_buf);
+    std::copy_n(reinterpret_cast<const unsigned char *>(step.data.data()), copy,
+                recv_buf);
   }
   return step.ret;
 }
@@ -439,8 +439,7 @@ size_t ReadExactlyFd(int fd, void *buf, size_t len, int deadline_ms) {
   return off;
 }
 
-void DrainUntilEofFd(int fd, std::string *out, bool *saw_eof,
-                     int deadline_ms) {
+void DrainUntilEofFd(int fd, std::string *out, bool *saw_eof, int deadline_ms) {
   *saw_eof = false;
   const auto start = std::chrono::steady_clock::now();
   uint8_t buf[256];
@@ -712,8 +711,8 @@ xqc_int_t FakeStreamClose(xqc_stream_t *stream) {
 }
 
 int FakeUdpRegisterConn(odin_xqc_udp_t *, const xqc_cid_t *cid) {
-  if (g_harness != nullptr && cid != nullptr &&
-      cid->cid_len == 1 && cid->cid_buf[0] == g_harness->fail_register_cid) {
+  if (g_harness != nullptr && cid != nullptr && cid->cid_len == 1 &&
+      cid->cid_buf[0] == g_harness->fail_register_cid) {
     errno = ENOMEM;
     return -1;
   }
@@ -744,13 +743,8 @@ void InstallRuntimeOps(RuntimeHarness *h) {
   g_harness = h;
 #if defined(ODIN_XQC_UDP_TESTING)
   static const odin_xqc_udp_test_ops_t kUdpOps = {
-      FakeEngineCreate,
-      FakeEngineDestroy,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
+      FakeEngineCreate, FakeEngineDestroy, nullptr, nullptr,
+      nullptr,          nullptr,           nullptr,
   };
   odin_xqc_udp_test_set_ops(&kUdpOps);
 #endif
@@ -952,8 +946,8 @@ int TestDialFilter(const struct sockaddr *addr, socklen_t addrlen,
   return state->err;
 }
 
-void QueueCompleteReq(FakeStream *stream, uint16_t port, const std::string &tail,
-                      uint8_t fin) {
+void QueueCompleteReq(FakeStream *stream, uint16_t port,
+                      const std::string &tail, uint8_t fin) {
   const std::string req = EncodedReq("127.0.0.1", port) + tail;
   QueueRecv(stream, req, static_cast<ssize_t>(req.size()), fin);
 }
@@ -973,14 +967,13 @@ void RunValidStream(RuntimeHarness *h, FakeConn *conn, FakeStream *stream,
     QueueSend(stream, 2);
     QueueSend(stream, -XQC_EAGAIN);
   }
-  ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(stream), stream->user_data),
+  ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(AsStream(stream),
+                                                            stream->user_data),
             XQC_OK);
 
   RunUntil(h->loop, [&] { return peer.accepted.load(); });
 
-  const std::string ok_resp =
-      EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_OK);
+  const std::string ok_resp = EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_OK);
   if (short_resp) {
     RunUntil(h->loop, [&] { return DataSends(*stream) == "\x01\x02"; });
     EXPECT_FALSE(peer.tail_read.load());
@@ -993,8 +986,9 @@ void RunValidStream(RuntimeHarness *h, FakeConn *conn, FakeStream *stream,
   RunUntil(h->loop, [&] { return StartsWith(DataSends(*stream), ok_resp); });
   RunUntil(h->loop, [&] { return peer.tail_read.load(); });
   RunUntil(h->loop, [&] { return peer.eof_seen.load(); });
-  RunUntil(h->loop,
-           [&] { return DataSends(*stream).find("reply") != std::string::npos; });
+  RunUntil(h->loop, [&] {
+    return DataSends(*stream).find("reply") != std::string::npos;
+  });
   RunUntil(h->loop, [&] { return stream->user_data == nullptr; });
 
   peer.Join();
@@ -1017,17 +1011,17 @@ void FinishStagedValidStream(RuntimeHarness *h, FakeStream *stream,
                              UpstreamPeer *peer, const std::string &req) {
   QueueRecv(stream, req.substr(4) + "tail",
             static_cast<ssize_t>(req.size() - 4 + 4), 1);
-  ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(stream), stream->user_data),
+  ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(AsStream(stream),
+                                                            stream->user_data),
             XQC_OK);
   RunUntil(h->loop, [&] { return peer->accepted.load(); });
-  const std::string ok_resp =
-      EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_OK);
+  const std::string ok_resp = EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_OK);
   RunUntil(h->loop, [&] { return StartsWith(DataSends(*stream), ok_resp); });
   RunUntil(h->loop, [&] { return peer->tail_read.load(); });
   RunUntil(h->loop, [&] { return peer->eof_seen.load(); });
-  RunUntil(h->loop,
-           [&] { return DataSends(*stream).find("reply") != std::string::npos; });
+  RunUntil(h->loop, [&] {
+    return DataSends(*stream).find("reply") != std::string::npos;
+  });
   RunUntil(h->loop, [&] { return stream->user_data == nullptr; });
 }
 
@@ -1037,8 +1031,8 @@ void RunDeniedStream(RuntimeHarness *h, FakeStream *stream, uint16_t port,
   bool in_read_notify = true;
   stream->send_must_be_inside_flag = &in_read_notify;
   stream->send_must_be_inside_bytes = EncodedResp(resp_code);
-  ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(stream), stream->user_data),
+  ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(AsStream(stream),
+                                                            stream->user_data),
             XQC_OK);
   in_read_notify = false;
   EXPECT_EQ(stream->send_must_be_inside_checks, 1);
@@ -1059,10 +1053,10 @@ TEST(OdinServerSessionTransportTest, T1) {
   odin_server_session_t *ss = sentinel;
 
   errno = 0;
-  EXPECT_EQ(odin_server_session_create_with_transport(
-                nullptr, FakeFactory, &factory, ServerSessionClose, nullptr,
-                &ss),
-            -1);
+  EXPECT_EQ(
+      odin_server_session_create_with_transport(
+          nullptr, FakeFactory, &factory, ServerSessionClose, nullptr, &ss),
+      -1);
   EXPECT_EQ(errno, EINVAL);
   EXPECT_EQ(ss, sentinel);
 
@@ -1081,10 +1075,10 @@ TEST(OdinServerSessionTransportTest, T1) {
   EXPECT_EQ(ss, sentinel);
 
   errno = 0;
-  EXPECT_EQ(odin_server_session_create_with_transport(
-                loop, FakeFactory, &factory, ServerSessionClose, nullptr,
-                nullptr),
-            -1);
+  EXPECT_EQ(
+      odin_server_session_create_with_transport(
+          loop, FakeFactory, &factory, ServerSessionClose, nullptr, nullptr),
+      -1);
   EXPECT_EQ(errno, EINVAL);
   EXPECT_EQ(ss, sentinel);
 
@@ -1157,9 +1151,9 @@ TEST(OdinXqcServerRuntimeTest, T1) {
             nullptr);
   EXPECT_NE(record->last_udp_create.transport_callbacks_value.server_refuse,
             nullptr);
-  EXPECT_NE(record->last_udp_create.transport_callbacks_value
-                .conn_update_cid_notify,
-            nullptr);
+  EXPECT_NE(
+      record->last_udp_create.transport_callbacks_value.conn_update_cid_notify,
+      nullptr);
   EXPECT_EQ(record->last_udp_create.transport_callbacks_value.save_token,
             nullptr);
   EXPECT_EQ(record->last_udp_create.app_user_data, h.rt);
@@ -1242,8 +1236,7 @@ TEST(OdinXqcServerRuntimeTest, T2) {
   EXPECT_EQ(CountCalls(ODIN_XQC_SERVER_RUNTIME_TEST_CALL_ENGINE_REGISTER_ALPN),
             1u);
   odin_xqc_server_runtime_destroy(out);
-  const int engine_destroy_calls_before_alpn_failure =
-      h.engine_destroy_calls;
+  const int engine_destroy_calls_before_alpn_failure = h.engine_destroy_calls;
 
   h.alpn_register_fails = true;
   out = reinterpret_cast<odin_xqc_server_runtime_t *>(0x66);
@@ -1269,8 +1262,8 @@ TEST(OdinXqcServerRuntimeTest, T3) {
   EXPECT_EQ(CountCalls(
                 ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_TRANSPORT_USER_DATA),
             1u);
-  EXPECT_EQ(CountCalls(ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_ALP_USER_DATA),
-            1u);
+  EXPECT_EQ(
+      CountCalls(ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_ALP_USER_DATA), 1u);
   CloseConn(&h, &conn, cid);
   ASSERT_EQ(h.fake_unregistered.size(), 1u);
   EXPECT_TRUE(CidEq(h.fake_unregistered[0], cid));
@@ -1305,7 +1298,8 @@ TEST(OdinXqcServerRuntimeTest, T4) {
   FakeStream live_on_failed_update;
   CreateBidiStream(&h, &conn_fail, &live_on_failed_update);
   ASSERT_NE(live_on_failed_update.user_data, nullptr);
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   const unsigned int session_count_with_live_stream =
       odin_server_session_test_live_count();
   const unsigned int connect_count_with_live_stream =
@@ -1315,7 +1309,8 @@ TEST(OdinXqcServerRuntimeTest, T4) {
   h.transport_callbacks.conn_update_cid_notify(AsConn(&conn_fail), &cid_f,
                                                &cid_g, h.xu_user_data);
   EXPECT_EQ(live_on_failed_update.user_data, nullptr);
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   EXPECT_EQ(odin_server_session_test_live_count(),
             session_count_with_live_stream - 1);
   EXPECT_EQ(odin_connect_session_test_live_count(),
@@ -1345,14 +1340,15 @@ TEST(OdinXqcServerRuntimeTest, T4) {
   const size_t register_count_before_stale = h.fake_registered.size();
   const size_t unregister_count_before_stale = h.fake_unregistered.size();
   const size_t close_count_before_stale = h.conn_close_cids.size();
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   const unsigned int session_count_before_stale =
       odin_server_session_test_live_count();
   const unsigned int connect_count_before_stale =
       odin_connect_session_test_live_count();
 #endif
-  h.transport_callbacks.conn_update_cid_notify(AsConn(&conn_z), &cid_z,
-                                               &cid_zz, h.xu_user_data);
+  h.transport_callbacks.conn_update_cid_notify(AsConn(&conn_z), &cid_z, &cid_zz,
+                                               h.xu_user_data);
   h.transport_callbacks.server_refuse(h.engine, AsConn(&conn_z), &cid_z,
                                       h.xu_user_data);
   ASSERT_EQ(h.app_callbacks->conn_cbs.conn_close_notify(
@@ -1361,11 +1357,10 @@ TEST(OdinXqcServerRuntimeTest, T4) {
   EXPECT_EQ(h.fake_registered.size(), register_count_before_stale);
   EXPECT_EQ(h.fake_unregistered.size(), unregister_count_before_stale);
   EXPECT_EQ(h.conn_close_cids.size(), close_count_before_stale);
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
-  EXPECT_EQ(odin_server_session_test_live_count(),
-            session_count_before_stale);
-  EXPECT_EQ(odin_connect_session_test_live_count(),
-            connect_count_before_stale);
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
+  EXPECT_EQ(odin_server_session_test_live_count(), session_count_before_stale);
+  EXPECT_EQ(odin_connect_session_test_live_count(), connect_count_before_stale);
 #endif
 
   FakeConn conn_refuse;
@@ -1558,8 +1553,8 @@ TEST(OdinXqcServerRuntimeTest, T8) {
   const std::string existing_req = EncodedReq("127.0.0.1", existing_port);
   QueueRecv(&stream_e, existing_req.substr(0, 4), 4, 0);
   QueueRecv(&stream_e, "", -XQC_EAGAIN, 0);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(&stream_e), stream_e.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream_e),
+                                                           stream_e.user_data),
             XQC_OK);
   EXPECT_EQ(allow_e.calls, 0);
   odin_xqc_server_runtime_set_dial_filter(h.rt, TestDialFilter, &deny_e);
@@ -1574,7 +1569,8 @@ TEST(OdinXqcServerRuntimeTest, T8) {
   EXPECT_EQ(close(existing_lfd), 0);
   CloseConn(&h, &conn_e, Cid(0x45));
 
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   const unsigned int session_base = odin_server_session_test_live_count();
   const unsigned int connect_base = odin_connect_session_test_live_count();
 #endif
@@ -1595,7 +1591,8 @@ TEST(OdinXqcServerRuntimeTest, T8) {
   CreateBidiStream(&h, &conn_f, &stream_f);
   void *saved_transport_f = stream_f.user_data;
   ASSERT_NE(saved_transport_f, nullptr);
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   EXPECT_EQ(odin_server_session_test_live_count(), session_base + 1);
   EXPECT_EQ(odin_connect_session_test_live_count(), connect_base + 1);
 #endif
@@ -1608,16 +1605,18 @@ TEST(OdinXqcServerRuntimeTest, T8) {
   ASSERT_EQ(h.conn_close_cids.size(), 1u);
   EXPECT_TRUE(CidEq(h.conn_close_cids[0], cid_f));
   EXPECT_EQ(stream_f.user_data, nullptr);
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   EXPECT_EQ(odin_server_session_test_live_count(), session_base);
   EXPECT_EQ(odin_connect_session_test_live_count(), connect_base);
 #endif
   const int stream_close_before = stream_f.close_calls;
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream_f), saved_transport_f),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream_f),
+                                                            saved_transport_f),
             XQC_OK);
   EXPECT_EQ(stream_f.close_calls, stream_close_before);
-#if defined(ODIN_SERVER_SESSION_TESTING) && defined(ODIN_CONNECT_SESSION_TESTING)
+#if defined(ODIN_SERVER_SESSION_TESTING) &&                                    \
+    defined(ODIN_CONNECT_SESSION_TESTING)
   EXPECT_EQ(odin_server_session_test_live_count(), session_base);
   EXPECT_EQ(odin_connect_session_test_live_count(), connect_base);
 #endif
@@ -1639,8 +1638,8 @@ TEST(OdinXqcServerRuntimeTest, T9) {
   FakeStream stream;
   stream.conn = &conn;
   stream.direction = XQC_STREAM_UNI;
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_create_notify(
-                AsStream(&stream), stream.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_create_notify(AsStream(&stream),
+                                                             stream.user_data),
             XQC_OK);
   EXPECT_EQ(stream.close_calls, 1);
   EXPECT_EQ(stream.user_data, nullptr);
@@ -1712,8 +1711,8 @@ TEST(OdinXqcServerRuntimeTest, T10) {
 
   FakeStream orphan;
   orphan.direction = XQC_STREAM_BIDI;
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_create_notify(
-                AsStream(&orphan), orphan.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_create_notify(AsStream(&orphan),
+                                                             orphan.user_data),
             XQC_OK);
   EXPECT_EQ(orphan.close_calls, 1);
   EXPECT_EQ(orphan.user_data, nullptr);
@@ -1734,10 +1733,10 @@ TEST(OdinXqcServerRuntimeTest, T10) {
       reinterpret_cast<odin_server_session_t *>(0x4242);
   odin_server_session_t *ss = sentinel;
   errno = 0;
-  EXPECT_EQ(odin_server_session_create_with_transport(
-                h.loop, FakeFactory, &factory, ServerSessionClose, nullptr,
-                &ss),
-            -1);
+  EXPECT_EQ(
+      odin_server_session_create_with_transport(
+          h.loop, FakeFactory, &factory, ServerSessionClose, nullptr, &ss),
+      -1);
   EXPECT_EQ(errno, EEXIST);
   EXPECT_EQ(ss, sentinel);
   EXPECT_EQ(downstream.destroy_calls, 1);
@@ -1803,11 +1802,11 @@ TEST(OdinXqcServerRuntimeTest, T11) {
             XQC_OK);
   h.app_callbacks->stream_cbs.stream_closing_notify(AsStream(&stream_a),
                                                     XQC_EPROTO, nullptr);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream_a), nullptr),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream_a),
+                                                            nullptr),
             XQC_OK);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream_a), stale_transport_a),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream_a),
+                                                            stale_transport_a),
             XQC_OK);
 
   const size_t close_count_before_post_destroy_stream =
@@ -1851,8 +1850,8 @@ TEST(OdinXqcServerRuntimeTest, T12) {
   std::string bad = EncodedReq("127.0.0.1", sentry_port);
   bad[0] = '\x7f';
   QueueRecv(&stream, bad, static_cast<ssize_t>(bad.size()), 0);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(&stream), stream.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream),
+                                                           stream.user_data),
             XQC_OK);
   EXPECT_EQ(stream.close_calls, 1);
   EXPECT_EQ(stream.user_data, nullptr);
@@ -1882,8 +1881,8 @@ TEST(OdinXqcServerRuntimeTest, T13) {
   std::string bad = EncodedReq("127.0.0.1", sentry_port);
   bad[1] = '\x7f';
   QueueRecv(&stream, bad, static_cast<ssize_t>(bad.size()), 0);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(&stream), stream.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream),
+                                                           stream.user_data),
             XQC_OK);
   EXPECT_EQ(stream.close_calls, 1);
   EXPECT_EQ(stream.user_data, nullptr);
@@ -1913,8 +1912,8 @@ TEST(OdinXqcServerRuntimeTest, T14) {
   std::string bad = EncodedReq("127.0.0.1", sentry_port);
   bad[2] = '\x00';
   QueueRecv(&stream, bad, static_cast<ssize_t>(bad.size()), 0);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(&stream), stream.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream),
+                                                           stream.user_data),
             XQC_OK);
   EXPECT_EQ(stream.close_calls, 1);
   EXPECT_EQ(stream.user_data, nullptr);
@@ -1939,15 +1938,15 @@ TEST(OdinXqcServerRuntimeTest, T15) {
   FakeStream stream;
   CreateBidiStream(&h, &conn, &stream);
   void *transport = stream.user_data;
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream), transport),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream),
+                                                            transport),
             XQC_OK);
   EXPECT_EQ(stream.user_data, nullptr);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream), nullptr),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream),
+                                                            nullptr),
             XQC_OK);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream), transport),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream),
+                                                            transport),
             XQC_OK);
   ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream),
                                                            nullptr),
@@ -1970,9 +1969,8 @@ TEST(OdinXqcServerRuntimeTest, T16) {
   AcceptConn(&h, &conn, Cid(0xA2));
   FakeStream stream;
   CreateBidiStream(&h, &conn, &stream);
-  h.app_callbacks->stream_cbs.stream_closing_notify(AsStream(&stream),
-                                                    XQC_EPROTO,
-                                                    stream.user_data);
+  h.app_callbacks->stream_cbs.stream_closing_notify(
+      AsStream(&stream), XQC_EPROTO, stream.user_data);
   EXPECT_EQ(stream.close_calls, 1);
   EXPECT_EQ(stream.user_data, nullptr);
   FakeStream later;
@@ -2005,8 +2003,8 @@ TEST(OdinXqcServerRuntimeTest, T17) {
   const std::string req = EncodedReq("127.0.0.1", port);
   QueueRecv(&stream, req.substr(0, 4), 4, 0);
   QueueRecv(&stream, "", -XQC_EAGAIN, 0);
-  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
-                AsStream(&stream), stream.user_data),
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream),
+                                                           stream.user_data),
             XQC_OK);
   EXPECT_EQ(filter.calls, 0);
   EXPECT_TRUE(stream.sends.empty());

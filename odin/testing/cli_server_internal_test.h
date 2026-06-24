@@ -15,32 +15,49 @@
 #include <stdint.h>
 #include <sys/socket.h>
 
+#include "odin/server_session.h"
+#include "odin/server_xqc_runtime.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef enum odin_cli_server_test_failpoint_t {
   ODIN_CLI_SERVER_TEST_FAIL_SOCKET = 1,
-  ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR,
-  ODIN_CLI_SERVER_TEST_FAIL_FCNTL_GETFL,
-  ODIN_CLI_SERVER_TEST_FAIL_FCNTL_SETFL,
-  ODIN_CLI_SERVER_TEST_FAIL_BIND,
-  ODIN_CLI_SERVER_TEST_FAIL_LISTEN,
-  ODIN_CLI_SERVER_TEST_FAIL_GETSOCKNAME,
-  ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_CREATE,
-  ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE,
-  ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGINT,
-  ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGTERM,
-  ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START,
-  ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_RUN,
-  ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR
+  ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR = 2,
+  ODIN_CLI_SERVER_TEST_FAIL_FCNTL_GETFL = 3,
+  ODIN_CLI_SERVER_TEST_FAIL_FCNTL_SETFL = 4,
+  ODIN_CLI_SERVER_TEST_FAIL_BIND = 5,
+  ODIN_CLI_SERVER_TEST_FAIL_LISTEN = 6,
+  ODIN_CLI_SERVER_TEST_FAIL_GETSOCKNAME = 7,
+  ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_CREATE = 8,
+  ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE = 9,
+  ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGINT = 10,
+  ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGTERM = 11,
+  ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START = 12,
+  ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_RUN = 13,
+  ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR = 14,
+  ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_CREATE = 100,
+  ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_START = 101,
+  ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_LOCAL_ADDR = 102,
+  ODIN_CLI_SERVER_TEST_FAIL_QUIC_EVENT_LOOP_RUN = 103,
 } odin_cli_server_test_failpoint_t;
 
 typedef struct odin_cli_server_test_liveness_t {
   size_t live_listeners;
   size_t live_runtimes;
   size_t last_cleanup_runtime_inflight;
+  size_t live_xqc_runtimes;
 } odin_cli_server_test_liveness_t;
+
+typedef struct odin_cli_server_test_filter_record_t {
+  unsigned int tcp_set_count;
+  unsigned int quic_set_count;
+  odin_server_session_dial_filter_cb tcp_cb;
+  odin_server_session_dial_filter_cb quic_cb;
+  void *tcp_user_data;
+  void *quic_user_data;
+} odin_cli_server_test_filter_record_t;
 
 typedef struct odin_cli_server_test_dial_start_t {
   int family;
@@ -60,6 +77,11 @@ int odin_cli_server_test_set_progress_fd(int fd);
 void odin_cli_server_test_set_dial_start_probe_fd(int fd, int errnum);
 int odin_cli_server_test_maybe_probe_dial_start(const struct sockaddr *addr,
                                                 socklen_t addrlen);
+int odin_cli_server_test_filter_record(
+    odin_cli_server_test_filter_record_t *out);
+int odin_cli_server_test_set_quic_start_probe(
+    void (*cb)(odin_xqc_server_runtime_t *rt, void *user_data),
+    void *user_data);
 
 #ifdef __cplusplus
 }

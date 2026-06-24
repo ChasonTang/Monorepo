@@ -518,6 +518,23 @@ void *odin_xqc_udp_app_user_data(odin_xqc_udp_t *xu) {
   return xu->app_user_data;
 }
 
+int odin_xqc_udp_local_addr(odin_xqc_udp_t *xu, struct sockaddr *addr,
+                            socklen_t *addrlen) {
+  if (xu == NULL || addr == NULL || addrlen == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  const socklen_t required = xu->local_addrlen;
+  if (*addrlen < required) {
+    *addrlen = required;
+    errno = ENOBUFS;
+    return -1;
+  }
+  memcpy(addr, &xu->local_addr, required);
+  *addrlen = required;
+  return 0;
+}
+
 int odin_xqc_udp_register_conn(odin_xqc_udp_t *xu, const xqc_cid_t *cid) {
   if (xu == NULL || cid == NULL) {
     errno = EINVAL;

@@ -70,6 +70,8 @@ void odin_xqc_udp_destroy(odin_xqc_udp_t *xu);
 xqc_engine_t *odin_xqc_udp_engine(odin_xqc_udp_t *xu);
 void *odin_xqc_udp_xqc_user_data(odin_xqc_udp_t *xu);
 void *odin_xqc_udp_app_user_data(odin_xqc_udp_t *xu);
+int odin_xqc_udp_local_addr(odin_xqc_udp_t *xu, struct sockaddr *addr,
+                            socklen_t *addrlen);
 int odin_xqc_udp_register_conn(odin_xqc_udp_t *xu, const xqc_cid_t *cid);
 void odin_xqc_udp_unregister_conn(odin_xqc_udp_t *xu, const xqc_cid_t *cid);
 

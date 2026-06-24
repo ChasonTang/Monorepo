@@ -5,9 +5,11 @@
  * yields the corresponding status.
  *
  *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR"
- *   <U_S>    = "usage: odin-server --listen ADDR"
+ *   <U_S>    = "usage: odin-server --listen ADDR [--transport tcp|quic] "
+ *              "[--quic-cert FILE --quic-key FILE]"
  *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR' or "
- *              "'odin-server --listen ADDR'"
+ *              "'odin-server --listen ADDR [--transport tcp|quic] "
+ *              "[--quic-cert FILE --quic-key FILE]'"
  *
  * | status               | mode    | out         | err | return |
  * |----------------------|---------|-------------|----------------------------------------------------|--------|
@@ -84,6 +86,9 @@ static const struct option kClientLong[] = {
 
 static const struct option kServerLong[] = {
     {"listen", required_argument, NULL, 'l'},
+    {"transport", required_argument, NULL, 1000},
+    {"quic-cert", required_argument, NULL, 1001},
+    {"quic-key", required_argument, NULL, 1002},
     {"help", no_argument, NULL, 'h'},
     {NULL, 0, NULL, 0},
 };
@@ -95,6 +100,9 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   out->server_host = NULL;
   out->server_host_len = 0;
   out->server_port = 0;
+  out->server_transport = ODIN_CLI_SERVER_TRANSPORT_TCP;
+  out->quic_cert_file = NULL;
+  out->quic_key_file = NULL;
 
   if (argc < 1 || argv[0] == NULL) {
     return ODIN_CLI_ERR_UNKNOWN_MODE;
@@ -139,6 +147,9 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   int unknown_flag_seen = 0;
   const char *listen_arg = NULL;
   const char *server_arg = NULL;
+  const char *transport_arg = NULL;
+  const char *quic_cert_arg = NULL;
+  const char *quic_key_arg = NULL;
 
   for (;;) {
     int longindex = -1;
@@ -182,6 +193,15 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     case 's':
       server_arg = optarg;
       break;
+    case 1000:
+      transport_arg = optarg;
+      break;
+    case 1001:
+      quic_cert_arg = optarg;
+      break;
+    case 1002:
+      quic_key_arg = optarg;
+      break;
     case 'h':
       help_seen = 1;
       break;
@@ -206,6 +226,26 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       (mode == ODIN_CLI_MODE_CLIENT && server_arg != NULL)
           ? odin_host_addr_parse(server_arg, &sr)
           : ODIN_HOST_ADDR_OK;
+  odin_cli_server_transport_t selected_transport =
+      ODIN_CLI_SERVER_TRANSPORT_TCP;
+  int bad_transport = 0;
+  if (mode == ODIN_CLI_MODE_SERVER && transport_arg != NULL) {
+    if (strcmp(transport_arg, "tcp") == 0) {
+      selected_transport = ODIN_CLI_SERVER_TRANSPORT_TCP;
+    } else if (strcmp(transport_arg, "quic") == 0) {
+      selected_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
+    } else {
+      bad_transport = 1;
+    }
+  }
+  const int quic_tls_present = quic_cert_arg != NULL || quic_key_arg != NULL;
+  const int bad_quic_tls =
+      mode == ODIN_CLI_MODE_SERVER &&
+      ((selected_transport == ODIN_CLI_SERVER_TRANSPORT_QUIC &&
+        (quic_cert_arg == NULL || quic_key_arg == NULL ||
+         quic_cert_arg[0] == '\0' || quic_key_arg[0] == '\0')) ||
+       (selected_transport == ODIN_CLI_SERVER_TRANSPORT_TCP &&
+        quic_tls_present));
 
   odin_cli_status_t status;
   if (help_seen) {
@@ -218,6 +258,10 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     status = ODIN_CLI_ERR_BAD_SERVER;
   } else if (mode == ODIN_CLI_MODE_CLIENT && server_arg == NULL) {
     status = ODIN_CLI_ERR_MISSING_REQUIRED;
+  } else if (bad_transport) {
+    status = ODIN_CLI_ERR_BAD_TRANSPORT;
+  } else if (bad_quic_tls) {
+    status = ODIN_CLI_ERR_BAD_QUIC_TLS;
   } else {
     out->listen_port =
         (pr.status == OK_PARSED)
@@ -229,6 +273,12 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       out->server_host = sr.host;
       out->server_host_len = sr.host_len;
       out->server_port = sr.port;
+    } else {
+      out->server_transport = selected_transport;
+      if (selected_transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
+        out->quic_cert_file = quic_cert_arg;
+        out->quic_key_file = quic_key_arg;
+      }
     }
     status = ODIN_CLI_OK;
   }
@@ -248,10 +298,13 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   const odin_cli_status_t status = odin_cli_parse(argc, argv, &args);
 
   static const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
-  static const char kUS[] = "usage: odin-server --listen ADDR";
+  static const char kUS[] =
+      "usage: odin-server --listen ADDR [--transport tcp|quic] "
+      "[--quic-cert FILE --quic-key FILE]";
   static const char kUBoth[] =
       "usage: 'odin-client --listen ADDR --server ADDR' or "
-      "'odin-server --listen ADDR'";
+      "'odin-server --listen ADDR [--transport tcp|quic] "
+      "[--quic-cert FILE --quic-key FILE]'";
 
   const char *um = (args.mode == ODIN_CLI_MODE_CLIENT) ? kUC : kUS;
 
@@ -263,8 +316,14 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
       return odin_cli_run_client(args.listen_port, args.server_host,
                                  args.server_host_len, args.server_port, err);
     } else {
+      const odin_cli_server_config_t config = {
+          args.listen_port,
+          args.server_transport,
+          args.quic_cert_file,
+          args.quic_key_file,
+      };
       (void)fflush(out);
-      rc = odin_cli_run_server(args.listen_port, err);
+      rc = odin_cli_run_server(&config, err);
     }
     break;
   case ODIN_CLI_HELP:
@@ -298,6 +357,18 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
     break;
   case ODIN_CLI_ERR_BAD_SERVER:
     (void)fputs("odin: invalid --server\n", err);
+    (void)fputs(um, err);
+    (void)fputc('\n', err);
+    rc = 2;
+    break;
+  case ODIN_CLI_ERR_BAD_TRANSPORT:
+    (void)fputs("odin: invalid --transport\n", err);
+    (void)fputs(um, err);
+    (void)fputc('\n', err);
+    rc = 2;
+    break;
+  case ODIN_CLI_ERR_BAD_QUIC_TLS:
+    (void)fputs("odin: invalid QUIC TLS configuration\n", err);
     (void)fputs(um, err);
     (void)fputc('\n', err);
     rc = 2;

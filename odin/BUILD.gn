@@ -97,6 +97,7 @@ source_set("odin_cli_server") {
     ":odin_core",
     ":odin_event_loop",
     ":odin_server_runtime",
+    ":odin_server_xqc_runtime",
   ]
 }
 

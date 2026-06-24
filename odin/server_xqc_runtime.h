@@ -32,10 +32,14 @@ int odin_xqc_server_runtime_create(
     odin_xqc_server_runtime_t **out);
 int odin_xqc_server_runtime_start(odin_xqc_server_runtime_t *rt);
 int odin_xqc_server_runtime_stop(odin_xqc_server_runtime_t *rt);
+int odin_xqc_server_runtime_local_addr(odin_xqc_server_runtime_t *rt,
+                                       struct sockaddr *addr,
+                                       socklen_t *addrlen);
 void odin_xqc_server_runtime_set_dial_filter(
     odin_xqc_server_runtime_t *rt, odin_server_session_dial_filter_cb cb,
     void *user_data);
 void odin_xqc_server_runtime_destroy(odin_xqc_server_runtime_t *rt);
+void odin_xqc_server_runtime_force_destroy(odin_xqc_server_runtime_t *rt);
 
 #ifdef __cplusplus
 }

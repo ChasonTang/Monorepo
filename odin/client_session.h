@@ -29,8 +29,7 @@ int odin_client_session_create(odin_event_loop_t *loop, int conn_fd,
                                const char *server_host, size_t server_host_len,
                                uint16_t server_port,
                                odin_client_session_close_cb on_close,
-                               void *user_data,
-                               odin_client_session_t **out);
+                               void *user_data, odin_client_session_t **out);
 
 void odin_client_session_set_dial_filter(odin_client_session_t *cs,
                                          odin_client_session_dial_filter_cb cb,

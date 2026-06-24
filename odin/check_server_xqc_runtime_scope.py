@@ -125,11 +125,10 @@ def main():
     args = parser.parse_args()
     root = os.path.abspath(args.root)
     try:
-        for rel in ("odin/server_runtime.c", "odin/server_runtime.h",
-                    "odin/cli_server.c"):
+        for rel in ("odin/server_runtime.c", "odin/server_runtime.h"):
             check_text(rel, read_file(root, rel))
         build_gn = read_file(root, "odin/BUILD.gn")
-        for target in ("odin_server_runtime", "odin_cli_server"):
+        for target in ("odin_server_runtime",):
             check_text(f"odin/BUILD.gn:{target}",
                        target_block(build_gn, target),
                        hash_comments=True)

@@ -504,7 +504,8 @@ TEST(OdinHttpResponseTest, T6NonTerminalAndUnknown) {
     // iOS disables gtest death tests; keep compiling there while still checking
     // the abort path on platforms that support it.
     // NOLINTNEXTLINE(misc-const-correctness)
-    EXPECT_DEATH_IF_SUPPORTED(odin_http_response_for_status(input), "non-terminal");
+    EXPECT_DEATH_IF_SUPPORTED(odin_http_response_for_status(input),
+                              "non-terminal");
 #else
     const odin_http_response_t r = odin_http_response_for_status(input);
     EXPECT_EQ(r.len, static_cast<size_t>(28)) << "input=" << input;

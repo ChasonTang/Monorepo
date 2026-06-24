@@ -17,19 +17,20 @@ extern "C" {
 
 typedef enum odin_xqc_server_runtime_test_call_kind_t {
   ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_CREATE = 1,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_START,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_STOP,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_DESTROY,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_REGISTER_CONN,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_ENGINE_REGISTER_ALPN,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_TRANSPORT_USER_DATA,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_ALP_USER_DATA,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_CLOSE,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_STREAM_GET_DIRECTION,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM,
-  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_STREAM_CLOSE
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_START = 2,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_STOP = 3,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_DESTROY = 4,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_REGISTER_CONN = 5,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN = 6,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_ENGINE_REGISTER_ALPN = 7,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN = 8,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_TRANSPORT_USER_DATA = 9,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_SET_ALP_USER_DATA = 10,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_CONN_CLOSE = 11,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_STREAM_GET_DIRECTION = 12,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM = 13,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_STREAM_CLOSE = 14,
+  ODIN_XQC_SERVER_RUNTIME_TEST_CALL_SET_DIAL_FILTER = 15,
 } odin_xqc_server_runtime_test_call_kind_t;
 
 typedef struct odin_xqc_server_runtime_test_udp_create_record_t {
@@ -57,6 +58,7 @@ typedef struct odin_xqc_server_runtime_test_call_t {
   size_t alpn_len;
   xqc_app_proto_callbacks_t *app_callbacks;
   void *user_data;
+  odin_server_session_dial_filter_cb dial_filter_cb;
   xqc_stream_direction_t direction;
   int int_result;
   xqc_int_t xqc_result;
@@ -72,13 +74,13 @@ typedef struct odin_xqc_server_runtime_test_record_t {
 } odin_xqc_server_runtime_test_record_t;
 
 typedef struct odin_xqc_server_runtime_test_ops_t {
-  xqc_int_t (*engine_register_alpn)(
-      xqc_engine_t *engine, const char *alpn, size_t alpn_len,
-      xqc_app_proto_callbacks_t *app_callbacks, void *user_data);
+  xqc_int_t (*engine_register_alpn)(xqc_engine_t *engine, const char *alpn,
+                                    size_t alpn_len,
+                                    xqc_app_proto_callbacks_t *app_callbacks,
+                                    void *user_data);
   xqc_int_t (*engine_unregister_alpn)(xqc_engine_t *engine, const char *alpn,
                                       size_t alpn_len);
-  void (*conn_set_transport_user_data)(xqc_connection_t *conn,
-                                       void *user_data);
+  void (*conn_set_transport_user_data)(xqc_connection_t *conn, void *user_data);
   void (*conn_set_alp_user_data)(xqc_connection_t *conn, void *user_data);
   xqc_int_t (*conn_close)(xqc_engine_t *engine, const xqc_cid_t *cid);
   xqc_stream_direction_t (*stream_get_direction)(xqc_stream_t *stream);

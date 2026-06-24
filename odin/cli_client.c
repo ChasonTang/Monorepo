@@ -269,8 +269,7 @@ static int startup_fail(cli_client_state_t *state, FILE *err,
 static void cli_client_session_on_close(odin_client_session_t *cs, int err,
                                         void *user_data) {
   (void)err;
-  cli_client_session_entry_t *entry =
-      (cli_client_session_entry_t *)user_data;
+  cli_client_session_entry_t *entry = (cli_client_session_entry_t *)user_data;
   cli_client_state_t *state = entry->owner;
   cli_client_session_entry_t **cur = &state->sessions;
   while (*cur != NULL && *cur != entry) {
@@ -350,8 +349,8 @@ static void cli_client_on_accept_loop_error(odin_accept_loop_t *al, int err,
 }
 
 #if defined(ODIN_CLI_CLIENT_TESTING)
-static void cli_client_test_maybe_write_progress(
-    const cli_client_state_t *state) {
+static void
+cli_client_test_maybe_write_progress(const cli_client_state_t *state) {
   if (g_progress_fd < 0 || g_progress_reported ||
       state->inflight_sessions < g_progress_min_inflight_sessions) {
     return;
@@ -374,8 +373,7 @@ cli_client_test_maybe_write_idle_snapshot(const cli_client_state_t *state) {
   snap.live_accept_loops = g_live_accept_loops;
   snap.live_sessions = g_live_sessions;
   snap.last_cleanup_sessions = g_last_cleanup_sessions;
-  if (write(g_idle_snapshot_fd, &snap, sizeof(snap)) ==
-      (ssize_t)sizeof(snap)) {
+  if (write(g_idle_snapshot_fd, &snap, sizeof(snap)) == (ssize_t)sizeof(snap)) {
     g_idle_snapshot_reported = 1;
   }
 }
@@ -445,7 +443,7 @@ static void cli_client_signal_timer_test_branch(odin_event_loop_t *loop,
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_fcntl(state->accept_loop, F_GETFL,
-                                               err);
+                                                err);
     cli_client_test_open_wakeup(state);
     return;
   }
@@ -455,7 +453,7 @@ static void cli_client_signal_timer_test_branch(odin_event_loop_t *loop,
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_fcntl(state->accept_loop, F_SETFL,
-                                               err);
+                                                err);
     cli_client_test_open_wakeup(state);
     return;
   }
@@ -621,8 +619,8 @@ int odin_cli_run_client(uint16_t listen_port, const char *server_host,
 #endif
   if (odin_event_timer_start(
           state.loop, ODIN_CLI_CLIENT_SIGNAL_POLL_INTERVAL_US,
-          ODIN_CLI_CLIENT_SIGNAL_POLL_INTERVAL_US,
-          cli_client_signal_poll_timer, &state, &state.signal_timer) != 0) {
+          ODIN_CLI_CLIENT_SIGNAL_POLL_INTERVAL_US, cli_client_signal_poll_timer,
+          &state, &state.signal_timer) != 0) {
     return startup_fail(&state, err, "signal_timer_start");
   }
 

@@ -420,8 +420,7 @@ bool ReadConnectReq(int fd, std::string *host, uint16_t *port) {
 bool SendConnectRespOk(int fd) {
   odin_proto_connect_resp_frame_t resp;
   odin_proto_encode_connect_resp(0, &resp);
-  return WriteAllDeadline(fd, resp.bytes, sizeof(resp.bytes),
-                          kShortDeadlineMs);
+  return WriteAllDeadline(fd, resp.bytes, sizeof(resp.bytes), kShortDeadlineMs);
 }
 
 bool ReadExactString(int fd, const char *s) {
@@ -578,10 +577,9 @@ TEST(OdinCliClientLoopbackAliasTest,
   ASSERT_GE(target_sentry, 0) << std::strerror(errno);
   ASSERT_NE(target_port, upstream_port);
 
-  SpawnedChild child = SpawnOdinClient(
-      client_path,
-      {"--listen", "0", "--server",
-       std::string("127.0.0.2:") + std::to_string(upstream_port)});
+  const SpawnedChild child = SpawnOdinClient(
+      client_path, {"--listen", "0", "--server",
+                    std::string("127.0.0.2:") + std::to_string(upstream_port)});
   ASSERT_NE(child.pid, -1);
   ChildGuard guard(child.pid);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);

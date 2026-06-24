@@ -46,8 +46,7 @@ constexpr char kHttp400[] = "HTTP/1.1 400 Bad Request\r\n\r\n";
 constexpr char kHttp405[] =
     "HTTP/1.1 405 Method Not Allowed\r\nAllow: CONNECT\r\n\r\n";
 constexpr char kHttp414[] = "HTTP/1.1 414 URI Too Long\r\n\r\n";
-constexpr char kHttp505[] =
-    "HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n";
+constexpr char kHttp505[] = "HTTP/1.1 505 HTTP Version Not Supported\r\n\r\n";
 
 class ClientSessionRunDeadline {
 public:
@@ -132,14 +131,10 @@ void MakeUnixPair(int *pa, int *pb) {
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0)
       << std::strerror(errno);
   const int buf_size = 65536;
-  (void)setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &buf_size,
-                   sizeof(buf_size));
-  (void)setsockopt(fds[0], SOL_SOCKET, SO_RCVBUF, &buf_size,
-                   sizeof(buf_size));
-  (void)setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &buf_size,
-                   sizeof(buf_size));
-  (void)setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &buf_size,
-                   sizeof(buf_size));
+  (void)setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+  (void)setsockopt(fds[0], SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+  (void)setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+  (void)setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
   SetNonblock(fds[0]);
   SetNonblock(fds[1]);
   *pa = fds[0];
@@ -322,8 +317,8 @@ std::string EncodedClientReq() {
   odin_proto_iov_t iov[3];
   uint8_t hdr[3];
   uint8_t portbe[2];
-  const odin_proto_status_t st = odin_proto_encode_connect_req(
-      "example.com", 11, 443, iov, hdr, portbe);
+  const odin_proto_status_t st =
+      odin_proto_encode_connect_req("example.com", 11, 443, iov, hdr, portbe);
   EXPECT_EQ(st, ODIN_PROTO_OK);
   std::string out;
   for (int i = 0; i < 3; ++i) {
@@ -398,8 +393,7 @@ int DenyIncCb(const struct sockaddr *addr, socklen_t addrlen, void *user_data) {
 int DenyLoopbackCb(const struct sockaddr *addr, socklen_t addrlen,
                    void *user_data) {
   (void)user_data;
-  if (addrlen == sizeof(struct sockaddr_in) &&
-      addr->sa_family == AF_INET) {
+  if (addrlen == sizeof(struct sockaddr_in) && addr->sa_family == AF_INET) {
     const struct sockaddr_in *sin =
         reinterpret_cast<const struct sockaddr_in *>(addr);
     if (sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
@@ -413,8 +407,7 @@ int DestroyInsideFilterCb(const struct sockaddr *addr, socklen_t addrlen,
                           void *user_data) {
   (void)addr;
   (void)addrlen;
-  odin_client_session_destroy(
-      static_cast<odin_client_session_t *>(user_data));
+  odin_client_session_destroy(static_cast<odin_client_session_t *>(user_data));
   return EACCES;
 }
 
@@ -480,8 +473,8 @@ TEST(OdinClientSessionTest, T1) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, 80,
-                                         OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, 80, OnClose,
+                                         &state, &cs),
               0)
         << std::strerror(errno);
     ASSERT_EQ(odin_event_loop_test_liveness(&liv_post), 0);
@@ -591,18 +584,19 @@ TEST(OdinClientSessionTest, T2b) {
               0);
     ASSERT_TRUE(WriteAll(pa, "CONNECT exa", 11));
     odin_event_timer_t *second_write = nullptr;
-    ASSERT_EQ(odin_event_timer_start(
-                  loop, 20000, 0,
-                  [](odin_event_loop_t *l, odin_event_timer_t *t, void *ud) {
-                    (void)l;
-                    const int fd = *static_cast<int *>(ud);
-                    const char rest[] =
-                        "mple.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n";
-                    (void)WriteAll(fd, rest, strlen(rest));
-                    odin_event_timer_stop(t);
-                  },
-                  &pa, &second_write),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(
+            loop, 20000, 0,
+            [](odin_event_loop_t *l, odin_event_timer_t *t, void *ud) {
+              (void)l;
+              const int fd = *static_cast<int *>(ud);
+              const char rest[] =
+                  "mple.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n";
+              (void)WriteAll(fd, rest, strlen(rest));
+              odin_event_timer_stop(t);
+            },
+            &pa, &second_write),
+        0);
     StartWatchdog(loop, &state);
 
     std::string http_resp;
@@ -650,8 +644,7 @@ TEST(OdinClientSessionTest, T2c) {
     ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, port,
                                          OnClose, &state, &cs),
               0);
-    odin_client_session_set_dial_filter(cs, DenyIncCb,
-                                        &state.deny_call_count);
+    odin_client_session_set_dial_filter(cs, DenyIncCb, &state.deny_call_count);
     odin_client_session_set_dial_filter(cs, nullptr, nullptr);
 
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
@@ -839,9 +832,8 @@ void RunParseCase(const ParseCase &c) {
   ASSERT_TRUE(WriteAll(pa, c.input.data(), c.input.size())) << c.name;
   StartWatchdog(loop, &state);
   std::string http_resp;
-  std::thread test_thread([pa, &http_resp, &c] {
-    http_resp = ReadString(pa, c.read_len, 1500);
-  });
+  std::thread test_thread(
+      [pa, &http_resp, &c] { http_resp = ReadString(pa, c.read_len, 1500); });
   EXPECT_EQ(odin_event_loop_run(loop), 0);
   test_thread.join();
   EXPECT_EQ(state.on_close_calls, 1) << c.name;
@@ -854,28 +846,27 @@ void RunParseCase(const ParseCase &c) {
 
 TEST(OdinClientSessionTest, T5) {
   ClientSessionRunDeadline::Run([] {
-    RunParseCase({"T5", "GET / HTTP/1.1\r\n\r\n", kHttp405,
-                  strlen(kHttp405)});
+    RunParseCase({"T5", "GET / HTTP/1.1\r\n\r\n", kHttp405, strlen(kHttp405)});
   });
 }
 
 TEST(OdinClientSessionTest, T6) {
   ClientSessionRunDeadline::Run([] {
-    RunParseCase({"T6", "CONNECT a:1 HTTP/2.0\r\n\r\n", kHttp505,
-                  strlen(kHttp505)});
+    RunParseCase(
+        {"T6", "CONNECT a:1 HTTP/2.0\r\n\r\n", kHttp505, strlen(kHttp505)});
   });
 }
 
 TEST(OdinClientSessionTest, T7) {
-  const ParseCase cases[] = {
-      {"bad-target", "CONNECT example.com HTTP/1.1\r\n\r\n", kHttp400,
-       strlen(kHttp400)},
-      {"bad-host-len",
-       std::string("CONNECT ") + std::string(256, 'x') +
-           ":443 HTTP/1.1\r\n\r\n",
-       kHttp400, strlen(kHttp400)},
-      {"bad-port", "CONNECT a:65536 HTTP/1.1\r\n\r\n", kHttp400,
-       strlen(kHttp400)}};
+  const ParseCase cases[] = {{"bad-target",
+                              "CONNECT example.com HTTP/1.1\r\n\r\n", kHttp400,
+                              strlen(kHttp400)},
+                             {"bad-host-len",
+                              std::string("CONNECT ") + std::string(256, 'x') +
+                                  ":443 HTTP/1.1\r\n\r\n",
+                              kHttp400, strlen(kHttp400)},
+                             {"bad-port", "CONNECT a:65536 HTTP/1.1\r\n\r\n",
+                              kHttp400, strlen(kHttp400)}};
   for (const auto &c : cases) {
     ClientSessionRunDeadline::Run([&] { RunParseCase(c); });
   }
@@ -898,8 +889,8 @@ TEST(OdinClientSessionTest, T9) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, 80,
-                                         OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, 80, OnClose,
+                                         &state, &cs),
               0);
     ASSERT_TRUE(WriteAll(pa, "CON", 3));
     (void)shutdown(pa, SHUT_WR);
@@ -933,9 +924,9 @@ TEST(OdinClientSessionTest, T9) {
               0);
     const int dpa = socket(AF_INET, SOCK_STREAM, 0);
     ASSERT_GE(dpa, 0);
-    ASSERT_EQ(connect(dpa, reinterpret_cast<struct sockaddr *>(&addr),
-                      sizeof(addr)),
-              0);
+    ASSERT_EQ(
+        connect(dpa, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)),
+        0);
     const int dpb = accept(listener_fd, nullptr, nullptr);
     ASSERT_GE(dpb, 0);
     close(listener_fd);
@@ -947,8 +938,8 @@ TEST(OdinClientSessionTest, T9) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, dpb, "127.0.0.1", 9, 80,
-                                         OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, dpb, "127.0.0.1", 9, 80, OnClose,
+                                         &state, &cs),
               0);
     ASSERT_TRUE(WriteAll(dpa, "CON", 3));
     CloseWithRst(dpa);
@@ -972,14 +963,15 @@ TEST(OdinClientSessionTest, T10) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9,
-                                         closed_port, OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, closed_port,
+                                         OnClose, &state, &cs),
               0);
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     StartWatchdog(loop, &state);
     std::string http_resp;
-    std::thread test_thread(
-        [pa, &http_resp] { http_resp = ReadString(pa, strlen(kHttp400), 1500); });
+    std::thread test_thread([pa, &http_resp] {
+      http_resp = ReadString(pa, strlen(kHttp400), 1500);
+    });
     EXPECT_EQ(odin_event_loop_run(loop), 0);
     test_thread.join();
     EXPECT_EQ(state.on_close_calls, 1);
@@ -1076,8 +1068,10 @@ TEST(OdinClientSessionTest, T12) {
     uint16_t code;
     int errnum;
   };
-  const Case cases[] = {{0x0001, ECONNREFUSED}, {0x0002, EHOSTUNREACH},
-                        {0x0003, ETIMEDOUT},    {0x0004, EIO},
+  const Case cases[] = {{0x0001, ECONNREFUSED},
+                        {0x0002, EHOSTUNREACH},
+                        {0x0003, ETIMEDOUT},
+                        {0x0004, EIO},
                         {0xBEEF, EPROTO}};
   for (const auto &c : cases) {
     ClientSessionRunDeadline::Run([&] {
@@ -1156,8 +1150,8 @@ TEST(OdinClientSessionTest, T13) {
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     StopAtHandshakeCtx handshake{cs, false};
     odin_event_timer_t *handshake_timer = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 0, 1, StopAtHandshakeCb,
-                                     &handshake, &handshake_timer),
+    ASSERT_EQ(odin_event_timer_start(loop, 0, 1, StopAtHandshakeCb, &handshake,
+                                     &handshake_timer),
               0);
     StartWatchdog(loop, &state);
     EXPECT_EQ(odin_event_loop_run(loop), 0);
@@ -1239,8 +1233,8 @@ TEST(OdinClientSessionTest, T15) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9,
-                                         closed_port, OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, closed_port,
+                                         OnClose, &state, &cs),
               0);
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     odin_event_timer_t *close_timer = nullptr;
@@ -1331,8 +1325,8 @@ TEST(OdinClientSessionTest, T16) {
     state.loop = loop;
     state.destroy_in_cb = true;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9,
-                                         closed_port, OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, closed_port,
+                                         OnClose, &state, &cs),
               0);
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     StartWatchdog(loop, &state);
@@ -1386,8 +1380,8 @@ TEST(OdinClientSessionTest, T17) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "192.0.2.1", 9, 80,
-                                         OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "192.0.2.1", 9, 80, OnClose,
+                                         &state, &cs),
               0);
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
 
@@ -1459,23 +1453,23 @@ TEST(OdinClientSessionTest, T18) {
     std::atomic<bool> srv_exchanged{false};
     bool srv_saw_eof = false;
     std::string srv_after_destroy;
-    std::thread srv_thread([lfd, &srv_exchanged, &srv_saw_eof,
-                            &srv_after_destroy] {
-      const int srv = AcceptWithPoll(lfd, 1500);
-      if (srv < 0) {
-        return;
-      }
-      EXPECT_EQ(ReadString(srv, EncodedClientReq().size(), 1500),
-                EncodedClientReq());
-      const std::string resp = EncodedResp(0);
-      EXPECT_TRUE(WriteAll(srv, resp.data(), resp.size()));
-      uint8_t b = 0;
-      (void)ReadExactly(srv, &b, 1, 1500);
-      (void)write(srv, "y", 1);
-      srv_exchanged.store(true);
-      srv_saw_eof = DrainUntilEof(srv, &srv_after_destroy, 1500);
-      close(srv);
-    });
+    std::thread srv_thread(
+        [lfd, &srv_exchanged, &srv_saw_eof, &srv_after_destroy] {
+          const int srv = AcceptWithPoll(lfd, 1500);
+          if (srv < 0) {
+            return;
+          }
+          EXPECT_EQ(ReadString(srv, EncodedClientReq().size(), 1500),
+                    EncodedClientReq());
+          const std::string resp = EncodedResp(0);
+          EXPECT_TRUE(WriteAll(srv, resp.data(), resp.size()));
+          uint8_t b = 0;
+          (void)ReadExactly(srv, &b, 1, 1500);
+          (void)write(srv, "y", 1);
+          srv_exchanged.store(true);
+          srv_saw_eof = DrainUntilEof(srv, &srv_after_destroy, 1500);
+          close(srv);
+        });
 
     odin_event_loop_t *loop = nullptr;
     ASSERT_EQ(odin_event_loop_create(&loop), 0);
@@ -1541,8 +1535,8 @@ TEST(OdinClientSessionTest, T19) {
     odin_event_loop_t *loop = nullptr;
     ASSERT_EQ(odin_event_loop_create(&loop), 0);
     odin_event_io_t *blocker = nullptr;
-    ASSERT_EQ(odin_event_io_start(loop, pb, ODIN_EVENT_READ, DummyIoCb,
-                                  nullptr, &blocker),
+    ASSERT_EQ(odin_event_io_start(loop, pb, ODIN_EVENT_READ, DummyIoCb, nullptr,
+                                  &blocker),
               0);
     ClientSessionState state;
     state.loop = loop;
@@ -1680,9 +1674,9 @@ TEST(OdinClientSessionTest, T22) {
                                          OnClose, &state, &cs),
               0);
 #if defined(ODIN_CLIENT_SESSION_TESTING)
-    ASSERT_EQ(odin_client_session_test_fail_next_http_parse_tail_write(
-                  cs, EAGAIN),
-              0);
+    ASSERT_EQ(
+        odin_client_session_test_fail_next_http_parse_tail_write(cs, EAGAIN),
+        0);
 #endif
     const std::string combined =
         std::string(kHttpReq) + std::string("PIPELINED-TAIL-17");
@@ -1730,9 +1724,9 @@ TEST(OdinClientSessionTest, T23) {
                                          OnClose, &state, &cs),
               0);
 #if defined(ODIN_CLIENT_SESSION_TESTING)
-    ASSERT_EQ(
-        odin_client_session_test_fail_next_upstream_transport_create(cs, EMFILE),
-        0);
+    ASSERT_EQ(odin_client_session_test_fail_next_upstream_transport_create(
+                  cs, EMFILE),
+              0);
 #endif
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     StartWatchdog(loop, &state);
@@ -1891,9 +1885,10 @@ TEST(OdinClientSessionTest, T25b) {
                                          OnClose, &state, &cs),
               0);
 #if defined(ODIN_CLIENT_SESSION_TESTING)
-    ASSERT_EQ(odin_client_session_test_arm_next_kqueue_read_fault_at_relay_start(
-                  cs, EEXIST),
-              0);
+    ASSERT_EQ(
+        odin_client_session_test_arm_next_kqueue_read_fault_at_relay_start(
+            cs, EEXIST),
+        0);
 #endif
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     StartWatchdog(loop, &state);
@@ -1965,15 +1960,15 @@ TEST(OdinClientSessionTest, T27) {
     ClientSessionState state;
     state.loop = loop;
     odin_client_session_t *cs = nullptr;
-    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, 80,
-                                         OnClose, &state, &cs),
+    ASSERT_EQ(odin_client_session_create(loop, pb, "127.0.0.1", 9, 80, OnClose,
+                                         &state, &cs),
               0);
     odin_client_session_set_dial_filter(cs, DestroyInsideFilterCb, cs);
     ASSERT_TRUE(WriteAll(pa, kHttpReq, strlen(kHttpReq)));
     odin_event_timer_t *end_timer = nullptr;
-    ASSERT_EQ(odin_event_timer_start(loop, 50000, 0, TestEndCb, nullptr,
-                                     &end_timer),
-              0);
+    ASSERT_EQ(
+        odin_event_timer_start(loop, 50000, 0, TestEndCb, nullptr, &end_timer),
+        0);
     StartWatchdog(loop, &state);
     EXPECT_EQ(odin_event_loop_run(loop), 0);
     EXPECT_EQ(state.on_close_calls, 0);

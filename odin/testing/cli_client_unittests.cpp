@@ -487,8 +487,7 @@ bool ReadConnectReq(int fd, std::string *host, uint16_t *port) {
 bool SendConnectRespOk(int fd) {
   odin_proto_connect_resp_frame_t resp;
   odin_proto_encode_connect_resp(0, &resp);
-  return WriteAllDeadline(fd, resp.bytes, sizeof(resp.bytes),
-                          kShortDeadlineMs);
+  return WriteAllDeadline(fd, resp.bytes, sizeof(resp.bytes), kShortDeadlineMs);
 }
 
 bool ReadExactString(int fd, const char *s) {
@@ -744,7 +743,8 @@ struct PausedRuntimeChild {
 };
 
 PausedRuntimeChild ForkPausedRuntimeChild(uint16_t server_port,
-                                          RuntimeFailKind kind, int signal_num) {
+                                          RuntimeFailKind kind,
+                                          int signal_num) {
   (void)signal_num;
   int err_pipe[2];
   int snap_pipe[2];
@@ -802,13 +802,11 @@ PausedRuntimeChild ForkPausedRuntimeChild(uint16_t server_port,
         break;
       case RuntimeFailKind::kFcntlGetfl:
         hook_rc = odin_cli_client_test_fail_next(
-            ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR,
-            EINVAL);
+            ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR, EINVAL);
         break;
       case RuntimeFailKind::kFcntlSetfl:
         hook_rc = odin_cli_client_test_fail_next(
-            ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR,
-            EINVAL);
+            ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR, EINVAL);
         break;
       case RuntimeFailKind::kEventLoopRun:
         hook_rc = odin_cli_client_test_fail_next(
@@ -854,7 +852,11 @@ PausedRuntimeChild ForkPausedRuntimeChild(uint16_t server_port,
   close(release_pipe[0]);
   close(progress_pipe[1]);
   close(trigger_pipe[0]);
-  return {pid, err_pipe[0], snap_pipe[0], release_pipe[1], progress_pipe[0],
+  return {pid,
+          err_pipe[0],
+          snap_pipe[0],
+          release_pipe[1],
+          progress_pipe[0],
           trigger_pipe[1]};
 }
 
@@ -940,8 +942,7 @@ TEST(OdinCliClientUnitTest, T3AcceptedSetupFailureClosesOnlyThatFd) {
   for (const auto &c : cases) {
     SCOPED_TRACE(c.name);
     uint16_t upstream_port = 0;
-    const int fake =
-        OpenIpv4Listener("127.0.0.1", 0, true, &upstream_port);
+    const int fake = OpenIpv4Listener("127.0.0.1", 0, true, &upstream_port);
     ASSERT_GE(fake, 0) << std::strerror(errno);
 
     int err_pipe[2];
@@ -994,8 +995,8 @@ TEST(OdinCliClientUnitTest, T3AcceptedSetupFailureClosesOnlyThatFd) {
     const char req_a[] = "CONNECT first.example:443 HTTP/1.1\r\n\r\n";
     ASSERT_TRUE(WriteAllDeadline(client_a, req_a, std::strlen(req_a),
                                  kShortDeadlineMs));
-    EXPECT_TRUE(DrainUntilEofOrResetExpectingNoBytes(client_a,
-                                                     kShortDeadlineMs));
+    EXPECT_TRUE(
+        DrainUntilEofOrResetExpectingNoBytes(client_a, kShortDeadlineMs));
     close(client_a);
     ExpectNoAccept(fake, 150);
 
@@ -1003,17 +1004,16 @@ TEST(OdinCliClientUnitTest, T3AcceptedSetupFailureClosesOnlyThatFd) {
     int upstream_b = -1;
     ExerciseOneSuccessfulConnect(proxy_port, fake,
                                  "CONNECT later.example:8443 HTTP/1.1\r\n\r\n",
-                                 "later.example", 8443, &client_b,
-                                 &upstream_b);
+                                 "later.example", 8443, &client_b, &upstream_b);
     shutdown(client_b, SHUT_WR);
     shutdown(upstream_b, SHUT_WR);
     EXPECT_TRUE(DrainUntilEofOrReset(client_b, kShortDeadlineMs));
     EXPECT_TRUE(DrainUntilEofOrReset(upstream_b, kShortDeadlineMs));
 
     odin_cli_client_test_liveness_t idle{};
-    ASSERT_EQ(ReadWithDeadline(snap_pipe[0], &idle, sizeof(idle),
-                               kLongDeadlineMs),
-              static_cast<ssize_t>(sizeof(idle)));
+    ASSERT_EQ(
+        ReadWithDeadline(snap_pipe[0], &idle, sizeof(idle), kLongDeadlineMs),
+        static_cast<ssize_t>(sizeof(idle)));
     EXPECT_EQ(idle.live_sessions, 0u);
     EXPECT_EQ(kill(pid, SIGTERM), 0);
     int st = 0;
@@ -1034,8 +1034,8 @@ TEST(OdinCliClientUnitTest, T4ParsedNonIpv4FailsBeforeBanner) {
   const std::vector<std::string> servers = {"example.com:443", "[::1]:443"};
   for (const auto &server_arg : servers) {
     SCOPED_TRACE(server_arg);
-    MutableArgv parse_argv({"odin-client", "--listen", "0", "--server",
-                            server_arg.c_str()});
+    MutableArgv parse_argv(
+        {"odin-client", "--listen", "0", "--server", server_arg.c_str()});
     odin_cli_args_t parsed{};
     ASSERT_EQ(odin_cli_parse(parse_argv.argc(), parse_argv.argv(), &parsed),
               ODIN_CLI_OK);
@@ -1056,8 +1056,8 @@ TEST(OdinCliClientUnitTest, T4ParsedNonIpv4FailsBeforeBanner) {
       FILE *err = fdopen(err_pipe[1], "w");
       odin_cli_client_test_reset_liveness();
       odin_event_loop_test_reset_liveness();
-      MutableArgv argv({"odin-client", "--listen", "0", "--server",
-                        server_arg.c_str()});
+      MutableArgv argv(
+          {"odin-client", "--listen", "0", "--server", server_arg.c_str()});
       const int rc = odin_cli_main(argv.argc(), argv.argv(), out, err);
       (void)fflush(out);
       (void)fflush(err);
@@ -1103,11 +1103,10 @@ TEST(OdinCliClientUnitTest, T5SignalsDestroyTwoInflightAndRestoreHandlers) {
   for (const int sig : signals) {
     SCOPED_TRACE(sig == SIGINT ? "SIGINT" : "SIGTERM");
     uint16_t upstream_port = 0;
-    const int fake =
-        OpenIpv4Listener("127.0.0.1", 0, true, &upstream_port);
+    const int fake = OpenIpv4Listener("127.0.0.1", 0, true, &upstream_port);
     ASSERT_GE(fake, 0) << std::strerror(errno);
-    PausedRuntimeChild child =
-        ForkPausedRuntimeChild(upstream_port, RuntimeFailKind::kSignalOnly, sig);
+    PausedRuntimeChild child = ForkPausedRuntimeChild(
+        upstream_port, RuntimeFailKind::kSignalOnly, sig);
     ASSERT_NE(child.pid, -1);
     ChildGuard guard(child.pid);
     const std::string startup = ReadLineWithDeadline(child.stderr_fd, 2000);
@@ -1117,9 +1116,8 @@ TEST(OdinCliClientUnitTest, T5SignalsDestroyTwoInflightAndRestoreHandlers) {
         << startup;
     InflightPair inflight = StartTwoInflightSessions(proxy_port, fake);
     char progress = 0;
-    ASSERT_EQ(ReadWithDeadline(child.progress_fd, &progress, 1,
-                               kLongDeadlineMs),
-              1);
+    ASSERT_EQ(
+        ReadWithDeadline(child.progress_fd, &progress, 1, kLongDeadlineMs), 1);
     ASSERT_EQ(waitpid(child.pid, nullptr, WNOHANG), 0);
     EXPECT_EQ(kill(child.pid, sig), 0);
 
@@ -1197,11 +1195,9 @@ TEST(OdinCliClientUnitTest, T6RuntimeFailuresCleanUpTwoInflightSessions) {
     }
 #endif
     uint16_t upstream_port = 0;
-    const int fake =
-        OpenIpv4Listener("127.0.0.1", 0, true, &upstream_port);
+    const int fake = OpenIpv4Listener("127.0.0.1", 0, true, &upstream_port);
     ASSERT_GE(fake, 0) << std::strerror(errno);
-    PausedRuntimeChild child =
-        ForkPausedRuntimeChild(upstream_port, c.kind, 0);
+    PausedRuntimeChild child = ForkPausedRuntimeChild(upstream_port, c.kind, 0);
     ASSERT_NE(child.pid, -1);
     ChildGuard guard(child.pid);
     const std::string startup = ReadLineWithDeadline(child.stderr_fd, 2000);
@@ -1211,9 +1207,8 @@ TEST(OdinCliClientUnitTest, T6RuntimeFailuresCleanUpTwoInflightSessions) {
         << startup;
     InflightPair inflight = StartTwoInflightSessions(proxy_port, fake);
     char progress = 0;
-    ASSERT_EQ(ReadWithDeadline(child.progress_fd, &progress, 1,
-                               kLongDeadlineMs),
-              1);
+    ASSERT_EQ(
+        ReadWithDeadline(child.progress_fd, &progress, 1, kLongDeadlineMs), 1);
     EXPECT_FALSE(WaitFd(child.snapshot_fd, POLLIN, 200, nullptr))
         << "runtime failpoint returned before trigger byte";
     ASSERT_EQ(waitpid(child.pid, nullptr, WNOHANG), 0);
@@ -1260,13 +1255,11 @@ TEST(OdinCliClientUnitTest, T7StartupFailureMatrixAndBindCapture) {
   const std::string client_path = Dirname(g_test_argv0) + "/odin-client";
 
   uint16_t occupied_port = 0;
-  const int occupied =
-      OpenIpv4Listener("127.0.0.1", 0, false, &occupied_port);
+  const int occupied = OpenIpv4Listener("127.0.0.1", 0, false, &occupied_port);
   ASSERT_GE(occupied, 0) << std::strerror(errno);
-  SpawnedChild child = SpawnOdinClient(
-      client_path,
-      {"--listen", std::to_string(occupied_port), "--server",
-       "127.0.0.1:4433"});
+  SpawnedChild child =
+      SpawnOdinClient(client_path, {"--listen", std::to_string(occupied_port),
+                                    "--server", "127.0.0.1:4433"});
   ASSERT_NE(child.pid, -1);
   ChildGuard prod_guard(child.pid);
   int st = 0;

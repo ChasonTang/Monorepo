@@ -41,6 +41,10 @@ int odin_cli_server_test_fail_next(odin_cli_server_test_failpoint_t fp,
   case ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START:
   case ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_RUN:
   case ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR:
+  case ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_CREATE:
+  case ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_START:
+  case ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_LOCAL_ADDR:
+  case ODIN_CLI_SERVER_TEST_FAIL_QUIC_EVENT_LOOP_RUN:
     g_failpoint = fp;
     g_failpoint_errno = errnum;
     return 0;
@@ -54,12 +58,16 @@ void odin_cli_server_test_reset_liveness(void) {
   g_live_listeners = 0;
   g_live_runtimes = 0;
   g_last_cleanup_runtime_inflight = 0;
+  g_live_xqc_runtimes = 0;
+  memset(&g_filter_record, 0, sizeof(g_filter_record));
   g_last_bind_addr_recorded = 0;
   memset(&g_last_bind_addr, 0, sizeof(g_last_bind_addr));
   g_progress_fd = -1;
   g_progress_reported = 0;
   g_probe_fd = -1;
   g_probe_errno = 0;
+  g_quic_start_probe = NULL;
+  g_quic_start_probe_ud = NULL;
   /* Also clears any pending failpoint so a previous test that forked a
    * child to consume the failpoint cannot leak armed state into the
    * next test in the same process. */
@@ -76,6 +84,7 @@ int odin_cli_server_test_liveness(odin_cli_server_test_liveness_t *out) {
   out->live_listeners = g_live_listeners;
   out->live_runtimes = g_live_runtimes;
   out->last_cleanup_runtime_inflight = g_last_cleanup_runtime_inflight;
+  out->live_xqc_runtimes = g_live_xqc_runtimes;
   return 0;
 }
 
@@ -123,4 +132,22 @@ int odin_cli_server_test_maybe_probe_dial_start(const struct sockaddr *addr,
   g_probe_errno = 0;
   errno = err;
   return -1;
+}
+
+int odin_cli_server_test_filter_record(
+    odin_cli_server_test_filter_record_t *out) {
+  if (out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  *out = g_filter_record;
+  return 0;
+}
+
+int odin_cli_server_test_set_quic_start_probe(
+    void (*cb)(odin_xqc_server_runtime_t *rt, void *user_data),
+    void *user_data) {
+  g_quic_start_probe = cb;
+  g_quic_start_probe_ud = cb == NULL ? NULL : user_data;
+  return 0;
 }

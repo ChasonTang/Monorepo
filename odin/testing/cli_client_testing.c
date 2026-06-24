@@ -92,8 +92,7 @@ int odin_cli_client_test_last_bind_addr(struct sockaddr_in *out) {
   return 0;
 }
 
-int odin_cli_client_test_set_progress_fd(int fd,
-                                         size_t min_inflight_sessions) {
+int odin_cli_client_test_set_progress_fd(int fd, size_t min_inflight_sessions) {
   if (fd < 0 || min_inflight_sessions == 0) {
     errno = EINVAL;
     return -1;

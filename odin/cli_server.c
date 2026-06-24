@@ -23,6 +23,7 @@
 #include "odin/event_loop.h"
 #include "odin/server_runtime.h"
 #include "odin/server_session.h"
+#include "odin/server_xqc_runtime.h"
 
 #if defined(ODIN_CLI_SERVER_TESTING)
 #include "odin/testing/cli_server_internal_test.h"
@@ -37,6 +38,7 @@ typedef struct cli_server_state_t {
   int listen_fd;
   odin_event_loop_t *loop;
   odin_server_runtime_t *runtime;
+  odin_xqc_server_runtime_t *xqc_runtime;
   odin_event_timer_t *signal_timer;
   int sigint_replaced;
   int sigterm_replaced;
@@ -55,12 +57,17 @@ static int g_failpoint_errno;
 static size_t g_live_listeners;
 static size_t g_live_runtimes;
 static size_t g_last_cleanup_runtime_inflight;
+static size_t g_live_xqc_runtimes;
+static odin_cli_server_test_filter_record_t g_filter_record;
 static int g_last_bind_addr_recorded;
 static struct sockaddr_in g_last_bind_addr;
 static int g_progress_fd = -1;
 static int g_progress_reported;
 static int g_probe_fd = -1;
 static int g_probe_errno;
+static void (*g_quic_start_probe)(odin_xqc_server_runtime_t *rt,
+                                  void *user_data);
+static void *g_quic_start_probe_ud;
 
 static int test_consume_failpoint(odin_cli_server_test_failpoint_t fp) {
   if (g_failpoint != fp) {
@@ -116,6 +123,27 @@ static int odin_cli_default_server_dial_filter(const struct sockaddr *addr,
 
 static int startup_fail(cli_server_state_t *state, FILE *err, const char *step);
 
+static void install_tcp_default_dial_filter(odin_server_runtime_t *runtime) {
+#if defined(ODIN_CLI_SERVER_TESTING)
+  g_filter_record.tcp_set_count += 1;
+  g_filter_record.tcp_cb = odin_cli_default_server_dial_filter;
+  g_filter_record.tcp_user_data = NULL;
+#endif
+  odin_server_runtime_set_dial_filter(
+      runtime, odin_cli_default_server_dial_filter, NULL);
+}
+
+static void
+install_quic_default_dial_filter(odin_xqc_server_runtime_t *runtime) {
+#if defined(ODIN_CLI_SERVER_TESTING)
+  g_filter_record.quic_set_count += 1;
+  g_filter_record.quic_cb = odin_cli_default_server_dial_filter;
+  g_filter_record.quic_user_data = NULL;
+#endif
+  odin_xqc_server_runtime_set_dial_filter(
+      runtime, odin_cli_default_server_dial_filter, NULL);
+}
+
 static void cli_runtime_on_error(odin_server_runtime_t *rt, int err,
                                  void *user_data) {
   (void)rt;
@@ -137,6 +165,12 @@ static void cli_signal_poll_timer(odin_event_loop_t *loop,
     g_progress_reported = 1;
   }
 #endif
+  if (g_progress_fd >= 0 && !g_progress_reported &&
+      state->xqc_runtime != NULL) {
+    const char b = 1;
+    (void)write(g_progress_fd, &b, 1);
+    g_progress_reported = 1;
+  }
   if (g_failpoint == ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR) {
     const int err = g_failpoint_errno;
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
@@ -210,6 +244,13 @@ static void cleanup_all(cli_server_state_t *state) {
     g_live_runtimes -= 1;
 #endif
   }
+  if (state->xqc_runtime != NULL) {
+    odin_xqc_server_runtime_force_destroy(state->xqc_runtime);
+    state->xqc_runtime = NULL;
+#if defined(ODIN_CLI_SERVER_TESTING)
+    g_live_xqc_runtimes -= 1;
+#endif
+  }
   if (state->loop != NULL) {
     odin_event_loop_destroy(state->loop);
     state->loop = NULL;
@@ -233,7 +274,22 @@ static int startup_fail(cli_server_state_t *state, FILE *err,
   return 1;
 }
 
-int odin_cli_run_server(uint16_t listen_port, FILE *err) {
+static int startup_fail_quic(cli_server_state_t *state, FILE *err,
+                             const char *step) {
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+  (void)fprintf(err, "odin: quic server startup failed at %s\n", step);
+  (void)fflush(err);
+  cleanup_all(state);
+  return 1;
+}
+
+static int startup_fail_config(FILE *err) {
+  (void)fputs("odin: server startup failed at config\n", err);
+  (void)fflush(err);
+  return 1;
+}
+
+static int run_tcp_server(uint16_t listen_port, FILE *err) {
   cli_server_state_t state;
   memset(&state, 0, sizeof(state));
   state.listen_fd = -1;
@@ -347,8 +403,7 @@ int odin_cli_run_server(uint16_t listen_port, FILE *err) {
   g_live_runtimes += 1;
 #endif
 
-  odin_server_runtime_set_dial_filter(
-      state.runtime, odin_cli_default_server_dial_filter, NULL);
+  install_tcp_default_dial_filter(state.runtime);
 
   const char *sig_fail = install_signal_handlers(&state);
   if (sig_fail != NULL) {
@@ -399,4 +454,163 @@ int odin_cli_run_server(uint16_t listen_port, FILE *err) {
   }
   cleanup_all(&state);
   return state.shutdown_requested ? 0 : 1;
+}
+
+static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
+  cli_server_state_t state;
+  memset(&state, 0, sizeof(state));
+  state.listen_fd = -1;
+
+#if defined(ODIN_CLI_SERVER_TESTING)
+  g_progress_reported = 0;
+#endif
+
+  if (config->quic_cert_file == NULL || config->quic_key_file == NULL ||
+      config->quic_cert_file[0] == '\0' || config->quic_key_file[0] == '\0') {
+    return startup_fail_quic(&state, err, "tls_config");
+  }
+
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_CREATE) !=
+      0) {
+    return startup_fail_quic(&state, err, "event_loop_create");
+  }
+#endif
+  if (odin_event_loop_create(&state.loop) != 0) {
+    return startup_fail_quic(&state, err, "event_loop_create");
+  }
+
+  struct sockaddr_in local;
+  memset(&local, 0, sizeof(local));
+  local.sin_family = AF_INET;
+  local.sin_addr.s_addr = htonl(INADDR_ANY);
+  local.sin_port = htons(config->listen_port);
+#if defined(ODIN_CLI_SERVER_TESTING)
+  g_last_bind_addr = local;
+  g_last_bind_addr_recorded = 1;
+#endif
+
+  xqc_engine_ssl_config_t ssl;
+  memset(&ssl, 0, sizeof(ssl));
+  ssl.private_key_file = (char *)config->quic_key_file;
+  ssl.cert_file = (char *)config->quic_cert_file;
+
+  xqc_engine_callback_t callbacks;
+  memset(&callbacks, 0, sizeof(callbacks));
+
+  odin_xqc_server_runtime_config_t rt_config;
+  memset(&rt_config, 0, sizeof(rt_config));
+  rt_config.loop = state.loop;
+  rt_config.local_addr = (const struct sockaddr *)&local;
+  rt_config.local_addrlen = sizeof(local);
+  rt_config.engine_config = NULL;
+  rt_config.ssl_config = &ssl;
+  rt_config.engine_callbacks = &callbacks;
+
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (test_consume_failpoint(
+          ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_CREATE) != 0) {
+    return startup_fail_quic(&state, err, "xqc_server_runtime_create");
+  }
+#endif
+  if (odin_xqc_server_runtime_create(&rt_config, &state.xqc_runtime) != 0) {
+    return startup_fail_quic(&state, err, "xqc_server_runtime_create");
+  }
+#if defined(ODIN_CLI_SERVER_TESTING)
+  g_live_xqc_runtimes += 1;
+#endif
+
+  install_quic_default_dial_filter(state.xqc_runtime);
+
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (test_consume_failpoint(
+          ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_START) != 0) {
+    return startup_fail_quic(&state, err, "xqc_server_runtime_start");
+  }
+#endif
+  if (odin_xqc_server_runtime_start(state.xqc_runtime) != 0) {
+    return startup_fail_quic(&state, err, "xqc_server_runtime_start");
+  }
+
+  struct sockaddr_storage bound;
+  socklen_t bound_len = sizeof(bound);
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (test_consume_failpoint(
+          ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_LOCAL_ADDR) != 0) {
+    return startup_fail_quic(&state, err, "xqc_server_runtime_local_addr");
+  }
+#endif
+  if (odin_xqc_server_runtime_local_addr(
+          state.xqc_runtime, (struct sockaddr *)&bound, &bound_len) != 0) {
+    return startup_fail_quic(&state, err, "xqc_server_runtime_local_addr");
+  }
+  const struct sockaddr_in *bound4 = (const struct sockaddr_in *)&bound;
+  const uint16_t actual_port = ntohs(bound4->sin_port);
+
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (g_quic_start_probe != NULL) {
+    void (*probe)(odin_xqc_server_runtime_t *, void *) = g_quic_start_probe;
+    void *probe_ud = g_quic_start_probe_ud;
+    g_quic_start_probe = NULL;
+    g_quic_start_probe_ud = NULL;
+    probe(state.xqc_runtime, probe_ud);
+  }
+#endif
+
+  const char *sig_fail = install_signal_handlers(&state);
+  if (sig_fail != NULL) {
+    return startup_fail_quic(&state, err, sig_fail);
+  }
+
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START) !=
+      0) {
+    return startup_fail_quic(&state, err, "signal_timer_start");
+  }
+#endif
+  if (odin_event_timer_start(
+          state.loop, ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US,
+          ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US, cli_signal_poll_timer,
+          &state, &state.signal_timer) != 0) {
+    return startup_fail_quic(&state, err, "signal_timer_start");
+  }
+
+  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+  (void)fprintf(err, "odin: mode=server transport=quic listen=%u\n",
+                (unsigned)actual_port);
+  (void)fflush(err);
+
+  int run_rc = 0;
+#if defined(ODIN_CLI_SERVER_TESTING)
+  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_QUIC_EVENT_LOOP_RUN) !=
+      0) {
+    run_rc = -1;
+  } else {
+    run_rc = odin_event_loop_run(state.loop);
+  }
+#else
+  run_rc = odin_event_loop_run(state.loop);
+#endif
+
+  if (run_rc != 0) {
+    (void)fputs("odin: quic server runtime failed at event_loop_run\n", err);
+    (void)fflush(err);
+    cleanup_all(&state);
+    return 1;
+  }
+  cleanup_all(&state);
+  return state.shutdown_requested ? 0 : 1;
+}
+
+int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *err) {
+  if (config == NULL) {
+    return startup_fail_config(err);
+  }
+  if (config->transport == ODIN_CLI_SERVER_TRANSPORT_TCP) {
+    return run_tcp_server(config->listen_port, err);
+  }
+  if (config->transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
+    return run_quic_server(config, err);
+  }
+  return startup_fail_config(err);
 }

@@ -93,10 +93,13 @@ std::string Basename(const std::string &path) {
 }
 
 constexpr const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
-constexpr const char kUS[] = "usage: odin-server --listen ADDR";
+constexpr const char kUS[] =
+    "usage: odin-server --listen ADDR [--transport tcp|quic] "
+    "[--quic-cert FILE --quic-key FILE]";
 constexpr const char kUBoth[] =
     "usage: 'odin-client --listen ADDR --server ADDR' or "
-    "'odin-server --listen ADDR'";
+    "'odin-server --listen ADDR [--transport tcp|quic] "
+    "[--quic-cert FILE --quic-key FILE]'";
 
 } // namespace
 
