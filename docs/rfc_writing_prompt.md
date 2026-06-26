@@ -15,6 +15,32 @@ For any RFC whose §3.2 has platform-conditional mechanism (`#if defined(__linux
 
 **Misfit:** an RFC whose `T#` rows are all cross-compile-only (purely Linux/iOS behavior with no host-runnable contract surface) fails the Pre-Draft Fit Check under "no executable red→green split in this env" — stop and propose deferring or carving out a host-runnable contract row.
 
+## Single-RFC Hard Caps
+
+Run this triage **before drafting** and again before declaring the draft ready. These are hard caps for a single RFC, not style preferences:
+
+- Body length after deleting template instructions and excluding `## Revision Notes`: **<= 750 lines**.
+- §5 test rows: **<= 20** rows matching `T#`.
+- Each §5 `T#` row: **<= 2500 characters** and **<= 8 named subcases**.
+- §3.2 detailed-design mechanism surfaces: **<= 5** subsections matching `#### 3.2.#`.
+- Independent touched modules / ownership boundaries: **<= 5**.
+
+If the requirement is likely to exceed any cap, **stop before drafting**. Do not produce a partial oversized RFC. Return a split proposal with 2-5 smaller RFCs, each independently reviewable, implementable, and testable, and ask which one to draft first.
+
+Use this refusal shape:
+
+```text
+This request exceeds the single-RFC hard cap.
+Reason: estimated <cap exceeded>.
+Proposed split:
+1. RFC A: ...
+2. RFC B: ...
+3. RFC C: ...
+Please choose which RFC to draft first.
+```
+
+A 1000-line RFC is a process failure unless the user explicitly approves an exception after seeing the split proposal. Even with approval, the draft must carry an `Exception:` paragraph before §1 explaining why the work cannot be split and which cap is exceeded.
+
 ## Pre-Draft Fit Check
 
 Run **before drafting**. The template hard-wires TDD red→green — §2 needs ≥1 testable Goal, §5 needs rows asserting observable behavior, §6 needs every `T#` to transition red→green across ≥2 phases. Requirements with no observable behavior change force fabricated `T#` rows or abused non-testable Goal annotations.
@@ -40,6 +66,7 @@ Save to docs/rfc_NNN_{slug}.md, where NNN is the lowest unused three-digit index
 
 Run each check before declaring the draft ready.
 
+0. **Hard-cap lint.** Run `python3 docs/rfc_lint.py <rfc-path>` and fix every failure. If the lint fails because the requirement genuinely needs more than one RFC, stop and return the split proposal instead of continuing to revise the same oversized draft.
 1. **Coverage matrix.** Persist the matrix as a `### 5.0 Coverage Matrix` subsection in the RFC (before the §5 test-row table) — a `(axis-value) → [T#, …]` table. Every reachable cell needs a §5 row; an empty `[]` is a missing-row finding. Persistence (not transient scratch) is mandatory: a later reviewer building the matrix from scratch routinely misses different cells than the writer, accumulating "missed (state, event) cell" `Major` findings across review rounds. Update §5.0 in the same revision that adds, splits, or removes a §5 row — a stale §5.0 is a form defect. Axes:
    - **G#** — every testable Goal.
    - **State** — every `(state, event)` cell §3.2 branches on; same fault class under two different states is two rows.
