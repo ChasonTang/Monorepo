@@ -70,6 +70,8 @@ struct odin_connect_session_t {
 
 #if defined(ODIN_CONNECT_SESSION_TESTING)
 static unsigned int g_connect_session_live_count;
+static int g_fail_next_create_client_armed;
+static int g_fail_next_create_client_errno;
 static int g_fail_next_create_server_armed;
 static int g_fail_next_create_server_errno;
 #endif
@@ -103,6 +105,15 @@ int odin_connect_session_create_client(const char *host, size_t host_len,
                                        odin_connect_session_done_cb on_done,
                                        void *user_data,
                                        odin_connect_session_t **out) {
+#if defined(ODIN_CONNECT_SESSION_TESTING)
+  if (g_fail_next_create_client_armed) {
+    const int errnum = g_fail_next_create_client_errno;
+    g_fail_next_create_client_armed = 0;
+    g_fail_next_create_client_errno = 0;
+    errno = errnum;
+    return -1;
+  }
+#endif
   if (host_len < 1 || host_len > ODIN_PROTO_HOST_MAX) {
     errno = EINVAL;
     return -1;
@@ -447,6 +458,12 @@ void odin_connect_session_destroy(odin_connect_session_t *s) {
 }
 
 #if defined(ODIN_CONNECT_SESSION_TESTING)
+int odin_connect_session_test_fail_next_create_client(int errnum) {
+  g_fail_next_create_client_armed = 1;
+  g_fail_next_create_client_errno = errnum;
+  return 0;
+}
+
 int odin_connect_session_test_fail_next_create_server(int errnum) {
   g_fail_next_create_server_armed = 1;
   g_fail_next_create_server_errno = errnum;

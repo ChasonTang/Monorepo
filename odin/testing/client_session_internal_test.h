@@ -29,6 +29,7 @@ int odin_client_session_test_arm_next_kqueue_read_fault_at_relay_start(
     odin_client_session_t *cs, int errnum);
 int odin_client_session_test_state(const odin_client_session_t *cs);
 int odin_client_session_test_fail_next_create(int errnum);
+int odin_client_session_test_fail_next_downstream_transport_create(int errnum);
 
 #define ODIN_CLIENT_SESSION_TEST_STATE_PARSING 1
 #define ODIN_CLIENT_SESSION_TEST_STATE_DIALING 2

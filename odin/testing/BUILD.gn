@@ -47,6 +47,10 @@ config("odin_xqc_server_runtime_testing_config") {
   defines = [ "ODIN_XQC_SERVER_RUNTIME_TESTING" ]
 }
 
+config("odin_xqc_client_runtime_testing_config") {
+  defines = [ "ODIN_XQC_CLIENT_RUNTIME_TESTING" ]
+}
+
 config("odin_server_session_testing_config") {
   defines = [ "ODIN_SERVER_SESSION_TESTING" ]
 }
@@ -90,6 +94,7 @@ executable("odin_unittests") {
     "../accept_loop.h",
     "../cli_client.h",
     "../cli_server.h",
+    "../client_xqc_runtime.h",
     "../client_session.h",
     "../connect_session.h",
     "../dial.h",
@@ -114,6 +119,9 @@ executable("odin_unittests") {
     "cli_server_unittests.cpp",
     "cli_unittests.cpp",
     "client_listen_unittests.cpp",
+    "client_xqc_runtime_internal_test.h",
+    "client_xqc_runtime_testing.c",
+    "client_xqc_runtime_unittests.cpp",
     "client_session_internal_test.h",
     "client_session_testing.c",
     "client_session_unittests.cpp",
@@ -174,6 +182,7 @@ executable("odin_unittests") {
     ":odin_event_loop_testing_config",
     ":odin_server_runtime_testing_config",
     ":odin_xqc_server_runtime_testing_config",
+    ":odin_xqc_client_runtime_testing_config",
     ":odin_server_session_testing_config",
     ":odin_transport_fd_testing_config",
     ":odin_transport_xqc_testing_config",

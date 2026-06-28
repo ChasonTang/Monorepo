@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 int odin_connect_session_test_fail_next_create_server(int errnum);
+int odin_connect_session_test_fail_next_create_client(int errnum);
 unsigned int odin_connect_session_test_live_count(void);
 
 #ifdef __cplusplus
