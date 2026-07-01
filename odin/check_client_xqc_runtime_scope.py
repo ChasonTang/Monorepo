@@ -125,6 +125,18 @@ def check_no_tokens(label, token_list, forbidden):
         raise RuntimeError(f"{label}: forbidden token(s): {unique}")
 
 
+def check_cli_scope(token_list, raw_text):
+    if "<xquic/xquic.h>" in raw_text:
+        raise RuntimeError("CLI client scope: forbidden include <xquic/xquic.h>")
+    found = []
+    for tok in token_list:
+        if tok.startswith("xqc_") or tok.startswith("XQC_") or tok == "transport_xqc":
+            found.append(tok)
+    if found:
+        unique = ", ".join(sorted(set(found)))
+        raise RuntimeError(f"CLI client scope: forbidden token(s): {unique}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
@@ -141,11 +153,7 @@ def main():
             find_target_body(build_text, "odin_cli_client"),
         ]
     )
-    check_no_tokens(
-        "CLI client scope",
-        tokens(cli_text),
-        {"xquic", "client_xqc_runtime", "transport_xqc"},
-    )
+    check_cli_scope(tokens(cli_text), cli_text)
 
     runtime_text = "\n".join(
         [

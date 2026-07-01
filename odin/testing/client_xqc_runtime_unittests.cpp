@@ -9,12 +9,12 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <csignal>
 #include <deque>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -548,12 +548,13 @@ xqc_int_t FakeEngineUnregisterAlpn(xqc_engine_t *engine, const char *alpn,
   return XQC_OK;
 }
 
-const xqc_cid_t *FakeXqcConnect(
-    xqc_engine_t *engine, const xqc_conn_settings_t *conn_settings,
-    const unsigned char *token, unsigned int token_len,
-    const char *server_host, int no_crypto_flag,
-    const xqc_conn_ssl_config_t *conn_ssl_config, const struct sockaddr *peer,
-    socklen_t peer_addrlen, const char *alpn, void *user_data) {
+const xqc_cid_t *
+FakeXqcConnect(xqc_engine_t *engine, const xqc_conn_settings_t *conn_settings,
+               const unsigned char *token, unsigned int token_len,
+               const char *server_host, int no_crypto_flag,
+               const xqc_conn_ssl_config_t *conn_ssl_config,
+               const struct sockaddr *peer, socklen_t peer_addrlen,
+               const char *alpn, void *user_data) {
   (void)token;
   (void)token_len;
   ClientHarness *h = g_client_harness;
@@ -754,8 +755,7 @@ ssize_t FakeStreamSend(xqc_stream_t *stream, unsigned char *send_data,
   if (result < 0) {
     return result;
   }
-  const size_t written =
-      std::min(static_cast<size_t>(result), send_data_size);
+  const size_t written = std::min(static_cast<size_t>(result), send_data_size);
   if (send_data != nullptr && written > 0) {
     s->sends.emplace_back(reinterpret_cast<const char *>(send_data), written);
   }
@@ -792,8 +792,18 @@ unsigned int CountClientCalls(odin_xqc_client_runtime_test_call_kind_t kind) {
   return count;
 }
 
-unsigned int CountClientCallsForCid(
-    odin_xqc_client_runtime_test_call_kind_t kind, const xqc_cid_t &cid) {
+void ExpectEventLoopLivenessZero() {
+  odin_event_loop_test_liveness_t live{};
+  ASSERT_EQ(odin_event_loop_test_liveness(&live), 0);
+  EXPECT_EQ(live.loops, 0u);
+  EXPECT_EQ(live.io_handles, 0u);
+  EXPECT_EQ(live.timers, 0u);
+  EXPECT_EQ(live.task_nodes, 0u);
+}
+
+unsigned int
+CountClientCallsForCid(odin_xqc_client_runtime_test_call_kind_t kind,
+                       const xqc_cid_t &cid) {
   const odin_xqc_client_runtime_test_record_t *record =
       odin_xqc_client_runtime_test_record();
   unsigned int count = 0;
@@ -805,8 +815,9 @@ unsigned int CountClientCallsForCid(
   return count;
 }
 
-unsigned int CountClientCallsForStream(
-    odin_xqc_client_runtime_test_call_kind_t kind, xqc_stream_t *stream) {
+unsigned int
+CountClientCallsForStream(odin_xqc_client_runtime_test_call_kind_t kind,
+                          xqc_stream_t *stream) {
   const odin_xqc_client_runtime_test_record_t *record =
       odin_xqc_client_runtime_test_record();
   unsigned int count = 0;
@@ -829,8 +840,8 @@ int FirstClientCallIndex(odin_xqc_client_runtime_test_call_kind_t kind) {
   return -1;
 }
 
-int FirstClientCallForCidIndex(
-    odin_xqc_client_runtime_test_call_kind_t kind, const xqc_cid_t &cid) {
+int FirstClientCallForCidIndex(odin_xqc_client_runtime_test_call_kind_t kind,
+                               const xqc_cid_t &cid) {
   const odin_xqc_client_runtime_test_record_t *record =
       odin_xqc_client_runtime_test_record();
   for (unsigned int i = 0; i < record->call_count; ++i) {
@@ -841,8 +852,8 @@ int FirstClientCallForCidIndex(
   return -1;
 }
 
-int FirstClientCallForStreamIndex(
-    odin_xqc_client_runtime_test_call_kind_t kind, xqc_stream_t *stream) {
+int FirstClientCallForStreamIndex(odin_xqc_client_runtime_test_call_kind_t kind,
+                                  xqc_stream_t *stream) {
   const odin_xqc_client_runtime_test_record_t *record =
       odin_xqc_client_runtime_test_record();
   for (unsigned int i = 0; i < record->call_count; ++i) {
@@ -895,6 +906,11 @@ protected:
     odin_event_loop_destroy(h.loop);
   }
 
+  void DestroyFixtureLoop() {
+    odin_event_loop_destroy(h.loop);
+    h.loop = nullptr;
+  }
+
   void InstallOps() {
     g_client_harness = &h;
     odin_xqc_client_runtime_test_reset();
@@ -904,16 +920,11 @@ protected:
     };
     odin_xqc_udp_test_set_ops(&kUdpOps);
     static const odin_xqc_client_runtime_test_ops_t kClientOps = {
-        FakeEngineRegisterAlpn,
-        FakeEngineUnregisterAlpn,
-        FakeXqcConnect,
-        FakeConnSetAlpUserData,
-        FakeConnClose,
-        FakeGetConnAlpUserDataByStream,
-        FakeStreamCreate,
-        FakeStreamClose,
-        FakeUdpRegisterConn,
-        FakeUdpUnregisterConn,
+        FakeEngineRegisterAlpn, FakeEngineUnregisterAlpn,
+        FakeXqcConnect,         FakeConnSetAlpUserData,
+        FakeConnClose,          FakeGetConnAlpUserDataByStream,
+        FakeStreamCreate,       FakeStreamClose,
+        FakeUdpRegisterConn,    FakeUdpUnregisterConn,
     };
     odin_xqc_client_runtime_test_set_ops(&kClientOps);
     static const odin_xqc_stream_transport_test_ops_t kStreamOps = {
@@ -1031,8 +1042,8 @@ protected:
     if (conn == nullptr) {
       conn = &h.conn_a;
     }
-    h.app_callbacks->conn_cbs.conn_handshake_finished(
-        AsConn(conn), h.xu_user_data, h.rt);
+    h.app_callbacks->conn_cbs.conn_handshake_finished(AsConn(conn),
+                                                      h.xu_user_data, h.rt);
   }
 
   void FireClose(FakeConn *conn = nullptr, const xqc_cid_t *cid = nullptr) {
@@ -1042,8 +1053,8 @@ protected:
     if (cid == nullptr) {
       cid = &h.cid_a;
     }
-    EXPECT_EQ(h.app_callbacks->conn_cbs.conn_close_notify(
-                  AsConn(conn), cid, h.xu_user_data, h.rt),
+    EXPECT_EQ(h.app_callbacks->conn_cbs.conn_close_notify(AsConn(conn), cid,
+                                                          h.xu_user_data, h.rt),
               0);
     conn->alp_user_data = nullptr;
   }
@@ -1302,8 +1313,9 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   config.engine_config = nullptr;
   ASSERT_EQ(odin_xqc_client_runtime_create(&config, &h.rt), 0)
       << std::strerror(errno);
-  EXPECT_EQ(odin_xqc_client_runtime_test_record()->last_udp_create.engine_config,
-            nullptr);
+  EXPECT_EQ(
+      odin_xqc_client_runtime_test_record()->last_udp_create.engine_config,
+      nullptr);
   ASSERT_EQ(odin_xqc_client_runtime_start(h.rt), 0);
   DestroyRunningRuntime();
   InstallOps();
@@ -1326,17 +1338,18 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
       sizeof(h.local_addr));
   EXPECT_EQ(odin_xqc_client_runtime_test_record()->last_udp_create.engine_type,
             XQC_ENGINE_CLIENT);
-  EXPECT_EQ(odin_xqc_client_runtime_test_record()->last_udp_create.engine_config,
-            &h.engine_config);
+  EXPECT_EQ(
+      odin_xqc_client_runtime_test_record()->last_udp_create.engine_config,
+      &h.engine_config);
   EXPECT_EQ(odin_xqc_client_runtime_test_record()->last_udp_create.ssl_config,
             &h.engine_ssl_config);
   EXPECT_EQ(
       odin_xqc_client_runtime_test_record()->last_udp_create.engine_callbacks,
       &h.engine_callbacks);
   EXPECT_EQ(h.engine_create_calls, engine_create_before_sendmmsg);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_REGISTER_ALPN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_REGISTER_ALPN),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_XQC_CONNECT),
@@ -1369,10 +1382,8 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(defaulted_record->last_udp_create.local_addrlen,
             sizeof(h.local_addr));
   EXPECT_EQ(defaulted_record->last_udp_create.engine_type, XQC_ENGINE_CLIENT);
-  EXPECT_EQ(defaulted_record->last_udp_create.engine_config,
-            &h.engine_config);
-  EXPECT_EQ(defaulted_record->last_udp_create.ssl_config,
-            &h.engine_ssl_config);
+  EXPECT_EQ(defaulted_record->last_udp_create.engine_config, &h.engine_config);
+  EXPECT_EQ(defaulted_record->last_udp_create.ssl_config, &h.engine_ssl_config);
   EXPECT_EQ(defaulted_record->last_udp_create.engine_callbacks,
             &h.engine_callbacks);
   EXPECT_EQ(defaulted_record->last_udp_create.app_user_data, h.rt);
@@ -1385,8 +1396,8 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   const unsigned int calls_before_noops =
       odin_xqc_client_runtime_test_record()->call_count;
   errno = EDOM;
-  defaulted_callbacks.save_token(
-      reinterpret_cast<const unsigned char *>("tok"), 3, h.xu_user_data);
+  defaulted_callbacks.save_token(reinterpret_cast<const unsigned char *>("tok"),
+                                 3, h.xu_user_data);
   EXPECT_EQ(errno, EDOM);
   defaulted_callbacks.save_session_cb("session", 7, h.xu_user_data);
   EXPECT_EQ(errno, EDOM);
@@ -1423,9 +1434,9 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   odin_xqc_client_runtime_destroy(h.rt);
   h.rt = nullptr;
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 0u);
   EXPECT_EQ(CountClientCalls(
                 ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
@@ -1534,8 +1545,7 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
     tp_bytes.shrink_to_fit();
     config.no_crypto_flag = 99;
 
-    ASSERT_EQ(odin_xqc_client_runtime_start(h.rt), 0)
-        << std::strerror(errno);
+    ASSERT_EQ(odin_xqc_client_runtime_start(h.rt), 0) << std::strerror(errno);
     DestroyRunningRuntime();
     InstallOps();
     ResetConnectExpectations();
@@ -1562,10 +1572,10 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(errno, ENOMEM);
   EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x3434));
 
-  ASSERT_EQ(odin_xqc_client_runtime_test_fail_config_copy_alloc(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CONFIG_COPY_SESSION_TICKET,
-                ENOMEM),
-            0);
+  ASSERT_EQ(
+      odin_xqc_client_runtime_test_fail_config_copy_alloc(
+          ODIN_XQC_CLIENT_RUNTIME_TEST_CONFIG_COPY_SESSION_TICKET, ENOMEM),
+      0);
   sentinel = reinterpret_cast<odin_xqc_client_runtime_t *>(0x3535);
   EXPECT_EQ(odin_xqc_client_runtime_create(&config, &sentinel), -1);
   EXPECT_EQ(errno, ENOMEM);
@@ -1580,11 +1590,11 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(errno, ENOMEM);
   EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x3636));
 
-  EXPECT_EQ(odin_xqc_client_runtime_test_fail_config_copy_alloc(
-                static_cast<odin_xqc_client_runtime_test_config_copy_alloc_t>(
-                    99),
-                ENOMEM),
-            -1);
+  EXPECT_EQ(
+      odin_xqc_client_runtime_test_fail_config_copy_alloc(
+          static_cast<odin_xqc_client_runtime_test_config_copy_alloc_t>(99),
+          ENOMEM),
+      -1);
   EXPECT_EQ(errno, EINVAL);
   const unsigned int udp_before_invalid_site =
       odin_xqc_client_runtime_test_record()->udp_create_calls;
@@ -1643,10 +1653,10 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
 #if defined(__APPLE__)
   CreateRuntime();
   const int kqueue_connect_before = h.connect_calls;
-  ASSERT_EQ(odin_event_loop_test_fail_next_kqueue_change(
-                h.loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD,
-                ODIN_EVENT_READ, EIO),
-            0);
+  ASSERT_EQ(
+      odin_event_loop_test_fail_next_kqueue_change(
+          h.loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD, ODIN_EVENT_READ, EIO),
+      0);
   errno = 0;
   EXPECT_EQ(odin_xqc_client_runtime_start(h.rt), -1);
   EXPECT_EQ(errno, EIO);
@@ -1664,10 +1674,10 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   ASSERT_EQ(odin_xqc_client_runtime_start(h.rt), 0) << std::strerror(errno);
   EXPECT_EQ(h.connect_calls, kqueue_connect_before + 1);
   ASSERT_EQ(odin_xqc_client_runtime_stop(h.rt), 0);
-  ASSERT_EQ(odin_event_loop_test_fail_next_kqueue_change(
-                h.loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD,
-                ODIN_EVENT_READ, EIO),
-            0);
+  ASSERT_EQ(
+      odin_event_loop_test_fail_next_kqueue_change(
+          h.loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD, ODIN_EVENT_READ, EIO),
+      0);
   errno = 0;
   EXPECT_EQ(odin_xqc_client_runtime_start(h.rt), -1);
   EXPECT_EQ(errno, EIO);
@@ -1680,19 +1690,16 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(restart_failed.closing, 0);
   EXPECT_TRUE(CidEq(restart_failed.current_cid, h.cid_a));
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN, h.cid_a),
             1u);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             0u);
   int restart_failed_owned = -1;
   int restart_failed_peer = -1;
   MakePair(&restart_failed_owned, &restart_failed_peer);
   errno = 0;
-  EXPECT_EQ(odin_xqc_client_runtime_add_connection(h.rt,
-                                                   restart_failed_owned),
+  EXPECT_EQ(odin_xqc_client_runtime_add_connection(h.rt, restart_failed_owned),
             -1);
   EXPECT_EQ(errno, ENOTCONN);
   EXPECT_GE(fcntl(restart_failed_owned, F_GETFD), 0);
@@ -1712,36 +1719,35 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(errno, EIO);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   odin_xqc_client_runtime_test_state_t failed_no_callback_destroy;
-  ASSERT_EQ(odin_xqc_client_runtime_test_state(h.rt,
-                                               &failed_no_callback_destroy),
-            0);
+  ASSERT_EQ(
+      odin_xqc_client_runtime_test_state(h.rt, &failed_no_callback_destroy), 0);
   EXPECT_EQ(failed_no_callback_destroy.conn, nullptr);
   EXPECT_EQ(failed_no_callback_destroy.cid_registered, 0);
   EXPECT_EQ(failed_no_callback_destroy.handshake_done, 0);
-  const unsigned int no_callback_destroy_alpn_before =
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int no_callback_destroy_alpn_before = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const unsigned int no_callback_destroy_udp_before =
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   const unsigned int no_callback_destroy_close_before =
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE);
-  const unsigned int no_callback_destroy_unregister_before = CountClientCalls(
-      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN);
+  const unsigned int no_callback_destroy_unregister_before =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN);
   odin_xqc_client_runtime_destroy(h.rt);
   h.rt = nullptr;
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      no_callback_destroy_alpn_before + 1u);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            no_callback_destroy_alpn_before + 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             no_callback_destroy_udp_before + 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE),
             no_callback_destroy_close_before);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            no_callback_destroy_unregister_before);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      no_callback_destroy_unregister_before);
   ResetFakeRuntimeState();
 
   h.connect_returns_null = true;
@@ -1752,9 +1758,9 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(errno, EIO);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   odin_xqc_client_runtime_test_state_t failed_no_callback;
   ASSERT_EQ(odin_xqc_client_runtime_test_state(h.rt, &failed_no_callback), 0);
   EXPECT_EQ(failed_no_callback.conn, nullptr);
@@ -1768,9 +1774,9 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(CountClientCallsForCid(
                 ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN, h.cid_a),
             1u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   DestroyRunningRuntime();
   h.rt = nullptr;
   ResetFakeRuntimeState();
@@ -1787,9 +1793,9 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
                 ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN, h.cid_a),
             1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 1u);
   odin_xqc_client_runtime_test_state_t failed_register;
   ASSERT_EQ(odin_xqc_client_runtime_test_state(h.rt, &failed_register), 0);
@@ -1803,9 +1809,9 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(h.conn_a.alp_user_data, h.rt);
   EXPECT_EQ(h.registered.size(), 1u);
   EXPECT_TRUE(CidEq(h.registered[0], h.cid_a));
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   DestroyRunningRuntime();
   h.rt = nullptr;
   ResetFakeRuntimeState();
@@ -1821,8 +1827,7 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(h.conn_close_cids.size(), post_create_close_before + 1u);
   EXPECT_TRUE(CidEq(h.conn_close_cids.back(), h.cid_a));
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             1u);
   h.connect_returns_null = false;
   h.connect_uses_conn_b = true;
@@ -1834,12 +1839,11 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(h.app_callbacks->conn_cbs.conn_close_notify(
                 AsConn(&h.conn_a), &h.cid_a, h.xu_user_data, h.rt),
             0);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            unregister_after_retry);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      unregister_after_retry);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             1u);
   odin_xqc_client_runtime_destroy(h.rt);
   FireClose(&h.conn_b, &h.cid_b);
@@ -1855,8 +1859,7 @@ TEST_F(OdinXqcClientRuntimeTest, T2) {
   EXPECT_EQ(odin_xqc_client_runtime_start(h.rt), -1);
   EXPECT_EQ(errno, EIO);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             1u);
   h.connect_returns_null = false;
   h.connect_invokes_close_before_null = false;
@@ -1968,8 +1971,9 @@ TEST_F(OdinXqcClientRuntimeTest, T5) {
   int peer = -1;
   MakePair(&owned, &peer);
   ASSERT_EQ(odin_xqc_client_runtime_add_connection(h.rt, owned), 0);
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   FakeStream stream;
   const std::string local_tail = "client-tail!";
   const std::string server_tail = "server-tail!";
@@ -2000,15 +2004,16 @@ TEST_F(OdinXqcClientRuntimeTest, T5) {
     return downstream.find(std::string(kHttp200) + server_tail) !=
            std::string::npos;
   }));
-  ASSERT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            1u);
+  ASSERT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      1u);
   ASSERT_FALSE(stream.sends.empty());
   EXPECT_EQ(stream.sends.front(), EncodedConnectReq());
   EXPECT_EQ(downstream.find(std::string(kHttp200) + server_tail), 0u);
   EXPECT_NE(JoinedSends(stream).find(local_tail), std::string::npos);
   ASSERT_NE(stream.user_data, nullptr);
-  EXPECT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(
-                AsStream(&stream), stream.user_data),
+  EXPECT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream),
+                                                            stream.user_data),
             XQC_OK);
   EXPECT_EQ(stream.user_data_values.back(), nullptr);
   EXPECT_EQ(stream.close_calls, 0);
@@ -2039,8 +2044,8 @@ TEST_F(OdinXqcClientRuntimeTest, T6) {
   EXPECT_EQ(JoinedSends(stream), connect_req.substr(0, 7));
   EXPECT_EQ(ReadAvailableFd(peer, 50).find(kHttp200), std::string::npos);
 
-  EXPECT_EQ(h.app_callbacks->stream_cbs.stream_write_notify(
-                AsStream(&stream), stream.user_data),
+  EXPECT_EQ(h.app_callbacks->stream_cbs.stream_write_notify(AsStream(&stream),
+                                                            stream.user_data),
             XQC_OK);
   EXPECT_EQ(JoinedSends(stream), connect_req);
   EXPECT_EQ(ReadAvailableFd(peer, 50).find(kHttp200), std::string::npos);
@@ -2100,18 +2105,17 @@ TEST_F(OdinXqcClientRuntimeTest, T7) {
   h.transport_callbacks.conn_update_cid_notify(AsConn(&h.conn_a), &h.cid_a,
                                                &h.cid_b, h.xu_user_data);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN,
-                h.cid_b),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN, h.cid_b),
             1u);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             1u);
-  EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE, h.cid_a),
+  EXPECT_EQ(CountClientCallsForCid(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE,
+                                   h.cid_a),
             1u);
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   MakePair(&owned, &peer);
   errno = 0;
   EXPECT_EQ(odin_xqc_client_runtime_add_connection(h.rt, owned), -1);
@@ -2135,8 +2139,9 @@ TEST_F(OdinXqcClientRuntimeTest, T7) {
   }));
   EXPECT_EQ(method_response, std::string(kHttp405));
   EXPECT_TRUE(PeerSawEof(peer));
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   close(peer);
 
   MakePair(&owned, &peer);
@@ -2147,25 +2152,27 @@ TEST_F(OdinXqcClientRuntimeTest, T7) {
   RunLoopFor(h.loop);
   EXPECT_TRUE(ReadAvailableFd(peer, 200).empty());
   EXPECT_TRUE(PeerSawEof(peer));
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(
+          ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
+      0u);
   DestroyRunningRuntime();
   close(peer);
 }
 
 TEST_F(OdinXqcClientRuntimeTest, T8) {
   StartRuntime();
-  ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_pending_queue_append(
-                h.rt, ENOMEM),
-            0);
-  ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_stream_context_alloc(
-                h.rt, ENOMEM),
-            0);
+  ASSERT_EQ(
+      odin_xqc_client_runtime_test_fail_next_pending_queue_append(h.rt, ENOMEM),
+      0);
+  ASSERT_EQ(
+      odin_xqc_client_runtime_test_fail_next_stream_context_alloc(h.rt, ENOMEM),
+      0);
   odin_xqc_client_runtime_test_reset();
   InstallOps();
   int owned = -1;
@@ -2180,9 +2187,9 @@ TEST_F(OdinXqcClientRuntimeTest, T8) {
 
   StartRuntime();
   MakePair(&owned, &peer);
-  ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_pending_queue_append(
-                h.rt, ENOMEM),
-            0);
+  ASSERT_EQ(
+      odin_xqc_client_runtime_test_fail_next_pending_queue_append(h.rt, ENOMEM),
+      0);
   errno = 0;
   EXPECT_EQ(odin_xqc_client_runtime_add_connection(h.rt, owned), -1);
   EXPECT_EQ(errno, ENOMEM);
@@ -2192,9 +2199,9 @@ TEST_F(OdinXqcClientRuntimeTest, T8) {
 
   FireHandshake();
   MakePair(&owned, &peer);
-  ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_stream_context_alloc(
-                h.rt, ENOMEM),
-            0);
+  ASSERT_EQ(
+      odin_xqc_client_runtime_test_fail_next_stream_context_alloc(h.rt, ENOMEM),
+      0);
   errno = 0;
   EXPECT_EQ(odin_xqc_client_runtime_add_connection(h.rt, owned), -1);
   EXPECT_EQ(errno, ENOMEM);
@@ -2281,8 +2288,9 @@ TEST_F(OdinXqcClientRuntimeTest, T8) {
     stream_create_fail_response += DrainFdNow(peer);
     return stream_create_fail_response.size() >= sizeof(kHttp400) - 1;
   }));
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            stream_create_before_null + 1);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      stream_create_before_null + 1);
   stream_create_fail_response += ReadAvailableFd(peer, 50);
   EXPECT_EQ(stream_create_fail_response, kHttp400);
   h.stream_create_returns_null = false;
@@ -2349,9 +2357,9 @@ TEST_F(OdinXqcClientRuntimeTest, T8) {
     EXPECT_EQ(queued_recovery.sends.front(), EncodedConnectReq());
     const unsigned int expected_stream_creates =
         failure == QueuedFailure::kStreamCreate ? 2u : 1u;
-    EXPECT_EQ(CountClientCalls(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-              expected_stream_creates);
+    EXPECT_EQ(
+        CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+        expected_stream_creates);
     DestroyRunningRuntime();
     close(peer1);
     close(peer2);
@@ -2389,8 +2397,7 @@ TEST_F(OdinXqcClientRuntimeTest, T9) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             1u);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             0u);
   close(reset_peer);
 
@@ -2413,12 +2420,12 @@ TEST_F(OdinXqcClientRuntimeTest, T9) {
   EXPECT_EQ(h.app_callbacks->stream_cbs.stream_close_notify(AsStream(&stream),
                                                             nullptr),
             XQC_OK);
-  h.app_callbacks->stream_cbs.stream_closing_notify(AsStream(&stream),
-                                                    -XQC_ESTREAM_RESET,
-                                                    nullptr);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
-            lookups_before_null + 4);
+  h.app_callbacks->stream_cbs.stream_closing_notify(
+      AsStream(&stream), -XQC_ESTREAM_RESET, nullptr);
+  EXPECT_EQ(
+      CountClientCalls(
+          ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
+      lookups_before_null + 4);
   EXPECT_EQ(stream.recv_calls, recv_before_null);
   EXPECT_EQ(stream.send_calls, send_before_null);
   EXPECT_EQ(stream.close_calls, close_before_null);
@@ -2438,9 +2445,10 @@ TEST_F(OdinXqcClientRuntimeTest, T9) {
             XQC_OK);
   h.app_callbacks->stream_cbs.stream_closing_notify(
       AsStream(&stream), -XQC_ESTREAM_RESET, live_user_data);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
-            lookups_before_missing_alpn + 4);
+  EXPECT_EQ(
+      CountClientCalls(
+          ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
+      lookups_before_missing_alpn + 4);
   EXPECT_EQ(stream.recv_calls, recv_before_null);
   EXPECT_EQ(stream.send_calls, send_before_null);
   EXPECT_EQ(stream.close_calls, close_before_null);
@@ -2455,8 +2463,7 @@ TEST_F(OdinXqcClientRuntimeTest, T9) {
   EXPECT_EQ(stream.user_data_values.back(), nullptr);
   EXPECT_EQ(stream.close_calls, 0);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before_close);
 
   const int recv_before_stale = stream.recv_calls;
@@ -2475,9 +2482,10 @@ TEST_F(OdinXqcClientRuntimeTest, T9) {
             XQC_OK);
   h.app_callbacks->stream_cbs.stream_closing_notify(
       AsStream(&stream), -XQC_ESTREAM_RESET, live_user_data);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
-            lookups_before_stale + 4);
+  EXPECT_EQ(
+      CountClientCalls(
+          ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM),
+      lookups_before_stale + 4);
   EXPECT_EQ(stream.recv_calls, recv_before_stale);
   EXPECT_EQ(stream.send_calls, send_before_stale);
   EXPECT_EQ(stream.close_calls, close_before_stale);
@@ -2497,8 +2505,7 @@ TEST_F(OdinXqcClientRuntimeTest, T9) {
   EXPECT_EQ(later.sends.front(), EncodedConnectReq());
   EXPECT_EQ(later.close_calls, 0);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before_close);
   DestroyRunningRuntime();
   close(peer);
@@ -2521,26 +2528,26 @@ TEST_F(OdinXqcClientRuntimeTest, T10) {
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE);
   const unsigned int unregister_before = CountClientCallsForCid(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const unsigned int alpn_unregister_before =
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int alpn_unregister_before = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const unsigned int udp_destroy_before =
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   FireClose();
   EXPECT_TRUE(PeerSawEof(peer1));
   EXPECT_TRUE(PeerSawEof(peer2));
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE),
             conn_close_before);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before + 1u);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before);
   close(peer1);
@@ -2552,18 +2559,17 @@ TEST_F(OdinXqcClientRuntimeTest, T10) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before + 1u);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before + 1u);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before + 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before + 1u);
   const int unregister = FirstClientCallForCidIndex(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const int alpn_unregister =
-      FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const int alpn_unregister = FirstClientCallIndex(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const int udp_destroy =
       FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   ASSERT_GE(unregister, 0);
@@ -2590,8 +2596,8 @@ TEST_F(OdinXqcClientRuntimeTest, T11) {
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE);
   const unsigned int unregister_before = CountClientCallsForCid(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const unsigned int alpn_unregister_before =
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int alpn_unregister_before = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const unsigned int udp_destroy_before =
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   FireClose();
@@ -2606,12 +2612,11 @@ TEST_F(OdinXqcClientRuntimeTest, T11) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before + 1u);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before);
   close(peer1);
@@ -2623,18 +2628,17 @@ TEST_F(OdinXqcClientRuntimeTest, T11) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before + 1u);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before + 1u);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before + 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before + 1u);
   const int unregister = FirstClientCallForCidIndex(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const int alpn_unregister =
-      FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const int alpn_unregister = FirstClientCallIndex(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const int udp_destroy =
       FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   ASSERT_GE(unregister, 0);
@@ -2660,8 +2664,8 @@ TEST_F(OdinXqcClientRuntimeTest, T13) {
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE);
   const unsigned int unregister_before = CountClientCallsForCid(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const unsigned int alpn_unregister_before =
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int alpn_unregister_before = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const unsigned int udp_destroy_before =
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   odin_xqc_client_runtime_destroy(h.rt);
@@ -2677,12 +2681,11 @@ TEST_F(OdinXqcClientRuntimeTest, T13) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before);
   odin_xqc_client_runtime_test_state_t closing;
@@ -2698,20 +2701,19 @@ TEST_F(OdinXqcClientRuntimeTest, T13) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before + 1u);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before + 1u);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before + 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before + 1u);
   const int conn_close = FirstClientCallForCidIndex(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE, h.cid_a);
   const int unregister = FirstClientCallForCidIndex(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const int alpn_unregister =
-      FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const int alpn_unregister = FirstClientCallIndex(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const int udp_destroy =
       FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   ASSERT_GE(conn_close, 0);
@@ -2743,8 +2745,8 @@ TEST_F(OdinXqcClientRuntimeTest, T14) {
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE);
   const unsigned int unregister_before = CountClientCallsForCid(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const unsigned int alpn_unregister_before =
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int alpn_unregister_before = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const unsigned int udp_destroy_before =
       CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   odin_xqc_client_runtime_destroy(h.rt);
@@ -2756,14 +2758,14 @@ TEST_F(OdinXqcClientRuntimeTest, T14) {
   EXPECT_GT(stream2.user_data_clear_order, 0);
   EXPECT_GT(stream1.close_order, stream1.user_data_clear_order);
   EXPECT_GT(stream2.close_order, stream2.user_data_clear_order);
-  EXPECT_EQ(CountClientCallsForStream(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
-                AsStream(&stream1)),
-            1u);
-  EXPECT_EQ(CountClientCallsForStream(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
-                AsStream(&stream2)),
-            1u);
+  EXPECT_EQ(
+      CountClientCallsForStream(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
+                                AsStream(&stream1)),
+      1u);
+  EXPECT_EQ(
+      CountClientCallsForStream(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
+                                AsStream(&stream2)),
+      1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before + 2u);
   EXPECT_EQ(h.conn_close_cids.size(), 1u);
@@ -2771,12 +2773,11 @@ TEST_F(OdinXqcClientRuntimeTest, T14) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE),
             conn_close_before + 1u);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before);
   odin_xqc_client_runtime_test_state_t closing;
@@ -2792,12 +2793,11 @@ TEST_F(OdinXqcClientRuntimeTest, T14) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             stream_close_before + 2u);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             unregister_before + 1u);
-  EXPECT_EQ(
-      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
-      alpn_unregister_before + 1u);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before + 1u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             udp_destroy_before + 1u);
   const int stream1_close = FirstClientCallForStreamIndex(
@@ -2808,8 +2808,8 @@ TEST_F(OdinXqcClientRuntimeTest, T14) {
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE, h.cid_a);
   const int unregister = FirstClientCallForCidIndex(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
-  const int alpn_unregister =
-      FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const int alpn_unregister = FirstClientCallIndex(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
   const int udp_destroy =
       FirstClientCallIndex(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
   ASSERT_GE(stream1_close, 0);
@@ -2942,8 +2942,7 @@ TEST_F(OdinXqcClientRuntimeTest, T15) {
   EXPECT_EQ(record->last_udp_create.engine_type, XQC_ENGINE_CLIENT);
   EXPECT_EQ(record->last_udp_create.engine_config, &client_engine_config);
   EXPECT_EQ(record->last_udp_create.ssl_config, &client_ssl);
-  EXPECT_EQ(record->last_udp_create.engine_callbacks,
-            &client_engine_callbacks);
+  EXPECT_EQ(record->last_udp_create.engine_callbacks, &client_engine_callbacks);
   EXPECT_EQ(record->last_udp_create.transport_callbacks_value.cert_verify_cb,
             ProductionCertVerify);
   EXPECT_NE(record->last_udp_create.transport_callbacks_value.save_token,
@@ -3063,8 +3062,9 @@ TEST_F(OdinXqcClientRuntimeTest, T15) {
             std::string::npos);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_XQC_CONNECT),
             1u);
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            1u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      1u);
 
   close(local_peer);
   close(upstream_fd);
@@ -3114,23 +3114,25 @@ TEST_F(OdinXqcClientRuntimeTest, T16) {
   EXPECT_TRUE(CidEq(stopped.current_cid, h.cid_a));
   EXPECT_FALSE(PeerSawEof(peer1));
   EXPECT_FALSE(PeerSawEof(peer2));
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   RunLoopFor(h.loop);
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   ASSERT_EQ(odin_xqc_client_runtime_start(h.rt), 0);
   FireHandshake();
   ASSERT_TRUE(RunUntil(h.loop, [&] {
@@ -3173,8 +3175,9 @@ TEST_F(OdinXqcClientRuntimeTest, T16) {
   EXPECT_EQ(stream2.sends.front(), encoded_req2);
   EXPECT_NE(JoinedSends(stream1).find(local_tail1), std::string::npos);
   EXPECT_NE(JoinedSends(stream2).find(local_tail2), std::string::npos);
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            2u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      2u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             0u);
   DestroyRunningRuntime();
@@ -3194,8 +3197,8 @@ TEST_F(OdinXqcClientRuntimeTest, T17) {
   int peer = -1;
   MakePair(&owned, &peer);
   ASSERT_EQ(odin_xqc_client_runtime_add_connection(h.rt, owned), 0);
-  ASSERT_TRUE(WriteAllFd(peer, pre_stop_request.data(),
-                         pre_stop_request.size()));
+  ASSERT_TRUE(
+      WriteAllFd(peer, pre_stop_request.data(), pre_stop_request.size()));
   RunLoopFor(h.loop);
   ASSERT_FALSE(stream.sends.empty());
   EXPECT_EQ(JoinedSends(stream), EncodedConnectReq());
@@ -3213,9 +3216,9 @@ TEST_F(OdinXqcClientRuntimeTest, T17) {
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
             0u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE), 0u);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      0u);
   ASSERT_EQ(odin_xqc_client_runtime_start(h.rt), 0);
   EXPECT_EQ(h.connect_calls, 1);
   stream.recv_chunks.push_back(EncodedConnectResp());
@@ -3255,13 +3258,14 @@ TEST_F(OdinXqcClientRuntimeTest, T18) {
   QueueStream(&stream);
   stream.recv_chunks.push_back(server_tail);
   ASSERT_TRUE(WriteAllFd(peer, kHttpReq, sizeof(kHttpReq) - 1));
-  h.app_callbacks->conn_cbs.conn_handshake_finished(
-      AsConn(&h.conn_b), h.xu_user_data, h.rt);
-  h.app_callbacks->conn_cbs.conn_handshake_finished(
-      AsConn(&h.conn_a), h.xu_user_data, nullptr);
+  h.app_callbacks->conn_cbs.conn_handshake_finished(AsConn(&h.conn_b),
+                                                    h.xu_user_data, h.rt);
+  h.app_callbacks->conn_cbs.conn_handshake_finished(AsConn(&h.conn_a),
+                                                    h.xu_user_data, nullptr);
   RunLoopFor(h.loop);
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   EXPECT_EQ(stream.user_data, nullptr);
   EXPECT_TRUE(stream.sends.empty());
   FireHandshake();
@@ -3299,12 +3303,13 @@ TEST_F(OdinXqcClientRuntimeTest, T18) {
   h.fail_register_cid = h.cid_b.cid_buf[0];
   h.transport_callbacks.conn_update_cid_notify(AsConn(&h.conn_a), &h.cid_a,
                                                &h.cid_b, h.xu_user_data);
-  h.app_callbacks->conn_cbs.conn_handshake_finished(
-      AsConn(&h.conn_a), h.xu_user_data, h.rt);
+  h.app_callbacks->conn_cbs.conn_handshake_finished(AsConn(&h.conn_a),
+                                                    h.xu_user_data, h.rt);
   RunLoopFor(h.loop);
   EXPECT_TRUE(PeerSawEof(peer));
-  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-            0u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      0u);
   odin_xqc_client_runtime_destroy(h.rt);
   h.rt = nullptr;
   close(peer);
@@ -3329,11 +3334,10 @@ TEST_F(OdinXqcClientRuntimeTest, T19) {
     EXPECT_TRUE(CidEq(stopped.current_cid, h.cid_a));
     EXPECT_FALSE(PeerSawEof(peer1));
     EXPECT_FALSE(PeerSawEof(peer2));
-    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP),
-              1u);
-    EXPECT_EQ(CountClientCalls(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-              0u);
+    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 1u);
+    EXPECT_EQ(
+        CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+        0u);
 
     h.engine_destroy_invokes_close = engine_destroy_callback;
     odin_xqc_client_runtime_destroy(h.rt);
@@ -3342,17 +3346,16 @@ TEST_F(OdinXqcClientRuntimeTest, T19) {
     EXPECT_TRUE(PeerSawEof(peer2));
     EXPECT_EQ(h.conn_close_cids.size(), 0u);
     EXPECT_EQ(h.conn_a.alp_user_data, nullptr);
-    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP),
-              1u);
+    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 1u);
     EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE),
               0u);
-    EXPECT_EQ(CountClientCalls(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-              0u);
-    EXPECT_EQ(CountClientCallsForCid(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                  h.cid_a),
-              1u);
+    EXPECT_EQ(
+        CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+        0u);
+    EXPECT_EQ(
+        CountClientCallsForCid(
+            ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
+        1u);
     EXPECT_EQ(CountClientCalls(
                   ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
               1u);
@@ -3406,11 +3409,10 @@ TEST_F(OdinXqcClientRuntimeTest, T20) {
     EXPECT_EQ(stream2.user_data_values.back(), stream2.user_data);
     EXPECT_EQ(stream1.close_calls, 0);
     EXPECT_EQ(stream2.close_calls, 0);
-    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP),
-              1u);
-    EXPECT_EQ(CountClientCalls(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
-              2u);
+    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_STOP), 1u);
+    EXPECT_EQ(
+        CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+        2u);
     EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
               0u);
 
@@ -3431,22 +3433,22 @@ TEST_F(OdinXqcClientRuntimeTest, T20) {
     EXPECT_EQ(stream2.recv_calls, recv_calls2);
     EXPECT_EQ(stream1.send_calls, send_calls1);
     EXPECT_EQ(stream2.send_calls, send_calls2);
-    EXPECT_EQ(CountClientCallsForStream(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
-                  AsStream(&stream1)),
-              1u);
-    EXPECT_EQ(CountClientCallsForStream(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
-                  AsStream(&stream2)),
-              1u);
+    EXPECT_EQ(
+        CountClientCallsForStream(
+            ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE, AsStream(&stream1)),
+        1u);
+    EXPECT_EQ(
+        CountClientCallsForStream(
+            ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE, AsStream(&stream2)),
+        1u);
     EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
               2u);
     EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE),
               0u);
-    EXPECT_EQ(CountClientCallsForCid(
-                  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                  h.cid_a),
-              1u);
+    EXPECT_EQ(
+        CountClientCallsForCid(
+            ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
+        1u);
     EXPECT_EQ(CountClientCalls(
                   ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
               1u);
@@ -3501,14 +3503,14 @@ TEST_F(OdinXqcClientRuntimeTest, T21) {
   EXPECT_EQ(after.cid_registered, before.cid_registered);
   EXPECT_EQ(after.handshake_done, before.handshake_done);
   EXPECT_EQ(after.closing, before.closing);
-  EXPECT_EQ(register_before,
-            CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN));
+  EXPECT_EQ(
+      register_before,
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN));
   EXPECT_EQ(conn_close_before,
             CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE));
-  EXPECT_EQ(unregister_before,
-            CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN));
+  EXPECT_EQ(
+      unregister_before,
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN));
   EXPECT_EQ(h.conn_b.alp_user_data, nullptr);
 
   odin_xqc_client_runtime_destroy(h.rt);
@@ -3537,21 +3539,20 @@ TEST_F(OdinXqcClientRuntimeTest, T21) {
   EXPECT_EQ(closing_after.handshake_done, closing_before.handshake_done);
   EXPECT_EQ(closing_after.closing, closing_before.closing);
   EXPECT_EQ(h.conn_c.alp_user_data, nullptr);
-  EXPECT_EQ(closing_register_before,
-            CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN));
+  EXPECT_EQ(
+      closing_register_before,
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_REGISTER_CONN));
   EXPECT_EQ(closing_conn_close_before,
             CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE));
-  EXPECT_EQ(closing_unregister_before,
-            CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN));
+  EXPECT_EQ(
+      closing_unregister_before,
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN));
   FireClose(&h.conn_a, &h.cid_a);
-  EXPECT_EQ(CountClientCalls(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
-            closing_unregister_before + 1);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      closing_unregister_before + 1);
   EXPECT_EQ(CountClientCallsForCid(
-                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN,
-                h.cid_a),
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
             1u);
   h.rt = nullptr;
 }
@@ -3618,7 +3619,7 @@ void FactoryDestroy(odin_transport_t *t) {
 }
 
 const odin_transport_vtable_t kFactoryTransportVtable = {
-    FactoryRead, FactoryWrite, FactoryShutdownWrite,
+    FactoryRead,        FactoryWrite, FactoryShutdownWrite,
     FactorySetInterest, FactoryError, FactoryDestroy,
 };
 
@@ -3695,8 +3696,8 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
         }
         errno = 0;
         EXPECT_EQ(odin_client_session_create_with_upstream_transport(
-                      loop_arg, owned, create_arg, &factory,
-                      FactoryDestroying, close_arg, &close_state, out_arg),
+                      loop_arg, owned, create_arg, &factory, FactoryDestroying,
+                      close_arg, &close_state, out_arg),
                   -1);
         EXPECT_EQ(errno, EINVAL);
         if (out_arg != nullptr) {
@@ -3718,9 +3719,9 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
                            nullptr);
 
   MakePair(&owned, &peer);
-  ASSERT_EQ(odin_client_session_test_fail_next_downstream_transport_create(
-                ENOMEM),
-            0);
+  ASSERT_EQ(
+      odin_client_session_test_fail_next_downstream_transport_create(ENOMEM),
+      0);
   FactoryState factory;
   ClientSessionFactoryState close_state;
   close_state.loop = loop;
@@ -3742,10 +3743,10 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
   close_state = ClientSessionFactoryState();
   close_state.loop = loop;
   out = reinterpret_cast<odin_client_session_t *>(0x77);
-  ASSERT_EQ(odin_event_loop_test_fail_next_kqueue_change(
-                loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD, ODIN_EVENT_READ,
-                EIO),
-            0);
+  ASSERT_EQ(
+      odin_event_loop_test_fail_next_kqueue_change(
+          loop, ODIN_EVENT_LOOP_TEST_KQUEUE_CHANGE_ADD, ODIN_EVENT_READ, EIO),
+      0);
   errno = 0;
   EXPECT_EQ(odin_client_session_create_with_upstream_transport(
                 loop, owned, FactoryCreate, &factory, FactoryDestroying,
@@ -3880,8 +3881,7 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
   std::string post_factory_failure;
   ASSERT_TRUE(RunUntil(loop, [&] {
     post_factory_failure += DrainFdNow(peer);
-    return factory.calls == 1 &&
-           close_state.on_close_calls == 1 &&
+    return factory.calls == 1 && close_state.on_close_calls == 1 &&
            post_factory_failure.size() >= sizeof(kHttp400) - 1;
   }));
   post_factory_failure += ReadAvailableFd(peer, 50);
@@ -3946,8 +3946,7 @@ class OdinXqcClientRuntimeScopeTest : public ::testing::Test {};
 
 TEST_F(OdinXqcClientRuntimeScopeTest, T12) {
   odin_xqc_client_runtime_test_reset();
-  const unsigned int before =
-      odin_xqc_client_runtime_test_record()->call_count;
+  const unsigned int before = odin_xqc_client_runtime_test_record()->call_count;
 
   odin_event_loop_t *loop = nullptr;
   ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
@@ -3981,8 +3980,7 @@ TEST_F(OdinXqcClientRuntimeScopeTest, T12) {
               (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
             return false;
           }
-          if (upstream_fd >= 0 &&
-              !SetNonblockNoAssert(upstream_fd)) {
+          if (upstream_fd >= 0 && !SetNonblockNoAssert(upstream_fd)) {
             return false;
           }
         }
@@ -4024,6 +4022,295 @@ TEST_F(OdinXqcClientRuntimeScopeTest, T12) {
   const std::string root = FindRepoRoot();
   ASSERT_EQ(RunScopeCheck(root), 0);
   EXPECT_EQ(odin_xqc_client_runtime_test_record()->call_count, before);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, RFC028T10ForceDestroyIsSynchronous) {
+  StartRuntime();
+  FireHandshake();
+  FakeStream live_stream;
+  int live_peer = -1;
+  AddStalledConnection(&live_stream, &live_peer);
+  ASSERT_NE(live_stream.user_data, nullptr);
+  int queued_owned = -1;
+  int queued_peer = -1;
+  MakePair(&queued_owned, &queued_peer);
+  ASSERT_EQ(odin_xqc_client_runtime_test_append_pending_fd(h.rt, queued_owned),
+            0)
+      << std::strerror(errno);
+  queued_owned = -1;
+  odin_xqc_client_runtime_test_state_t before_destroy;
+  ASSERT_EQ(odin_xqc_client_runtime_test_state(h.rt, &before_destroy), 0);
+  EXPECT_EQ(before_destroy.pending_fds, 1u);
+  EXPECT_EQ(before_destroy.live_sessions, 1u);
+  EXPECT_FALSE(PeerSawEof(queued_peer));
+  EXPECT_FALSE(PeerSawEof(live_peer));
+  h.engine_destroy_invokes_close = true;
+  const int live_recv_before = live_stream.recv_calls;
+  const int live_send_before = live_stream.send_calls;
+  const unsigned int stream_create_before =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI);
+  EXPECT_EQ(stream_create_before, 1u);
+  const unsigned int conn_close_before =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE);
+  const unsigned int stream_close_before =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE);
+  const unsigned int unregister_before = CountClientCallsForCid(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a);
+  const unsigned int alpn_unregister_before = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int udp_destroy_before =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
+  const unsigned int runtime_free_before =
+      odin_xqc_client_runtime_test_record()->runtime_free_calls;
+  const unsigned int runtime_free_call_before =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_RUNTIME_FREE);
+  odin_xqc_client_runtime_force_destroy(h.rt);
+  h.rt = nullptr;
+  EXPECT_TRUE(PeerSawEof(queued_peer));
+  EXPECT_TRUE(PeerSawEof(live_peer));
+  EXPECT_EQ(live_stream.user_data_values.back(), nullptr);
+  EXPECT_EQ(live_stream.close_calls, 1);
+  EXPECT_GT(live_stream.user_data_clear_order, 0);
+  EXPECT_GT(live_stream.close_order, live_stream.user_data_clear_order);
+  EXPECT_EQ(live_stream.recv_calls, live_recv_before);
+  EXPECT_EQ(live_stream.send_calls, live_send_before);
+  EXPECT_EQ(
+      CountClientCallsForStream(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
+                                AsStream(&live_stream)),
+      1u);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI),
+      stream_create_before);
+  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE),
+            stream_close_before + 1u);
+  EXPECT_EQ(h.engine_destroy_callback_close_calls, 1);
+  EXPECT_EQ(h.conn_close_cids.size(), 0u);
+  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE),
+            conn_close_before);
+  EXPECT_EQ(CountClientCallsForCid(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN, h.cid_a),
+            unregister_before + 1u);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            alpn_unregister_before + 1u);
+  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
+            udp_destroy_before + 1u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->runtime_free_calls,
+            runtime_free_before + 1u);
+  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_RUNTIME_FREE),
+            runtime_free_call_before + 1u);
+  close(queued_peer);
+  close(live_peer);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, RFC028T13ForceDestroyNullReceiverIsInert) {
+  odin_xqc_client_runtime_test_reset();
+  const unsigned int before_null =
+      odin_xqc_client_runtime_test_record()->force_destroy_null_calls;
+  const unsigned int before_free =
+      odin_xqc_client_runtime_test_record()->runtime_free_calls;
+  const unsigned int before_calls =
+      odin_xqc_client_runtime_test_record()->call_count;
+  const unsigned int before_udp_destroy =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY);
+  const unsigned int before_alpn_unregister = CountClientCalls(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN);
+  const unsigned int before_unregister =
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN);
+  odin_xqc_client_runtime_force_destroy(nullptr);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->force_destroy_null_calls,
+            before_null + 1u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->runtime_free_calls,
+            before_free);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->call_count, before_calls);
+  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
+            before_udp_destroy);
+  EXPECT_EQ(CountClientCalls(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_ENGINE_UNREGISTER_ALPN),
+            before_alpn_unregister);
+  EXPECT_EQ(
+      CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_UNREGISTER_CONN),
+      before_unregister);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, RFC028T17DefaultCreateNullPreconditions) {
+  DestroyFixtureLoop();
+  ExpectEventLoopLivenessZero();
+  odin_xqc_client_runtime_test_reset();
+  odin_event_loop_t *loop = nullptr;
+  ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+  struct sockaddr_in local = Loopback4(0);
+  struct sockaddr_in peer = Loopback4(4433);
+  odin_xqc_client_runtime_default_config_t config{};
+  config.loop = loop;
+  config.local_addr = reinterpret_cast<const struct sockaddr *>(&local);
+  config.local_addrlen = sizeof(local);
+  config.peer_addr = reinterpret_cast<const struct sockaddr *>(&peer);
+  config.peer_addrlen = sizeof(peer);
+  config.server_host = "127.0.0.1";
+
+  auto expect_invalid =
+      [&](const odin_xqc_client_runtime_default_config_t *bad_config) {
+        odin_xqc_client_runtime_t *sentinel =
+            reinterpret_cast<odin_xqc_client_runtime_t *>(0x2828);
+        errno = 0;
+        EXPECT_EQ(odin_xqc_client_runtime_create_default(bad_config, &sentinel),
+                  -1);
+        EXPECT_EQ(errno, EINVAL);
+        EXPECT_EQ(sentinel,
+                  reinterpret_cast<odin_xqc_client_runtime_t *>(0x2828));
+      };
+
+  expect_invalid(nullptr);
+  odin_xqc_client_runtime_t *sentinel =
+      reinterpret_cast<odin_xqc_client_runtime_t *>(0x2929);
+  errno = 0;
+  EXPECT_EQ(odin_xqc_client_runtime_create_default(&config, nullptr), -1);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x2929));
+  odin_xqc_client_runtime_default_config_t invalid = config;
+  invalid.loop = nullptr;
+  expect_invalid(&invalid);
+  invalid = config;
+  invalid.local_addr = nullptr;
+  expect_invalid(&invalid);
+  invalid = config;
+  invalid.peer_addr = nullptr;
+  expect_invalid(&invalid);
+  invalid = config;
+  invalid.server_host = nullptr;
+  expect_invalid(&invalid);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->default_create_calls, 0u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->udp_create_calls, 0u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->call_count, 0u);
+  odin_event_loop_destroy(loop);
+  ExpectEventLoopLivenessZero();
+}
+
+TEST_F(OdinXqcClientRuntimeTest, RFC028T18DefaultCreateAddressShapes) {
+  DestroyFixtureLoop();
+  ExpectEventLoopLivenessZero();
+  odin_xqc_client_runtime_test_reset();
+  odin_event_loop_t *loop = nullptr;
+  ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
+  struct sockaddr_in local4 = Loopback4(0);
+  struct sockaddr_in peer4 = Loopback4(4433);
+  struct sockaddr_in6 local6 = Loopback6(0);
+  struct sockaddr_in6 peer6 = Loopback6(4433);
+  odin_xqc_client_runtime_default_config_t config{};
+  config.loop = loop;
+  config.local_addr = reinterpret_cast<const struct sockaddr *>(&local4);
+  config.local_addrlen = sizeof(local4);
+  config.peer_addr = reinterpret_cast<const struct sockaddr *>(&peer4);
+  config.peer_addrlen = sizeof(peer4);
+  config.server_host = "127.0.0.1";
+
+  auto expect_invalid = [&](odin_xqc_client_runtime_default_config_t bad) {
+    odin_xqc_client_runtime_t *sentinel =
+        reinterpret_cast<odin_xqc_client_runtime_t *>(0x3838);
+    errno = 0;
+    EXPECT_EQ(odin_xqc_client_runtime_create_default(&bad, &sentinel), -1);
+    EXPECT_EQ(errno, EINVAL);
+    EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x3838));
+  };
+  odin_xqc_client_runtime_default_config_t invalid = config;
+  invalid.local_addrlen = sizeof(local4) - 1u;
+  expect_invalid(invalid);
+  invalid = config;
+  invalid.local_addrlen = sizeof(local4) + 1u;
+  expect_invalid(invalid);
+  struct sockaddr bad_family{};
+  bad_family.sa_family = AF_UNIX;
+  invalid = config;
+  invalid.local_addr = &bad_family;
+  invalid.local_addrlen = sizeof(bad_family);
+  expect_invalid(invalid);
+  invalid = config;
+  invalid.peer_addrlen = sizeof(peer4) - 1u;
+  expect_invalid(invalid);
+  invalid = config;
+  invalid.peer_addrlen = sizeof(peer4) + 1u;
+  expect_invalid(invalid);
+  invalid = config;
+  invalid.peer_addr = &bad_family;
+  invalid.peer_addrlen = sizeof(bad_family);
+  expect_invalid(invalid);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->default_create_calls, 0u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->udp_create_calls, 0u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->call_count, 0u);
+  odin_event_loop_destroy(loop);
+  ExpectEventLoopLivenessZero();
+
+  InstallOps();
+  h.expected_server_host = "127.0.0.1";
+  h.expected_no_crypto_flag = 0;
+  auto expect_default_fields = [] {
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()
+                  ->last_default_create.engine_config,
+              nullptr);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()
+                  ->last_default_create.transport_callbacks,
+              nullptr);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()->last_default_create.token,
+              nullptr);
+    EXPECT_EQ(
+        odin_xqc_client_runtime_test_record()->last_default_create.token_len,
+        0u);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()
+                  ->last_default_create.conn_ssl_config_value.cert_verify_flag,
+              0);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()
+                  ->last_default_create.no_crypto_flag,
+              0);
+  };
+  auto expect_success = [&](odin_xqc_client_runtime_default_config_t valid,
+                            unsigned int expected_successes,
+                            bool start_runtime) {
+    odin_event_loop_t *success_loop = nullptr;
+    ASSERT_EQ(odin_event_loop_create(&success_loop), 0) << std::strerror(errno);
+    valid.loop = success_loop;
+    odin_xqc_client_runtime_t *rt = nullptr;
+    ASSERT_EQ(odin_xqc_client_runtime_create_default(&valid, &rt), 0)
+        << std::strerror(errno);
+    EXPECT_NE(rt, nullptr);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()->default_create_calls,
+              expected_successes);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()->udp_create_calls,
+              expected_successes);
+    expect_default_fields();
+    if (start_runtime) {
+      ASSERT_EQ(odin_xqc_client_runtime_start(rt), 0);
+    }
+    odin_xqc_client_runtime_force_destroy(rt);
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()->runtime_free_calls,
+              expected_successes);
+    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
+              expected_successes);
+    odin_event_loop_destroy(success_loop);
+    ExpectEventLoopLivenessZero();
+  };
+
+  odin_xqc_client_runtime_default_config_t valid = config;
+  valid.local_addr = reinterpret_cast<const struct sockaddr *>(&local6);
+  valid.local_addrlen = sizeof(local6);
+  expect_success(valid, 1u, false);
+  EXPECT_EQ(
+      odin_xqc_client_runtime_test_record()->last_udp_create.local_addrlen,
+      static_cast<socklen_t>(sizeof(struct sockaddr_in6)));
+
+  valid = config;
+  valid.local_addr = reinterpret_cast<const struct sockaddr *>(&local4);
+  valid.local_addrlen = sizeof(local4);
+  valid.peer_addr = reinterpret_cast<const struct sockaddr *>(&peer6);
+  valid.peer_addrlen = sizeof(peer6);
+  SetExpectedPeer(reinterpret_cast<const struct sockaddr *>(&peer6),
+                  sizeof(peer6));
+  expect_success(valid, 2u, true);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->default_create_calls, 2u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->udp_create_calls, 2u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->runtime_free_calls, 2u);
+  EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
+            2u);
 }
 
 } // namespace

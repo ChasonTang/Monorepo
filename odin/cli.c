@@ -4,7 +4,8 @@
  * row below is what odin_cli_main writes and returns when odin_cli_parse
  * yields the corresponding status.
  *
- *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR"
+ *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR "
+ *              "[--transport tcp|quic]"
  *   <U_S>    = "usage: odin-server --listen ADDR [--transport tcp|quic] "
  *              "[--quic-cert FILE --quic-key FILE]"
  *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR' or "
@@ -80,6 +81,7 @@ static const char *cli_basename(const char *path) {
 static const struct option kClientLong[] = {
     {"listen", required_argument, NULL, 'l'},
     {"server", required_argument, NULL, 's'},
+    {"transport", required_argument, NULL, 1000},
     {"help", no_argument, NULL, 'h'},
     {NULL, 0, NULL, 0},
 };
@@ -100,6 +102,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   out->server_host = NULL;
   out->server_host_len = 0;
   out->server_port = 0;
+  out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_TCP;
   out->server_transport = ODIN_CLI_SERVER_TRANSPORT_TCP;
   out->quic_cert_file = NULL;
   out->quic_key_file = NULL;
@@ -226,10 +229,20 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       (mode == ODIN_CLI_MODE_CLIENT && server_arg != NULL)
           ? odin_host_addr_parse(server_arg, &sr)
           : ODIN_HOST_ADDR_OK;
+  odin_cli_client_transport_t selected_client_transport =
+      ODIN_CLI_CLIENT_TRANSPORT_TCP;
   odin_cli_server_transport_t selected_transport =
       ODIN_CLI_SERVER_TRANSPORT_TCP;
   int bad_transport = 0;
-  if (mode == ODIN_CLI_MODE_SERVER && transport_arg != NULL) {
+  if (mode == ODIN_CLI_MODE_CLIENT && transport_arg != NULL) {
+    if (strcmp(transport_arg, "tcp") == 0) {
+      selected_client_transport = ODIN_CLI_CLIENT_TRANSPORT_TCP;
+    } else if (strcmp(transport_arg, "quic") == 0) {
+      selected_client_transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
+    } else {
+      bad_transport = 1;
+    }
+  } else if (mode == ODIN_CLI_MODE_SERVER && transport_arg != NULL) {
     if (strcmp(transport_arg, "tcp") == 0) {
       selected_transport = ODIN_CLI_SERVER_TRANSPORT_TCP;
     } else if (strcmp(transport_arg, "quic") == 0) {
@@ -273,6 +286,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       out->server_host = sr.host;
       out->server_host_len = sr.host_len;
       out->server_port = sr.port;
+      out->client_transport = selected_client_transport;
     } else {
       out->server_transport = selected_transport;
       if (selected_transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
@@ -297,7 +311,8 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   odin_cli_args_t args;
   const odin_cli_status_t status = odin_cli_parse(argc, argv, &args);
 
-  static const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
+  static const char kUC[] =
+      "usage: odin-client --listen ADDR --server ADDR [--transport tcp|quic]";
   static const char kUS[] =
       "usage: odin-server --listen ADDR [--transport tcp|quic] "
       "[--quic-cert FILE --quic-key FILE]";
@@ -312,9 +327,12 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   switch (status) {
   case ODIN_CLI_OK:
     if (args.mode == ODIN_CLI_MODE_CLIENT) {
+      const odin_cli_client_config_t config = {
+          args.listen_port, args.server_host,      args.server_host_len,
+          args.server_port, args.client_transport,
+      };
       (void)fflush(out);
-      return odin_cli_run_client(args.listen_port, args.server_host,
-                                 args.server_host_len, args.server_port, err);
+      return odin_cli_run_client(&config, err);
     } else {
       const odin_cli_server_config_t config = {
           args.listen_port,

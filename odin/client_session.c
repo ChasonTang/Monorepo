@@ -136,9 +136,9 @@ static void cs_leave(odin_client_session_t *cs) {
   }
 }
 
-static odin_client_session_t *alloc_client_session(
-    odin_event_loop_t *loop, int conn_fd, odin_client_session_close_cb on_close,
-    void *user_data) {
+static odin_client_session_t *
+alloc_client_session(odin_event_loop_t *loop, int conn_fd,
+                     odin_client_session_close_cb on_close, void *user_data) {
   odin_client_session_t *cs = (odin_client_session_t *)calloc(1, sizeof(*cs));
   if (cs == NULL) {
     errno = ENOMEM;
@@ -244,7 +244,8 @@ int odin_client_session_create_with_upstream_transport(
 
 #if defined(ODIN_CLIENT_SESSION_TESTING)
   if (g_client_session_fail_next_downstream_transport_create_errno != 0) {
-    const int err = g_client_session_fail_next_downstream_transport_create_errno;
+    const int err =
+        g_client_session_fail_next_downstream_transport_create_errno;
     g_client_session_fail_next_downstream_transport_create_errno = 0;
     free(cs);
     errno = err;

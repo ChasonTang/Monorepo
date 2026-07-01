@@ -13,8 +13,8 @@
  *     persists on OK, HELP, ERR_UNKNOWN_FLAG, ERR_BAD_LISTEN_PORT,
  *     ERR_BAD_SERVER, and ERR_MISSING_REQUIRED.
  *   - Only OK fills `listen_port` / `server_host` / `server_host_len` /
- *     `server_port`. `listen_port` is the parsed decimal port supplied
- *     via `--listen`, or — when `--listen` is omitted or supplied as
+ *     `server_port` / `client_transport`. `listen_port` is the parsed decimal
+ * port supplied via `--listen`, or — when `--listen` is omitted or supplied as
  *     the empty string — the per-mode default
  *     (ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT for Client mode,
  *     ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER for Server mode). On every
@@ -77,6 +77,14 @@ typedef enum odin_cli_server_transport_t {
   ODIN_CLI_SERVER_TRANSPORT_QUIC,
 } odin_cli_server_transport_t;
 
+typedef enum odin_cli_client_transport_t {
+  ODIN_CLI_CLIENT_TRANSPORT_TCP = 0,
+  ODIN_CLI_CLIENT_TRANSPORT_QUIC = 1,
+#if defined(ODIN_CLI_CLIENT_TESTING)
+  ODIN_CLI_CLIENT_TRANSPORT_TEST_INVALID = 99,
+#endif
+} odin_cli_client_transport_t;
+
 typedef enum odin_cli_status_t {
   ODIN_CLI_OK = 0,
   ODIN_CLI_HELP,
@@ -95,6 +103,7 @@ typedef struct odin_cli_args_t {
   const char *server_host;
   size_t server_host_len;
   uint16_t server_port;
+  odin_cli_client_transport_t client_transport;
   odin_cli_server_transport_t server_transport;
   const char *quic_cert_file;
   const char *quic_key_file;

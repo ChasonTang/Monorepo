@@ -92,7 +92,8 @@ std::string Basename(const std::string &path) {
   return path.substr(pos + 1);
 }
 
-constexpr const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
+constexpr const char kUC[] =
+    "usage: odin-client --listen ADDR --server ADDR [--transport tcp|quic]";
 constexpr const char kUS[] =
     "usage: odin-server --listen ADDR [--transport tcp|quic] "
     "[--quic-cert FILE --quic-key FILE]";
@@ -405,6 +406,139 @@ TEST(OdinCliTest, T10CodecTestsCarryUnderRenamedBinary) {
     }
   }
   EXPECT_TRUE(found_odin_proto_suite);
+}
+
+namespace {
+
+void ExpectMainInvalidTransport(const char *transport) {
+  char out_buf[256];
+  char err_buf[512];
+  std::memset(out_buf, 0, sizeof(out_buf));
+  std::memset(err_buf, 0, sizeof(err_buf));
+  FILE *out = fmemopen(out_buf, sizeof(out_buf), "w");
+  FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+  ASSERT_NE(out, nullptr);
+  ASSERT_NE(err, nullptr);
+  MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                    "127.0.0.1:4433", "--transport", transport});
+  const int rc = odin_cli_main(argv.argc(), argv.argv(), out, err);
+  static_cast<void>(std::fclose(out));
+  static_cast<void>(std::fclose(err));
+  EXPECT_EQ(rc, 2);
+  EXPECT_STREQ(out_buf, "");
+  EXPECT_STREQ(
+      err_buf,
+      (std::string("odin: invalid --transport\n") + kUC + "\n").c_str());
+}
+
+} // namespace
+
+TEST(OdinRFC028ClientTransportTest, T1ParserAndMainTransportContract) {
+  {
+    MutableArgv argv(
+        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+  }
+  {
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:4433", "--transport", "tcp"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+  }
+  {
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:4433", "--transport", "quic"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
+  }
+  {
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:4433", "--transport", "udp"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_BAD_TRANSPORT);
+  }
+  {
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:4433", "--trans", "quic"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_UNKNOWN_FLAG);
+  }
+  {
+    MutableArgv argv({"odin-server", "--listen", "0", "--transport", "quic",
+                      "--quic-cert", "C", "--quic-key", "K"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+    EXPECT_STREQ(out.quic_cert_file, "C");
+    EXPECT_STREQ(out.quic_key_file, "K");
+  }
+
+  ExpectMainInvalidTransport("udp");
+  ExpectMainInvalidTransport("QUIC");
+}
+
+TEST(OdinRFC028ClientTransportTest, T14ParserPrecedenceAndTlsRejection) {
+  struct Case {
+    std::vector<std::string> tokens;
+    odin_cli_status_t expected;
+  };
+  const std::vector<Case> cases = {
+      {{"odin-client", "--help", "--transport", "udp"}, ODIN_CLI_HELP},
+      {{"odin-client", "--listen", "nope", "--server", "127.0.0.1:443",
+        "--transport", "udp"},
+       ODIN_CLI_ERR_BAD_LISTEN_PORT},
+      {{"odin-client", "--listen", "0", "--server", "127.0.0.1:bad",
+        "--transport", "udp"},
+       ODIN_CLI_ERR_BAD_SERVER},
+      {{"odin-client", "--listen", "0", "--transport", "udp"},
+       ODIN_CLI_ERR_MISSING_REQUIRED},
+      {{"odin-client", "--listen", "0", "--server", "127.0.0.1:443",
+        "--transport="},
+       ODIN_CLI_ERR_BAD_TRANSPORT},
+      {{"odin-client", "--listen", "0", "--server", "127.0.0.1:443",
+        "--quic-cert", "C"},
+       ODIN_CLI_ERR_UNKNOWN_FLAG},
+      {{"odin-client", "--listen", "0", "--server", "127.0.0.1:443",
+        "--quic-key", "K"},
+       ODIN_CLI_ERR_UNKNOWN_FLAG},
+      {{"odin-client", "--listen", "0", "--server", "127.0.0.1:443",
+        "--transport", "quic", "--quic-cert", "C", "--quic-key", "K"},
+       ODIN_CLI_ERR_UNKNOWN_FLAG},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.tokens.size() > 1 ? c.tokens[1] : c.tokens[0]);
+    MutableArgv argv(c.tokens);
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), c.expected);
+    if (c.expected != ODIN_CLI_OK) {
+      EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+    }
+  }
+}
+
+TEST(OdinRFC028ClientTransportTest, T16UnknownFlagPrecedesInvalidTransport) {
+  {
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:443", "--transport", "udp"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_BAD_TRANSPORT);
+  }
+  {
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:443", "--transport", "udp", "--quic-cert",
+                      "C"});
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_UNKNOWN_FLAG);
+  }
 }
 
 // ---------------------------------------------------------------------

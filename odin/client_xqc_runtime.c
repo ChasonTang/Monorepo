@@ -105,8 +105,9 @@ static xqc_int_t runtime_stream_close_notify(xqc_stream_t *stream,
 static void runtime_stream_closing_notify(xqc_stream_t *stream,
                                           xqc_int_t err_code,
                                           void *strm_user_data);
-static void runtime_client_session_upstream_destroying(
-    odin_transport_t *transport, void *factory_user_data);
+static void
+runtime_client_session_upstream_destroying(odin_transport_t *transport,
+                                           void *factory_user_data);
 static void runtime_client_session_on_close(odin_client_session_t *cs, int err,
                                             void *user_data);
 
@@ -204,12 +205,24 @@ int odin_xqc_client_runtime_test_state(
     errno = EINVAL;
     return -1;
   }
+  size_t pending_fds = 0;
+  for (const odin_xqc_client_pending_fd_t *node = rt->pending_head;
+       node != NULL; node = node->next) {
+    pending_fds += 1u;
+  }
+  size_t live_sessions = 0;
+  for (const odin_xqc_client_stream_ctx_t *stream_ctx = rt->sessions;
+       stream_ctx != NULL; stream_ctx = stream_ctx->session_next) {
+    live_sessions += 1u;
+  }
   out->conn = rt->conn;
   out->current_cid = rt->current_cid;
   out->cid_registered = rt->cid_registered;
   out->handshake_done = rt->handshake_done;
   out->closing = rt->closing;
   out->connect_errno = rt->connect_errno;
+  out->pending_fds = pending_fds;
+  out->live_sessions = live_sessions;
   return 0;
 }
 
@@ -255,8 +268,7 @@ int odin_xqc_client_runtime_test_fail_config_copy_alloc(
 #endif
 
 static void runtime_noop_save_token(const unsigned char *token,
-                                    uint32_t token_len,
-                                    void *conn_user_data) {
+                                    uint32_t token_len, void *conn_user_data) {
   const int saved = errno;
   (void)token;
   (void)token_len;
@@ -468,11 +480,10 @@ static xqc_int_t runtime_engine_unregister_alpn_call(xqc_engine_t *engine,
 
 static const xqc_cid_t *runtime_xqc_connect_call(
     xqc_engine_t *engine, const xqc_conn_settings_t *conn_settings,
-    const unsigned char *token, unsigned int token_len,
-    const char *server_host, int no_crypto_flag,
-    const xqc_conn_ssl_config_t *conn_ssl_config,
-    const struct sockaddr *peer_addr, socklen_t peer_addrlen,
-    const char *alpn, void *user_data) {
+    const unsigned char *token, unsigned int token_len, const char *server_host,
+    int no_crypto_flag, const xqc_conn_ssl_config_t *conn_ssl_config,
+    const struct sockaddr *peer_addr, socklen_t peer_addrlen, const char *alpn,
+    void *user_data) {
 #if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
   odin_xqc_client_runtime_test_call_t *call =
       runtime_test_append_call(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_XQC_CONNECT);
@@ -489,8 +500,8 @@ static const xqc_cid_t *runtime_xqc_connect_call(
         conn_ssl_config, peer_addr, peer_addrlen, alpn, user_data);
   } else {
     cid = xqc_connect(engine, conn_settings, token, token_len, server_host,
-                      no_crypto_flag, conn_ssl_config, peer_addr,
-                      peer_addrlen, alpn, user_data);
+                      no_crypto_flag, conn_ssl_config, peer_addr, peer_addrlen,
+                      alpn, user_data);
   }
   if (call != NULL) {
     call->int_result = cid != NULL ? 0 : -1;
@@ -569,8 +580,7 @@ runtime_get_conn_alp_user_data_by_stream_call(xqc_stream_t *stream) {
 #endif
 }
 
-static xqc_stream_t *
-runtime_stream_create_bidi_call(xqc_connection_t *conn) {
+static xqc_stream_t *runtime_stream_create_bidi_call(xqc_connection_t *conn) {
 #if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
   odin_xqc_client_runtime_test_call_t *call = runtime_test_append_call(
       ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI);
@@ -754,6 +764,11 @@ static void runtime_finish_destroy(odin_xqc_client_runtime_t *rt) {
   }
   rt->force_destroy_active = 0;
   runtime_free_copied_config(rt);
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  (void)runtime_test_append_call(
+      ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_RUNTIME_FREE);
+  g_client_xqc_test_record.runtime_free_calls += 1;
+#endif
   free(rt);
 }
 
@@ -767,8 +782,8 @@ static void runtime_pending_fds_destroy_all(odin_xqc_client_runtime_t *rt) {
   rt->pending_tail = NULL;
 }
 
-static void runtime_stream_ctx_unlink_session(
-    odin_xqc_client_stream_ctx_t *stream_ctx) {
+static void
+runtime_stream_ctx_unlink_session(odin_xqc_client_stream_ctx_t *stream_ctx) {
   odin_xqc_client_runtime_t *rt = stream_ctx->rt;
   if (stream_ctx->session_prev != NULL) {
     stream_ctx->session_prev->session_next = stream_ctx->session_next;
@@ -807,8 +822,9 @@ runtime_stream_ctx_link_session(odin_xqc_client_runtime_t *rt,
   rt->sessions = stream_ctx;
 }
 
-static void runtime_stream_ctx_link_map(
-    odin_xqc_client_runtime_t *rt, odin_xqc_client_stream_ctx_t *stream_ctx) {
+static void
+runtime_stream_ctx_link_map(odin_xqc_client_runtime_t *rt,
+                            odin_xqc_client_stream_ctx_t *stream_ctx) {
   stream_ctx->map_next = rt->streams_by_transport;
   if (rt->streams_by_transport != NULL) {
     rt->streams_by_transport->map_prev = stream_ctx;
@@ -828,8 +844,9 @@ runtime_find_stream_by_transport(odin_xqc_client_runtime_t *rt,
   return NULL;
 }
 
-static void runtime_destroy_stream_ctx_unlinked(
-    odin_xqc_client_stream_ctx_t *stream_ctx, int close_stream) {
+static void
+runtime_destroy_stream_ctx_unlinked(odin_xqc_client_stream_ctx_t *stream_ctx,
+                                    int close_stream) {
   xqc_stream_t *stream = stream_ctx->stream;
   odin_client_session_t *cs = stream_ctx->cs;
   stream_ctx->cs = NULL;
@@ -846,8 +863,8 @@ static void runtime_destroy_stream_ctx_unlinked(
   free(stream_ctx);
 }
 
-static void runtime_destroy_stream_ctx(
-    odin_xqc_client_stream_ctx_t *stream_ctx, int close_stream) {
+static void runtime_destroy_stream_ctx(odin_xqc_client_stream_ctx_t *stream_ctx,
+                                       int close_stream) {
   runtime_stream_ctx_unlink_session(stream_ctx);
   runtime_destroy_stream_ctx_unlinked(stream_ctx, close_stream);
 }
@@ -902,6 +919,17 @@ static int append_pending_local_fd(odin_xqc_client_runtime_t *rt, int conn_fd) {
   return 0;
 }
 
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+int odin_xqc_client_runtime_test_append_pending_fd(
+    odin_xqc_client_runtime_t *rt, int conn_fd) {
+  if (rt == NULL || conn_fd < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return append_pending_local_fd(rt, conn_fd);
+}
+#endif
+
 static int xqc_client_upstream_factory(odin_transport_ready_cb on_ready,
                                        void *ready_user_data,
                                        void *factory_user_data,
@@ -921,8 +949,8 @@ static int xqc_client_upstream_factory(odin_transport_ready_cb on_ready,
     }
     return -1;
   }
-  if (odin_xqc_stream_transport_create(stream, on_ready, ready_user_data, out) !=
-      0) {
+  if (odin_xqc_stream_transport_create(stream, on_ready, ready_user_data,
+                                       out) != 0) {
     const int saved = errno;
     (void)runtime_stream_close_call(stream);
     errno = saved;
@@ -976,7 +1004,8 @@ int odin_xqc_client_runtime_create(
     errno = EINVAL;
     return -1;
   }
-  if (runtime_validate_peer_addr(config->peer_addr, config->peer_addrlen) != 0) {
+  if (runtime_validate_peer_addr(config->peer_addr, config->peer_addrlen) !=
+      0) {
     return -1;
   }
   if (config->token_len > 0 && config->token == NULL) {
@@ -1045,7 +1074,8 @@ int odin_xqc_client_runtime_create(
   rt->app_callbacks.stream_cbs.stream_read_notify = runtime_stream_read_notify;
   rt->app_callbacks.stream_cbs.stream_write_notify =
       runtime_stream_write_notify;
-  rt->app_callbacks.stream_cbs.stream_close_notify = runtime_stream_close_notify;
+  rt->app_callbacks.stream_cbs.stream_close_notify =
+      runtime_stream_close_notify;
   rt->app_callbacks.stream_cbs.stream_closing_notify =
       runtime_stream_closing_notify;
 
@@ -1083,6 +1113,84 @@ int odin_xqc_client_runtime_create(
 #endif
   *out = rt;
   return 0;
+}
+
+int odin_xqc_client_runtime_create_default(
+    const odin_xqc_client_runtime_default_config_t *config,
+    odin_xqc_client_runtime_t **out) {
+  if (config == NULL || out == NULL || config->loop == NULL ||
+      config->local_addr == NULL || config->peer_addr == NULL ||
+      config->server_host == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (runtime_validate_peer_addr(config->local_addr, config->local_addrlen) !=
+      0) {
+    return -1;
+  }
+  if (runtime_validate_peer_addr(config->peer_addr, config->peer_addrlen) !=
+      0) {
+    return -1;
+  }
+
+  xqc_engine_ssl_config_t engine_ssl_config;
+  memset(&engine_ssl_config, 0, sizeof(engine_ssl_config));
+  xqc_engine_callback_t engine_callbacks;
+  memset(&engine_callbacks, 0, sizeof(engine_callbacks));
+  xqc_conn_settings_t conn_settings;
+  memset(&conn_settings, 0, sizeof(conn_settings));
+  xqc_conn_ssl_config_t conn_ssl_config;
+  memset(&conn_ssl_config, 0, sizeof(conn_ssl_config));
+
+  odin_xqc_client_runtime_config_t full_config;
+  memset(&full_config, 0, sizeof(full_config));
+  full_config.loop = config->loop;
+  full_config.local_addr = config->local_addr;
+  full_config.local_addrlen = config->local_addrlen;
+  full_config.peer_addr = config->peer_addr;
+  full_config.peer_addrlen = config->peer_addrlen;
+  full_config.server_host = config->server_host;
+  full_config.engine_config = NULL;
+  full_config.engine_ssl_config = &engine_ssl_config;
+  full_config.engine_callbacks = &engine_callbacks;
+  full_config.transport_callbacks = NULL;
+  full_config.conn_settings = &conn_settings;
+  full_config.conn_ssl_config = &conn_ssl_config;
+  full_config.token = NULL;
+  full_config.token_len = 0;
+  full_config.no_crypto_flag = 0;
+
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.default_create_calls += 1;
+  memset(&g_client_xqc_test_record.last_default_create, 0,
+         sizeof(g_client_xqc_test_record.last_default_create));
+  g_client_xqc_test_record.last_default_create.engine_config =
+      full_config.engine_config;
+  g_client_xqc_test_record.last_default_create.engine_ssl_config =
+      full_config.engine_ssl_config;
+  g_client_xqc_test_record.last_default_create.engine_ssl_config_value =
+      engine_ssl_config;
+  g_client_xqc_test_record.last_default_create.engine_callbacks =
+      full_config.engine_callbacks;
+  g_client_xqc_test_record.last_default_create.engine_callbacks_value =
+      engine_callbacks;
+  g_client_xqc_test_record.last_default_create.transport_callbacks =
+      full_config.transport_callbacks;
+  g_client_xqc_test_record.last_default_create.conn_settings =
+      full_config.conn_settings;
+  g_client_xqc_test_record.last_default_create.conn_settings_value =
+      conn_settings;
+  g_client_xqc_test_record.last_default_create.conn_ssl_config =
+      full_config.conn_ssl_config;
+  g_client_xqc_test_record.last_default_create.conn_ssl_config_value =
+      conn_ssl_config;
+  g_client_xqc_test_record.last_default_create.token = full_config.token;
+  g_client_xqc_test_record.last_default_create.token_len =
+      full_config.token_len;
+  g_client_xqc_test_record.last_default_create.no_crypto_flag =
+      full_config.no_crypto_flag;
+#endif
+  return odin_xqc_client_runtime_create(&full_config, out);
 }
 
 static void cleanup_failed_start_connection(odin_xqc_client_runtime_t *rt) {
@@ -1123,8 +1231,8 @@ int odin_xqc_client_runtime_start(odin_xqc_client_runtime_t *rt) {
   rt->connect_errno = 0;
   rt->startup_connecting = 1;
   const xqc_cid_t *cid = runtime_xqc_connect_call(
-      odin_xqc_udp_engine(rt->xu), &rt->conn_settings, rt->token,
-      rt->token_len, rt->server_host, rt->no_crypto_flag, &rt->conn_ssl_config,
+      odin_xqc_udp_engine(rt->xu), &rt->conn_settings, rt->token, rt->token_len,
+      rt->server_host, rt->no_crypto_flag, &rt->conn_ssl_config,
       (const struct sockaddr *)&rt->peer_addr_storage, rt->peer_addrlen,
       ODIN_XQC_CLIENT_ALPN, odin_xqc_udp_xqc_user_data(rt->xu));
   if (cid == NULL) {
@@ -1212,6 +1320,31 @@ void odin_xqc_client_runtime_destroy(odin_xqc_client_runtime_t *rt) {
   (void)runtime_maybe_finish_destroy(rt);
 }
 
+void odin_xqc_client_runtime_force_destroy(odin_xqc_client_runtime_t *rt) {
+  if (rt == NULL) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+    g_client_xqc_test_record.force_destroy_null_calls += 1;
+#endif
+    return;
+  }
+  rt->force_destroy_active = 1;
+  rt->destroy_pending = 1;
+  rt->closing = 1;
+  runtime_pending_fds_destroy_all(rt);
+  runtime_destroy_all_streams(rt, 1);
+  if (rt->conn != NULL) {
+    runtime_conn_set_alp_user_data_call(rt->conn, NULL);
+  }
+  if (rt->cid_registered) {
+    runtime_udp_unregister_conn_call(rt->xu, &rt->current_cid);
+    rt->cid_registered = 0;
+  }
+  rt->conn = NULL;
+  rt->connect_started = 0;
+  rt->handshake_done = 0;
+  runtime_finish_destroy(rt);
+}
+
 static int runtime_conn_create_notify(xqc_connection_t *conn,
                                       const xqc_cid_t *cid,
                                       void *conn_user_data,
@@ -1223,6 +1356,9 @@ static int runtime_conn_create_notify(xqc_connection_t *conn,
                  : NULL;
   if (rt == NULL) {
     return -1;
+  }
+  if (rt->force_destroy_active) {
+    return 0;
   }
   if (rt->conn != NULL || rt->closing) {
     rt->connect_errno = EALREADY;
@@ -1256,8 +1392,7 @@ static int runtime_conn_close_notify(xqc_connection_t *conn,
   if (rt->force_destroy_active) {
     return 0;
   }
-  if (rt->startup_connecting && !rt->connect_started &&
-      !rt->destroy_pending) {
+  if (rt->startup_connecting && !rt->connect_started && !rt->destroy_pending) {
     if (rt->cid_registered) {
       runtime_udp_unregister_conn_call(rt->xu, &rt->current_cid);
       rt->cid_registered = 0;
@@ -1287,7 +1422,8 @@ static void runtime_conn_handshake_finished(xqc_connection_t *conn,
   odin_xqc_client_runtime_t *rt =
       xu != NULL ? (odin_xqc_client_runtime_t *)odin_xqc_udp_app_user_data(xu)
                  : NULL;
-  if (rt == NULL || conn_proto_data != rt || rt->conn != conn || rt->closing) {
+  if (rt == NULL || conn_proto_data != rt || rt->conn != conn || rt->closing ||
+      rt->force_destroy_active) {
     return;
   }
   rt->handshake_done = 1;
@@ -1313,7 +1449,8 @@ static void runtime_conn_update_cid(xqc_connection_t *conn,
   odin_xqc_client_runtime_t *rt =
       xu != NULL ? (odin_xqc_client_runtime_t *)odin_xqc_udp_app_user_data(xu)
                  : NULL;
-  if (rt == NULL || rt->conn != conn || rt->closing) {
+  if (rt == NULL || rt->conn != conn || rt->closing ||
+      rt->force_destroy_active) {
     return;
   }
   if (runtime_udp_register_conn_call(rt->xu, new_cid) != 0) {
@@ -1335,10 +1472,9 @@ static void runtime_conn_update_cid(xqc_connection_t *conn,
 
 static xqc_int_t runtime_stream_read_notify(xqc_stream_t *stream,
                                             void *strm_user_data) {
-  odin_xqc_client_runtime_t *rt =
-      (odin_xqc_client_runtime_t *)runtime_get_conn_alp_user_data_by_stream_call(
-          stream);
-  if (rt == NULL || strm_user_data == NULL) {
+  odin_xqc_client_runtime_t *rt = (odin_xqc_client_runtime_t *)
+      runtime_get_conn_alp_user_data_by_stream_call(stream);
+  if (rt == NULL || strm_user_data == NULL || rt->force_destroy_active) {
     return XQC_OK;
   }
   if (runtime_find_stream_by_transport(rt, strm_user_data) == NULL) {
@@ -1349,10 +1485,9 @@ static xqc_int_t runtime_stream_read_notify(xqc_stream_t *stream,
 
 static xqc_int_t runtime_stream_write_notify(xqc_stream_t *stream,
                                              void *strm_user_data) {
-  odin_xqc_client_runtime_t *rt =
-      (odin_xqc_client_runtime_t *)runtime_get_conn_alp_user_data_by_stream_call(
-          stream);
-  if (rt == NULL || strm_user_data == NULL) {
+  odin_xqc_client_runtime_t *rt = (odin_xqc_client_runtime_t *)
+      runtime_get_conn_alp_user_data_by_stream_call(stream);
+  if (rt == NULL || strm_user_data == NULL || rt->force_destroy_active) {
     return XQC_OK;
   }
   if (runtime_find_stream_by_transport(rt, strm_user_data) == NULL) {
@@ -1363,10 +1498,9 @@ static xqc_int_t runtime_stream_write_notify(xqc_stream_t *stream,
 
 static xqc_int_t runtime_stream_close_notify(xqc_stream_t *stream,
                                              void *strm_user_data) {
-  odin_xqc_client_runtime_t *rt =
-      (odin_xqc_client_runtime_t *)runtime_get_conn_alp_user_data_by_stream_call(
-          stream);
-  if (rt == NULL || strm_user_data == NULL) {
+  odin_xqc_client_runtime_t *rt = (odin_xqc_client_runtime_t *)
+      runtime_get_conn_alp_user_data_by_stream_call(stream);
+  if (rt == NULL || strm_user_data == NULL || rt->force_destroy_active) {
     return XQC_OK;
   }
   odin_xqc_client_stream_ctx_t *stream_ctx =
@@ -1380,10 +1514,9 @@ static xqc_int_t runtime_stream_close_notify(xqc_stream_t *stream,
 static void runtime_stream_closing_notify(xqc_stream_t *stream,
                                           xqc_int_t err_code,
                                           void *strm_user_data) {
-  odin_xqc_client_runtime_t *rt =
-      (odin_xqc_client_runtime_t *)runtime_get_conn_alp_user_data_by_stream_call(
-          stream);
-  if (rt == NULL || strm_user_data == NULL) {
+  odin_xqc_client_runtime_t *rt = (odin_xqc_client_runtime_t *)
+      runtime_get_conn_alp_user_data_by_stream_call(stream);
+  if (rt == NULL || strm_user_data == NULL || rt->force_destroy_active) {
     return;
   }
   if (runtime_find_stream_by_transport(rt, strm_user_data) == NULL) {
@@ -1392,8 +1525,9 @@ static void runtime_stream_closing_notify(xqc_stream_t *stream,
   odin_xqc_stream_transport_closing_notify(stream, err_code, strm_user_data);
 }
 
-static void runtime_client_session_upstream_destroying(
-    odin_transport_t *transport, void *factory_user_data) {
+static void
+runtime_client_session_upstream_destroying(odin_transport_t *transport,
+                                           void *factory_user_data) {
   odin_xqc_client_stream_ctx_t *stream_ctx =
       (odin_xqc_client_stream_ctx_t *)factory_user_data;
   if (stream_ctx->transport == transport) {

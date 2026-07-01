@@ -29,7 +29,8 @@ typedef enum odin_xqc_client_runtime_test_call_kind_t {
   ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CONN_CLOSE,
   ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_GET_CONN_ALP_USER_DATA_BY_STREAM,
   ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI,
-  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE
+  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CLOSE,
+  ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_RUNTIME_FREE
 } odin_xqc_client_runtime_test_call_kind_t;
 
 typedef struct odin_xqc_client_runtime_test_call_t {
@@ -62,6 +63,22 @@ typedef struct odin_xqc_client_runtime_test_udp_create_record_t {
   void *app_user_data;
 } odin_xqc_client_runtime_test_udp_create_record_t;
 
+typedef struct odin_xqc_client_runtime_test_default_create_record_t {
+  const xqc_config_t *engine_config;
+  const xqc_engine_ssl_config_t *engine_ssl_config;
+  xqc_engine_ssl_config_t engine_ssl_config_value;
+  const xqc_engine_callback_t *engine_callbacks;
+  xqc_engine_callback_t engine_callbacks_value;
+  const xqc_transport_callbacks_t *transport_callbacks;
+  const xqc_conn_settings_t *conn_settings;
+  xqc_conn_settings_t conn_settings_value;
+  const xqc_conn_ssl_config_t *conn_ssl_config;
+  xqc_conn_ssl_config_t conn_ssl_config_value;
+  const unsigned char *token;
+  unsigned int token_len;
+  int no_crypto_flag;
+} odin_xqc_client_runtime_test_default_create_record_t;
+
 typedef struct odin_xqc_client_runtime_test_record_t {
   unsigned int call_count;
   unsigned int dropped_call_count;
@@ -69,6 +86,10 @@ typedef struct odin_xqc_client_runtime_test_record_t {
       calls[ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_CAP];
   unsigned int udp_create_calls;
   odin_xqc_client_runtime_test_udp_create_record_t last_udp_create;
+  unsigned int default_create_calls;
+  odin_xqc_client_runtime_test_default_create_record_t last_default_create;
+  unsigned int runtime_free_calls;
+  unsigned int force_destroy_null_calls;
 } odin_xqc_client_runtime_test_record_t;
 
 typedef struct odin_xqc_client_runtime_test_state_t {
@@ -78,6 +99,8 @@ typedef struct odin_xqc_client_runtime_test_state_t {
   int handshake_done;
   int closing;
   int connect_errno;
+  size_t pending_fds;
+  size_t live_sessions;
 } odin_xqc_client_runtime_test_state_t;
 
 typedef enum odin_xqc_client_runtime_test_config_copy_alloc_t {
@@ -88,18 +111,21 @@ typedef enum odin_xqc_client_runtime_test_config_copy_alloc_t {
 } odin_xqc_client_runtime_test_config_copy_alloc_t;
 
 typedef struct odin_xqc_client_runtime_test_ops_t {
-  xqc_int_t (*engine_register_alpn)(
-      xqc_engine_t *engine, const char *alpn, size_t alpn_len,
-      xqc_app_proto_callbacks_t *app_callbacks, void *user_data);
+  xqc_int_t (*engine_register_alpn)(xqc_engine_t *engine, const char *alpn,
+                                    size_t alpn_len,
+                                    xqc_app_proto_callbacks_t *app_callbacks,
+                                    void *user_data);
   xqc_int_t (*engine_unregister_alpn)(xqc_engine_t *engine, const char *alpn,
                                       size_t alpn_len);
-  const xqc_cid_t *(*xqc_connect)(
-      xqc_engine_t *engine, const xqc_conn_settings_t *conn_settings,
-      const unsigned char *token, unsigned int token_len,
-      const char *server_host, int no_crypto_flag,
-      const xqc_conn_ssl_config_t *conn_ssl_config,
-      const struct sockaddr *peer_addr, socklen_t peer_addrlen,
-      const char *alpn, void *user_data);
+  const xqc_cid_t *(*xqc_connect)(xqc_engine_t *engine,
+                                  const xqc_conn_settings_t *conn_settings,
+                                  const unsigned char *token,
+                                  unsigned int token_len,
+                                  const char *server_host, int no_crypto_flag,
+                                  const xqc_conn_ssl_config_t *conn_ssl_config,
+                                  const struct sockaddr *peer_addr,
+                                  socklen_t peer_addrlen, const char *alpn,
+                                  void *user_data);
   void (*conn_set_alp_user_data)(xqc_connection_t *conn, void *user_data);
   xqc_int_t (*conn_close)(xqc_engine_t *engine, const xqc_cid_t *cid);
   void *(*get_conn_alp_user_data_by_stream)(xqc_stream_t *stream);
@@ -123,6 +149,8 @@ int odin_xqc_client_runtime_test_fail_next_stream_context_alloc(
     odin_xqc_client_runtime_t *rt, int errnum);
 int odin_xqc_client_runtime_test_fail_next_pending_queue_append(
     odin_xqc_client_runtime_t *rt, int errnum);
+int odin_xqc_client_runtime_test_append_pending_fd(
+    odin_xqc_client_runtime_t *rt, int conn_fd);
 int odin_xqc_client_runtime_test_fail_config_copy_alloc(
     odin_xqc_client_runtime_test_config_copy_alloc_t site, int errnum);
 

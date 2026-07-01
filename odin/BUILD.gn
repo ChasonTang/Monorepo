@@ -66,6 +66,7 @@ source_set("odin_cli_client") {
   public_deps = [
     ":odin_accept_loop",
     ":odin_client_session",
+    ":odin_client_xqc_runtime",
     ":odin_core",
     ":odin_event_loop",
   ]

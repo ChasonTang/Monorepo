@@ -35,14 +35,27 @@ typedef struct odin_xqc_client_runtime_config_t {
   int no_crypto_flag;
 } odin_xqc_client_runtime_config_t;
 
+typedef struct odin_xqc_client_runtime_default_config_t {
+  odin_event_loop_t *loop;
+  const struct sockaddr *local_addr;
+  socklen_t local_addrlen;
+  const struct sockaddr *peer_addr;
+  socklen_t peer_addrlen;
+  const char *server_host;
+} odin_xqc_client_runtime_default_config_t;
+
 int odin_xqc_client_runtime_create(
     const odin_xqc_client_runtime_config_t *config,
+    odin_xqc_client_runtime_t **out);
+int odin_xqc_client_runtime_create_default(
+    const odin_xqc_client_runtime_default_config_t *config,
     odin_xqc_client_runtime_t **out);
 int odin_xqc_client_runtime_start(odin_xqc_client_runtime_t *rt);
 int odin_xqc_client_runtime_stop(odin_xqc_client_runtime_t *rt);
 int odin_xqc_client_runtime_add_connection(odin_xqc_client_runtime_t *rt,
                                            int conn_fd);
 void odin_xqc_client_runtime_destroy(odin_xqc_client_runtime_t *rt);
+void odin_xqc_client_runtime_force_destroy(odin_xqc_client_runtime_t *rt);
 
 #ifdef __cplusplus
 }
