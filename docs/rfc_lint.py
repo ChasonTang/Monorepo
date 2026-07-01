@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Mechanical RFC hard-cap checks.
+"""Mechanical RFC hard-cap and consistency checks.
 
 This script is intentionally narrow. It checks limits that should be enforced
-before human RFC review starts; semantic correctness still belongs to the RFC
-review prompt.
+before human RFC review starts, plus low-risk numeric consistency warnings.
+Semantic correctness still belongs to the RFC review prompt.
 """
 
 from __future__ import annotations
@@ -15,6 +15,13 @@ from pathlib import Path
 
 
 T_ROW_RE = re.compile(r"^\|\s*T\d+(?:[A-Za-z]|\.\d+)?\s*\|")
+T_ROW_ID_RE = re.compile(r"^\|\s*T(?P<num>\d+)(?:[A-Za-z]|\.\d+)?\s*\|")
+T_REF_RE = re.compile(r"\bT(?P<num>\d+)(?:[A-Za-z]|\.\d+)?\b")
+T_RANGE_RE = re.compile(
+    r"\bT(?P<start>\d+)(?:[A-Za-z]|\.\d+)?\s*[-–]\s*"
+    r"T(?P<end>\d+)(?:[A-Za-z]|\.\d+)?\b"
+)
+FULL_RANGE_WORD_RE = re.compile(r"(?i)\b(all|rows?|runs?|passes|executes)\b")
 DETAIL_RE = re.compile(r"^####\s+3\.2\.\d+\b")
 SECTION_1_RE = re.compile(r"^##\s+1\.")
 
@@ -76,6 +83,23 @@ def body_lines(lines: list[str]) -> list[str]:
     return result
 
 
+def body_line_pairs(lines: list[str]) -> list[tuple[int, str]]:
+    """Return (1-based line number, line) pairs counted against the body cap."""
+    result: list[tuple[int, str]] = []
+    skipping = False
+    for idx, line in enumerate(lines, start=1):
+        if line.startswith("## Revision Notes") or line.startswith(
+            "## Writing Instructions"
+        ):
+            skipping = True
+            continue
+        if skipping and SECTION_1_RE.match(line):
+            skipping = False
+        if not skipping:
+            result.append((idx, line))
+    return result
+
+
 def has_exception_before_section_1(lines: list[str]) -> bool:
     for line in lines:
         if SECTION_1_RE.match(line):
@@ -103,12 +127,18 @@ def subcase_count(line: str) -> int:
 
 def check_file(path: Path, args: argparse.Namespace) -> int:
     lines = path.read_text(encoding="utf-8").splitlines()
-    counted_body = body_lines(lines)
+    body_pairs = body_line_pairs(lines)
+    counted_body = [line for _, line in body_pairs]
     failures: list[str] = []
     warnings: list[str] = []
 
     body_count = len(counted_body)
     t_rows = [(idx + 1, line) for idx, line in enumerate(lines) if T_ROW_RE.match(line)]
+    t_ids = {
+        int(match.group("num"))
+        for _, line in t_rows
+        if (match := T_ROW_ID_RE.match(line)) is not None
+    }
     mechanism_surfaces = [
         idx + 1 for idx, line in enumerate(counted_body) if DETAIL_RE.match(line)
     ]
@@ -132,6 +162,17 @@ def check_file(path: Path, args: argparse.Namespace) -> int:
             f"§3.2 mechanism surfaces {len(mechanism_surfaces)} > "
             f"{args.max_mechanism_surfaces}"
         )
+
+    if t_ids:
+        max_t_id = max(t_ids)
+        missing_t_ids = sorted(set(range(1, max_t_id + 1)) - t_ids)
+        if missing_t_ids:
+            warnings.append(
+                "T row numeric gaps: missing "
+                + ", ".join(f"T{num}" for num in missing_t_ids[:8])
+                + (" ..." if len(missing_t_ids) > 8 else "")
+            )
+        check_t_reference_consistency(body_pairs, t_ids, max_t_id, warnings)
 
     for lineno, line in t_rows:
         row_len = len(line)
@@ -172,6 +213,69 @@ def check_file(path: Path, args: argparse.Namespace) -> int:
         print(f"  error: {failure}")
 
     return 1 if failures else 0
+
+
+def check_t_reference_consistency(
+    body_pairs: list[tuple[int, str]],
+    t_ids: set[int],
+    max_t_id: int,
+    warnings: list[str],
+) -> None:
+    """Warn on stale-looking T references without rejecting partial phase ranges."""
+    missing_refs: list[tuple[int, int]] = []
+    stale_full_ranges: list[tuple[int, int]] = []
+    reversed_ranges: list[tuple[int, int, int]] = []
+
+    for lineno, line in body_pairs:
+        ranges = list(T_RANGE_RE.finditer(line))
+        for match in ranges:
+            start = int(match.group("start"))
+            end = int(match.group("end"))
+            if start > end:
+                reversed_ranges.append((lineno, start, end))
+            for num in (start, end):
+                if num not in t_ids:
+                    missing_refs.append((lineno, num))
+
+        if len(ranges) == 1:
+            start = int(ranges[0].group("start"))
+            end = int(ranges[0].group("end"))
+            line_lower = line.lower()
+            looks_like_full_set = (
+                start == 1
+                and end != max_t_id
+                and " only" not in line_lower
+                and FULL_RANGE_WORD_RE.search(line) is not None
+            )
+            if looks_like_full_set:
+                stale_full_ranges.append((lineno, end))
+
+        for match in T_REF_RE.finditer(line):
+            num = int(match.group("num"))
+            if num not in t_ids:
+                missing_refs.append((lineno, num))
+
+    for lineno, start, end in reversed_ranges[:5]:
+        warnings.append(f"line {lineno}: T range T{start}-T{end} is reversed")
+
+    seen_missing: set[tuple[int, int]] = set()
+    for lineno, num in missing_refs:
+        key = (lineno, num)
+        if key in seen_missing:
+            continue
+        seen_missing.add(key)
+        warnings.append(f"line {lineno}: references T{num}, but no T{num} row exists")
+        if len(seen_missing) >= 8:
+            remaining = len(set(missing_refs)) - len(seen_missing)
+            if remaining > 0:
+                warnings.append(f"{remaining} additional missing T references omitted")
+            break
+
+    for lineno, end in stale_full_ranges[:5]:
+        warnings.append(
+            f"line {lineno}: T1-T{end} looks like a full-row range, "
+            f"but table ends at T{max_t_id}"
+        )
 
 
 def main(argv: list[str]) -> int:
