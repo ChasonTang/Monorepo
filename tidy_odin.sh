@@ -8,15 +8,14 @@
 # Usage:
 #   ./tidy_odin.sh                                  # all odin TUs, uses out/
 #   ./tidy_odin.sh odin/protocol.c                  # only selected TU(s)
-#   ./tidy_odin.sh --diff                           # only TUs changed vs origin/main
-#   ./tidy_odin.sh --diff HEAD~1                    # only TUs changed vs HEAD~1
+#   ./tidy_odin.sh --staged                         # only staged odin TU changes
 #   JOBS=4 ./tidy_odin.sh                           # limit parallelism
 #   BUILD_DIR=out/linux ./tidy_odin.sh              # CI / cross builds
 #
-# Diff mode heuristic: changed .c/.cc/.cpp files are tidied directly;
-# changed .h files also pull in their sibling .c (same dir, same basename)
+# Staged mode heuristic: staged .c/.cc/.cpp files are tidied directly;
+# staged .h files also pull in their sibling .c (same dir, same basename)
 # when present. Header-only changes with no sibling TU are skipped --
-# run without --diff to be exhaustive.
+# run without --staged to be exhaustive.
 
 set -euo pipefail
 
@@ -47,18 +46,17 @@ case "$JOBS" in
         ;;
 esac
 
-DIFF_MODE=0
-DIFF_BASE=""
+STAGED_MODE=0
 POSITIONAL=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --diff)
-            DIFF_MODE=1
+        --staged)
+            STAGED_MODE=1
             shift
-            if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then
-                DIFF_BASE="$1"
-                shift
-            fi
+            ;;
+        --diff)
+            echo "error: --diff has been replaced by --staged" >&2
+            exit 1
             ;;
         --)
             shift
@@ -78,13 +76,9 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-if [ "$DIFF_MODE" -eq 1 ] && [ "${#POSITIONAL[@]}" -gt 0 ]; then
-    echo "error: --diff cannot be combined with explicit files" >&2
+if [ "$STAGED_MODE" -eq 1 ] && [ "${#POSITIONAL[@]}" -gt 0 ]; then
+    echo "error: --staged cannot be combined with explicit files" >&2
     exit 1
-fi
-
-if [ "$DIFF_MODE" -eq 1 ] && [ -z "$DIFF_BASE" ]; then
-    DIFF_BASE="origin/main"
 fi
 
 if [ ! -x "$GN" ]; then
@@ -124,12 +118,8 @@ echo "regenerating $BUILD_DIR/compile_commands.json"
 "$GN" gen "$BUILD_DIR" --add-export-compile-commands="//odin/*" >/dev/null
 
 FILES=()
-if [ "$DIFF_MODE" -eq 1 ]; then
-    if ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$DIFF_BASE" >/dev/null; then
-        echo "error: diff base '$DIFF_BASE' not found in git" >&2
-        exit 1
-    fi
-    echo "collecting odin changes vs $DIFF_BASE"
+if [ "$STAGED_MODE" -eq 1 ]; then
+    echo "collecting staged odin changes"
     RAW=()
     while IFS= read -r rel; do
         [ -z "$rel" ] && continue
@@ -147,7 +137,7 @@ if [ "$DIFF_MODE" -eq 1 ]; then
                 fi
             done
         fi
-    done < <(git -C "$REPO_ROOT" diff --name-only --diff-filter=ACMRTUB "$DIFF_BASE" -- 'odin/**')
+    done < <(git -C "$REPO_ROOT" diff --cached --name-only --diff-filter=ACMRTUB -- 'odin/**')
     if [ "${#RAW[@]}" -gt 0 ]; then
         while IFS= read -r f; do
             FILES+=("$f")
@@ -194,8 +184,8 @@ STATUS=0
 COUNT="${#FILES[@]}"
 
 if [ "$COUNT" -eq 0 ]; then
-    if [ "$DIFF_MODE" -eq 1 ]; then
-        echo "no odin C/C++ translation units changed vs $DIFF_BASE"
+    if [ "$STAGED_MODE" -eq 1 ]; then
+        echo "no staged odin C/C++ translation units found"
     else
         echo "no C/C++ translation units found under $ODIN_DIR"
     fi
