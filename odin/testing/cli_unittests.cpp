@@ -132,7 +132,7 @@ TEST(OdinCliTest, T1ClientBasenameBothFlagsShortLong) {
 // T2 — Server basename with listen flag, short and long forms.
 TEST(OdinCliTest, T2ServerBasenameListenFlagShortLong) {
   {
-    MutableArgv argv({"odin-server", "--listen", "4433"});
+    MutableArgv argv({"odin-server", "--transport", "tcp", "--listen", "4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
@@ -142,7 +142,8 @@ TEST(OdinCliTest, T2ServerBasenameListenFlagShortLong) {
     EXPECT_EQ(out.server_port, 0);
   }
   {
-    MutableArgv argv({"/usr/local/bin/odin-server", "-l", "4433"});
+    MutableArgv argv(
+        {"/usr/local/bin/odin-server", "--transport", "tcp", "-l", "4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
@@ -182,9 +183,8 @@ TEST(OdinCliTest, T3UnknownOrMissingBasename) {
 
 // T4 — Missing required flag carries mode for usage-line selection.
 // RFC-006 removes the `--listen` requirement, so the prior
-// `{"odin-client", "-s", …}` and `{"odin-server"}` cases now return OK
-// and are covered by RFC-006 T1; only the `--server`-required case
-// remains.
+// `{"odin-client", "-s", …}` case is covered by RFC-006 T1; only the
+// `--server`-required case remains.
 TEST(OdinCliTest, T4MissingRequiredFlagCarriesMode) {
   struct Case {
     std::vector<std::string> tokens;
@@ -296,7 +296,9 @@ TEST(OdinCliTest, T7GetoptGlobalsRestored) {
        ODIN_CLI_MODE_CLIENT},
       {{"odin-client"}, ODIN_CLI_ERR_MISSING_REQUIRED, ODIN_CLI_MODE_CLIENT},
       {{"odin"}, ODIN_CLI_ERR_UNKNOWN_MODE, ODIN_CLI_MODE_UNKNOWN},
-      {{"odin-server", "-l", "4433"}, ODIN_CLI_OK, ODIN_CLI_MODE_SERVER},
+      {{"odin-server", "--transport", "tcp", "-l", "4433"},
+       ODIN_CLI_OK,
+       ODIN_CLI_MODE_SERVER},
   };
   for (const auto &c : sequence) {
     MutableArgv argv(c.tokens);
@@ -439,7 +441,7 @@ TEST(OdinRFC028ClientTransportTest, T1ParserAndMainTransportContract) {
         {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
-    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
   }
   {
     MutableArgv argv({"odin-client", "--listen", "0", "--server",
@@ -560,11 +562,12 @@ TEST(OdinCliListenPortTest, T1PerModeDefaultWhenListenOmitted) {
     EXPECT_EQ(out.server_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
   }
   {
-    MutableArgv argv({"odin-server"});
+    MutableArgv argv({"odin-server", "--quic-cert", "C", "--quic-key", "K"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
     EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
+    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
     EXPECT_EQ(out.server_host, nullptr);
     EXPECT_EQ(out.server_host_len, static_cast<size_t>(0));
     EXPECT_EQ(out.server_port, 0);
@@ -580,10 +583,12 @@ TEST(OdinCliListenPortTest, T2EmptyListenValueResolvesToDefault) {
     EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT);
   }
   {
-    MutableArgv argv({"odin-server", "-l", ""});
+    MutableArgv argv(
+        {"odin-server", "-l", "", "--quic-cert", "C", "--quic-key", "K"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
+    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
   }
 }
 
@@ -598,7 +603,7 @@ TEST(OdinCliListenPortTest, T3ValidDigitStringParsesToExactPort) {
       {"8443", 8443}, {"65535", 65535}, {"00080", 80},
   };
   for (const auto &c : cases) {
-    MutableArgv argv({"odin-server", "-l", c.port});
+    MutableArgv argv({"odin-server", "--transport", "tcp", "-l", c.port});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK)
         << "port=" << c.port;

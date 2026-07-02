@@ -833,8 +833,10 @@ PausedRuntimeChild ForkPausedRuntimeChild(uint16_t server_port,
     char a3[] = "--server";
     std::string server = "127.0.0.1:" + std::to_string(server_port);
     char *a4 = &server[0];
-    char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
-    const int rc = odin_cli_main(5, argv, stdout, stderr);
+    char a5[] = "--transport";
+    char a6[] = "tcp";
+    char *const argv[] = {a0, a1, a2, a3, a4, a5, a6, nullptr};
+    const int rc = odin_cli_main(7, argv, stdout, stderr);
 
     DirectChildSnapshot snap{};
     snap.rc = rc;
@@ -1267,7 +1269,6 @@ TEST(OdinRFC028ClientTransportTest, T2TcpPathPreserved) {
     std::vector<std::string> extra_args;
   };
   const Case cases[] = {
-      {"omitted", {}},
       {"explicit_tcp", {"--transport", "tcp"}},
   };
   for (const auto &c : cases) {
@@ -1777,8 +1778,9 @@ TEST(OdinCliClientProcessTest, T1EphemeralStartupReportsReadyLoopback) {
   ASSERT_FALSE(g_test_argv0.empty());
   const std::string client_path = Dirname(g_test_argv0) + "/odin-client";
 
-  SpawnedChild child = SpawnOdinClient(
-      client_path, {"--listen", "0", "--server", "127.0.0.1:4433"});
+  SpawnedChild child =
+      SpawnOdinClient(client_path, {"--transport", "tcp", "--listen", "0",
+                                    "--server", "127.0.0.1:4433"});
   ASSERT_NE(child.pid, -1);
   ChildGuard guard(child.pid);
 
@@ -1854,8 +1856,10 @@ TEST(OdinCliClientUnitTest, T3AcceptedSetupFailureClosesOnlyThatFd) {
       char a3[] = "--server";
       std::string server = "127.0.0.1:" + std::to_string(upstream_port);
       char *a4 = &server[0];
-      char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
-      const int rc = odin_cli_main(5, argv, stdout, stderr);
+      char a5[] = "--transport";
+      char a6[] = "tcp";
+      char *const argv[] = {a0, a1, a2, a3, a4, a5, a6, nullptr};
+      const int rc = odin_cli_main(7, argv, stdout, stderr);
       _exit(rc);
     }
     close(err_pipe[1]);
@@ -1912,8 +1916,8 @@ TEST(OdinCliClientUnitTest, T4ParsedNonIpv4FailsBeforeBanner) {
   const std::vector<std::string> servers = {"example.com:443", "[::1]:443"};
   for (const auto &server_arg : servers) {
     SCOPED_TRACE(server_arg);
-    MutableArgv parse_argv(
-        {"odin-client", "--listen", "0", "--server", server_arg.c_str()});
+    MutableArgv parse_argv({"odin-client", "--transport", "tcp", "--listen",
+                            "0", "--server", server_arg.c_str()});
     odin_cli_args_t parsed{};
     ASSERT_EQ(odin_cli_parse(parse_argv.argc(), parse_argv.argv(), &parsed),
               ODIN_CLI_OK);
@@ -1934,8 +1938,8 @@ TEST(OdinCliClientUnitTest, T4ParsedNonIpv4FailsBeforeBanner) {
       FILE *err = fdopen(err_pipe[1], "w");
       odin_cli_client_test_reset_liveness();
       odin_event_loop_test_reset_liveness();
-      MutableArgv argv(
-          {"odin-client", "--listen", "0", "--server", server_arg.c_str()});
+      MutableArgv argv({"odin-client", "--transport", "tcp", "--listen", "0",
+                        "--server", server_arg.c_str()});
       const int rc = odin_cli_main(argv.argc(), argv.argv(), out, err);
       (void)fflush(out);
       (void)fflush(err);
@@ -2136,8 +2140,9 @@ TEST(OdinCliClientUnitTest, T7StartupFailureMatrixAndBindCapture) {
   const int occupied = OpenIpv4Listener("127.0.0.1", 0, false, &occupied_port);
   ASSERT_GE(occupied, 0) << std::strerror(errno);
   SpawnedChild child =
-      SpawnOdinClient(client_path, {"--listen", std::to_string(occupied_port),
-                                    "--server", "127.0.0.1:4433"});
+      SpawnOdinClient(client_path, {"--transport", "tcp", "--listen",
+                                    std::to_string(occupied_port), "--server",
+                                    "127.0.0.1:4433"});
   ASSERT_NE(child.pid, -1);
   ChildGuard prod_guard(child.pid);
   int st = 0;
@@ -2216,8 +2221,10 @@ TEST(OdinCliClientUnitTest, T7StartupFailureMatrixAndBindCapture) {
     char a3[] = "--server";
     std::string server = "127.0.0.1:" + std::to_string(invalid_server_port);
     char *a4 = &server[0];
-    char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
-    const int rc = odin_cli_main(5, argv, stdout, stderr);
+    char a5[] = "--transport";
+    char a6[] = "tcp";
+    char *const argv[] = {a0, a1, a2, a3, a4, a5, a6, nullptr};
+    const int rc = odin_cli_main(7, argv, stdout, stderr);
     _exit(rc);
   }
   close(invalid_out_pipe[1]);
@@ -2324,8 +2331,10 @@ TEST(OdinCliClientUnitTest, T7StartupFailureMatrixAndBindCapture) {
     char *a2 = &ps[0];
     char a3[] = "--server";
     char a4[] = "127.0.0.1:4433";
-    char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
-    const int rc = odin_cli_main(5, argv, stdout, err);
+    char a5[] = "--transport";
+    char a6[] = "tcp";
+    char *const argv[] = {a0, a1, a2, a3, a4, a5, a6, nullptr};
+    const int rc = odin_cli_main(7, argv, stdout, err);
     (void)fclose(err);
     EXPECT_EQ(rc, 1);
     EXPECT_STREQ(err_buf, fc.line);

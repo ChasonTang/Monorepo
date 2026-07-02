@@ -395,7 +395,8 @@ TEST(OdinCliServerProcessTest, T1EphemeralStartupReportsActualPort) {
   ASSERT_FALSE(g_test_argv0.empty());
   const std::string server_path = Dirname(g_test_argv0) + "/odin-server";
 
-  ChildHandle child = SpawnOdinServer(server_path, {"--listen", "0"});
+  ChildHandle child =
+      SpawnOdinServer(server_path, {"--transport", "tcp", "--listen", "0"});
   ASSERT_NE(child.pid, -1);
   ASSERT_GE(child.stderr_fd, 0);
 
@@ -431,7 +432,8 @@ TEST(OdinCliServerProcessTest, T2SigintGracefulShutdown) {
   ASSERT_FALSE(g_test_argv0.empty());
   const std::string server_path = Dirname(g_test_argv0) + "/odin-server";
 
-  ChildHandle child = SpawnOdinServer(server_path, {"--listen", "0"});
+  ChildHandle child =
+      SpawnOdinServer(server_path, {"--transport", "tcp", "--listen", "0"});
   ASSERT_NE(child.pid, -1);
 
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
@@ -480,8 +482,8 @@ TEST(OdinCliServerProcessTest, T3BindCollisionDoesNotDisturb) {
   const int parent_listener = OpenIpv4ListenerAny(0, &port);
   ASSERT_GE(parent_listener, 0) << std::strerror(errno);
 
-  ChildHandle child =
-      SpawnOdinServer(server_path, {"--listen", std::to_string(port)});
+  ChildHandle child = SpawnOdinServer(
+      server_path, {"--transport", "tcp", "--listen", std::to_string(port)});
   ASSERT_NE(child.pid, -1);
 
   int wstatus = 0;
@@ -523,7 +525,8 @@ TEST(OdinCliServerProcessTest, T4DenyLoopbackUpstream) {
   const int upstream_listener = OpenLoopbackListener(&upstream_port);
   ASSERT_GE(upstream_listener, 0) << std::strerror(errno);
 
-  ChildHandle child = SpawnOdinServer(server_path, {"--listen", "0"});
+  ChildHandle child =
+      SpawnOdinServer(server_path, {"--transport", "tcp", "--listen", "0"});
   ASSERT_NE(child.pid, -1);
 
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
@@ -588,10 +591,12 @@ TEST(OdinCliServerProcessTest, T4AllowPublicIpv4ReachesDialBoundary) {
     dup2(stderr_pipe[1], STDERR_FILENO);
     odin_cli_server_test_set_dial_start_probe_fd(probe_pipe[1], ETIMEDOUT);
     char arg0[] = "odin-server";
-    char arg1[] = "--listen";
-    char arg2[] = "0";
-    char *const child_argv[] = {arg0, arg1, arg2, nullptr};
-    const int rc = odin_cli_main(3, child_argv, stdout, stderr);
+    char arg1[] = "--transport";
+    char arg2[] = "tcp";
+    char arg3[] = "--listen";
+    char arg4[] = "0";
+    char *const child_argv[] = {arg0, arg1, arg2, arg3, arg4, nullptr};
+    const int rc = odin_cli_main(5, child_argv, stdout, stderr);
     (void)write(port_pipe[1], &rc, sizeof(rc));
     _exit(rc);
   }
@@ -822,11 +827,13 @@ TEST(OdinCliServerUnitTest, T6SetupFailureCleanupMatrix) {
       FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
       ASSERT_NE(err, nullptr);
       char a0[] = "odin-server";
-      char a1[] = "--listen";
+      char a1[] = "--transport";
+      char a2[] = "tcp";
+      char a3[] = "--listen";
       std::string ps = port_s;
-      char *a2 = &ps[0];
-      char *const argv[] = {a0, a1, a2, nullptr};
-      const int rc = odin_cli_main(3, argv, stdout, err);
+      char *a4 = &ps[0];
+      char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
+      const int rc = odin_cli_main(5, argv, stdout, err);
       (void)fclose(err);
       EXPECT_EQ(rc, 1) << "fp=" << static_cast<int>(fc.fp);
       EXPECT_STREQ(err_buf, fc.line) << "fp=" << static_cast<int>(fc.fp);
@@ -878,11 +885,13 @@ TEST(OdinCliServerUnitTest, T6SetupFailureCleanupMatrix) {
         close(err_pipe[0]);
         dup2(err_pipe[1], STDERR_FILENO);
         char a0[] = "odin-server";
-        char a1[] = "--listen";
+        char a1[] = "--transport";
+        char a2[] = "tcp";
+        char a3[] = "--listen";
         std::string ps = port_s;
-        char *a2 = &ps[0];
-        char *const argv[] = {a0, a1, a2, nullptr};
-        const int rc = odin_cli_main(3, argv, stdout, stderr);
+        char *a4 = &ps[0];
+        char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
+        const int rc = odin_cli_main(5, argv, stdout, stderr);
         odin_cli_server_test_liveness_t live{};
         odin_event_loop_test_liveness_t elive{};
         (void)odin_cli_server_test_liveness(&live);
@@ -990,10 +999,12 @@ TEST(OdinCliServerUnitTest, T7GracefulShutdownCleanupAndHandlers) {
     (void)sigaction(SIGTERM, &sa, nullptr);
 
     char a0[] = "odin-server";
-    char a1[] = "--listen";
-    char a2[] = "0";
-    char *const argv[] = {a0, a1, a2, nullptr};
-    const int rc = odin_cli_main(3, argv, stdout, stderr);
+    char a1[] = "--transport";
+    char a2[] = "tcp";
+    char a3[] = "--listen";
+    char a4[] = "0";
+    char *const argv[] = {a0, a1, a2, a3, a4, nullptr};
+    const int rc = odin_cli_main(5, argv, stdout, stderr);
 
     odin_cli_server_test_liveness_t live{};
     odin_event_loop_test_liveness_t elive{};

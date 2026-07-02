@@ -230,9 +230,9 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
           ? odin_host_addr_parse(server_arg, &sr)
           : ODIN_HOST_ADDR_OK;
   odin_cli_client_transport_t selected_client_transport =
-      ODIN_CLI_CLIENT_TRANSPORT_TCP;
+      ODIN_CLI_CLIENT_TRANSPORT_QUIC;
   odin_cli_server_transport_t selected_transport =
-      ODIN_CLI_SERVER_TRANSPORT_TCP;
+      ODIN_CLI_SERVER_TRANSPORT_QUIC;
   int bad_transport = 0;
   if (mode == ODIN_CLI_MODE_CLIENT && transport_arg != NULL) {
     if (strcmp(transport_arg, "tcp") == 0) {

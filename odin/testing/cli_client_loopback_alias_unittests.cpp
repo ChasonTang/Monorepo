@@ -578,7 +578,7 @@ TEST(OdinCliClientLoopbackAliasTest,
   ASSERT_NE(target_port, upstream_port);
 
   const SpawnedChild child = SpawnOdinClient(
-      client_path, {"--listen", "0", "--server",
+      client_path, {"--transport", "tcp", "--listen", "0", "--server",
                     std::string("127.0.0.2:") + std::to_string(upstream_port)});
   ASSERT_NE(child.pid, -1);
   ChildGuard guard(child.pid);
