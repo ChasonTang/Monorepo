@@ -27,20 +27,10 @@ int odin_cli_server_test_fail_next(odin_cli_server_test_failpoint_t fp,
     return -1;
   }
   switch (fp) {
-  case ODIN_CLI_SERVER_TEST_FAIL_SOCKET:
-  case ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR:
-  case ODIN_CLI_SERVER_TEST_FAIL_FCNTL_GETFL:
-  case ODIN_CLI_SERVER_TEST_FAIL_FCNTL_SETFL:
-  case ODIN_CLI_SERVER_TEST_FAIL_BIND:
-  case ODIN_CLI_SERVER_TEST_FAIL_LISTEN:
-  case ODIN_CLI_SERVER_TEST_FAIL_GETSOCKNAME:
   case ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_CREATE:
-  case ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE:
   case ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGINT:
   case ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGTERM:
   case ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START:
-  case ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_RUN:
-  case ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR:
   case ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_CREATE:
   case ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_START:
   case ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_LOCAL_ADDR:
@@ -56,8 +46,6 @@ int odin_cli_server_test_fail_next(odin_cli_server_test_failpoint_t fp,
 
 void odin_cli_server_test_reset_liveness(void) {
   g_live_listeners = 0;
-  g_live_runtimes = 0;
-  g_last_cleanup_runtime_inflight = 0;
   g_live_xqc_runtimes = 0;
   memset(&g_filter_record, 0, sizeof(g_filter_record));
   g_last_bind_addr_recorded = 0;
@@ -82,8 +70,6 @@ int odin_cli_server_test_liveness(odin_cli_server_test_liveness_t *out) {
     return -1;
   }
   out->live_listeners = g_live_listeners;
-  out->live_runtimes = g_live_runtimes;
-  out->last_cleanup_runtime_inflight = g_last_cleanup_runtime_inflight;
   out->live_xqc_runtimes = g_live_xqc_runtimes;
   return 0;
 }

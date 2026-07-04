@@ -23,20 +23,10 @@ extern "C" {
 #endif
 
 typedef enum odin_cli_server_test_failpoint_t {
-  ODIN_CLI_SERVER_TEST_FAIL_SOCKET = 1,
-  ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR = 2,
-  ODIN_CLI_SERVER_TEST_FAIL_FCNTL_GETFL = 3,
-  ODIN_CLI_SERVER_TEST_FAIL_FCNTL_SETFL = 4,
-  ODIN_CLI_SERVER_TEST_FAIL_BIND = 5,
-  ODIN_CLI_SERVER_TEST_FAIL_LISTEN = 6,
-  ODIN_CLI_SERVER_TEST_FAIL_GETSOCKNAME = 7,
   ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_CREATE = 8,
-  ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE = 9,
   ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGINT = 10,
   ODIN_CLI_SERVER_TEST_FAIL_SIGACTION_SIGTERM = 11,
   ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START = 12,
-  ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_RUN = 13,
-  ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR = 14,
   ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_CREATE = 100,
   ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_START = 101,
   ODIN_CLI_SERVER_TEST_FAIL_XQC_SERVER_RUNTIME_LOCAL_ADDR = 102,
@@ -45,17 +35,12 @@ typedef enum odin_cli_server_test_failpoint_t {
 
 typedef struct odin_cli_server_test_liveness_t {
   size_t live_listeners;
-  size_t live_runtimes;
-  size_t last_cleanup_runtime_inflight;
   size_t live_xqc_runtimes;
 } odin_cli_server_test_liveness_t;
 
 typedef struct odin_cli_server_test_filter_record_t {
-  unsigned int tcp_set_count;
   unsigned int quic_set_count;
-  odin_server_session_dial_filter_cb tcp_cb;
   odin_server_session_dial_filter_cb quic_cb;
-  void *tcp_user_data;
   void *quic_user_data;
 } odin_cli_server_test_filter_record_t;
 

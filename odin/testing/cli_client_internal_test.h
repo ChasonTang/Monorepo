@@ -34,8 +34,6 @@ typedef enum odin_cli_client_test_failpoint_t {
   ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_ERROR = 15,
   ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR = 16,
   ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR = 17,
-  ODIN_CLI_CLIENT_TEST_FAIL_NEXT_SESSION_ENTRY_ALLOC = 18,
-  ODIN_CLI_CLIENT_TEST_FAIL_NEXT_CLIENT_SESSION_CREATE = 19,
   ODIN_CLI_CLIENT_TEST_FAILPOINT_INVALID = 99,
   ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE = 100,
   ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_START = 101,
@@ -45,8 +43,6 @@ typedef enum odin_cli_client_test_failpoint_t {
 typedef struct odin_cli_client_test_liveness_t {
   size_t live_listeners;
   size_t live_accept_loops;
-  size_t live_sessions;
-  size_t last_cleanup_sessions;
   size_t live_xqc_client_runtimes;
   size_t quic_runtime_create_calls;
   size_t quic_runtime_start_calls;
@@ -86,8 +82,6 @@ int odin_cli_client_test_pending_failpoint(
     odin_cli_client_test_failpoint_t *out);
 int odin_cli_client_test_set_progress_fd(int fd, size_t min_inflight_sessions);
 int odin_cli_client_test_set_runtime_trigger_fd(int fd);
-int odin_cli_client_test_set_idle_snapshot_fd(int fd,
-                                              size_t min_closed_sessions);
 
 #ifdef __cplusplus
 }

@@ -401,8 +401,6 @@ void ExpectZeroLiveness(const LivenessSnapshot &snapshot) {
   EXPECT_EQ(snapshot.cli_rc, 0);
   EXPECT_EQ(snapshot.event_rc, 0);
   EXPECT_EQ(snapshot.cli.live_listeners, 0u);
-  EXPECT_EQ(snapshot.cli.live_runtimes, 0u);
-  EXPECT_EQ(snapshot.cli.last_cleanup_runtime_inflight, 0u);
   EXPECT_EQ(snapshot.cli.live_xqc_runtimes, 0u);
   EXPECT_EQ(snapshot.event.loops, 0u);
   EXPECT_EQ(snapshot.event.io_handles, 0u);
@@ -1789,33 +1787,14 @@ TEST(OdinCliServerQuicSecurityTest, T8SharedDefaultFilterBeforeServing) {
   ASSERT_EQ(odin_cli_server_test_fail_next(
                 ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START, EIO),
             0);
-  char tcp_err_buf[512] = {0};
-  FILE *tcp_err = fmemopen(tcp_err_buf, sizeof(tcp_err_buf), "w");
-  ASSERT_NE(tcp_err, nullptr);
-  const odin_cli_server_config_t tcp_config = {
-      0,
-      ODIN_CLI_SERVER_TRANSPORT_TCP,
-      nullptr,
-      nullptr,
-  };
-  EXPECT_EQ(odin_cli_run_server(&tcp_config, tcp_err), 1);
-  static_cast<void>(std::fclose(tcp_err));
-
-  ASSERT_EQ(odin_cli_server_test_fail_next(
-                ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START, EIO),
-            0);
   MainResult quic = RunMain({"odin-server", "--listen", "0", "--quic-cert",
                              kCertPath, "--quic-key", kKeyPath});
   EXPECT_EQ(quic.rc, 1);
 
   odin_cli_server_test_filter_record_t record{};
   ASSERT_EQ(odin_cli_server_test_filter_record(&record), 0);
-  EXPECT_EQ(record.tcp_set_count, 1u);
   EXPECT_EQ(record.quic_set_count, 1u);
-  ASSERT_NE(record.tcp_cb, nullptr);
   ASSERT_NE(record.quic_cb, nullptr);
-  EXPECT_EQ(record.tcp_cb, record.quic_cb);
-  EXPECT_EQ(record.tcp_user_data, nullptr);
   EXPECT_EQ(record.quic_user_data, nullptr);
 
   auto MakeIpv4 = [](const char *ip) {
@@ -1843,10 +1822,6 @@ TEST(OdinCliServerQuicSecurityTest, T8SharedDefaultFilterBeforeServing) {
   };
   for (const char *ip : denied) {
     const struct sockaddr_in sa = MakeIpv4(ip);
-    EXPECT_EQ(record.tcp_cb(reinterpret_cast<const struct sockaddr *>(&sa),
-                            sizeof(sa), nullptr),
-              EACCES)
-        << ip;
     EXPECT_EQ(record.quic_cb(reinterpret_cast<const struct sockaddr *>(&sa),
                              sizeof(sa), nullptr),
               EACCES)
@@ -1863,10 +1838,6 @@ TEST(OdinCliServerQuicSecurityTest, T8SharedDefaultFilterBeforeServing) {
   };
   for (const char *ip : allowed) {
     const struct sockaddr_in sa = MakeIpv4(ip);
-    EXPECT_EQ(record.tcp_cb(reinterpret_cast<const struct sockaddr *>(&sa),
-                            sizeof(sa), nullptr),
-              0)
-        << ip;
     EXPECT_EQ(record.quic_cb(reinterpret_cast<const struct sockaddr *>(&sa),
                              sizeof(sa), nullptr),
               0)
@@ -1876,16 +1847,9 @@ TEST(OdinCliServerQuicSecurityTest, T8SharedDefaultFilterBeforeServing) {
   struct sockaddr_in6 sa6;
   std::memset(&sa6, 0, sizeof(sa6));
   sa6.sin6_family = AF_INET6;
-  EXPECT_EQ(record.tcp_cb(nullptr, sizeof(short_sa), nullptr), EAFNOSUPPORT);
   EXPECT_EQ(record.quic_cb(nullptr, sizeof(short_sa), nullptr), EAFNOSUPPORT);
-  EXPECT_EQ(record.tcp_cb(reinterpret_cast<const struct sockaddr *>(&short_sa),
-                          sizeof(short_sa) - 1, nullptr),
-            EAFNOSUPPORT);
   EXPECT_EQ(record.quic_cb(reinterpret_cast<const struct sockaddr *>(&short_sa),
                            sizeof(short_sa) - 1, nullptr),
-            EAFNOSUPPORT);
-  EXPECT_EQ(record.tcp_cb(reinterpret_cast<const struct sockaddr *>(&sa6),
-                          sizeof(sa6), nullptr),
             EAFNOSUPPORT);
   EXPECT_EQ(record.quic_cb(reinterpret_cast<const struct sockaddr *>(&sa6),
                            sizeof(sa6), nullptr),

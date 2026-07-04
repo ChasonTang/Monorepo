@@ -26,8 +26,8 @@ extern char **environ;
 
 // argv[0] captured by the custom test main below; used by T9 to derive
 // <bindir> for the spawned odin-client symlink, and by T10 to assert on
-// the renamed odin_unittests basename. External linkage so
-// cli_server_unittests.cpp can derive its own server symlink path.
+// the renamed odin_unittests basename. External linkage lets other CLI
+// integration tests derive sibling symlink paths.
 std::string g_test_argv0;
 
 namespace {
@@ -440,7 +440,7 @@ TEST(OdinRFC028ClientTransportTest, T1ParserAndMainTransportContract) {
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
-    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
     EXPECT_STREQ(out.quic_cert_file, "C");
     EXPECT_STREQ(out.quic_key_file, "K");
   }
@@ -482,7 +482,7 @@ TEST(OdinRFC028ClientTransportTest, T14ParserPrecedenceAndTlsRejection) {
     odin_cli_args_t out{};
     EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), c.expected);
     if (c.expected != ODIN_CLI_OK) {
-      EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_TCP);
+      EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
     }
   }
 }

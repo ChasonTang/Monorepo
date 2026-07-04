@@ -25,8 +25,6 @@ static int valid_fail_next_fp(odin_cli_client_test_failpoint_t fp) {
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_ERROR:
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR:
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR:
-  case ODIN_CLI_CLIENT_TEST_FAIL_NEXT_SESSION_ENTRY_ALLOC:
-  case ODIN_CLI_CLIENT_TEST_FAIL_NEXT_CLIENT_SESSION_CREATE:
   case ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE:
   case ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_START:
   case ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_ADD_CONNECTION:
@@ -72,8 +70,6 @@ int odin_cli_client_test_trigger_next(odin_cli_client_test_failpoint_t fp) {
 void odin_cli_client_test_reset_liveness(void) {
   g_live_listeners = 0;
   g_live_accept_loops = 0;
-  g_live_sessions = 0;
-  g_last_cleanup_sessions = 0;
   g_live_xqc_client_runtimes = 0;
   g_quic_runtime_create_calls = 0;
   g_quic_runtime_start_calls = 0;
@@ -92,9 +88,6 @@ void odin_cli_client_test_reset_liveness(void) {
   g_progress_reported = 0;
   g_runtime_trigger_fd = -1;
   g_runtime_trigger_released = 0;
-  g_idle_snapshot_fd = -1;
-  g_idle_snapshot_min_closed_sessions = 0;
-  g_idle_snapshot_reported = 0;
   g_failpoint = ODIN_CLI_CLIENT_TEST_FAIL_NONE;
   g_failpoint_errno = 0;
 }
@@ -106,8 +99,6 @@ int odin_cli_client_test_liveness(odin_cli_client_test_liveness_t *out) {
   }
   out->live_listeners = g_live_listeners;
   out->live_accept_loops = g_live_accept_loops;
-  out->live_sessions = g_live_sessions;
-  out->last_cleanup_sessions = g_last_cleanup_sessions;
   out->live_xqc_client_runtimes = g_live_xqc_client_runtimes;
   out->quic_runtime_create_calls = g_quic_runtime_create_calls;
   out->quic_runtime_start_calls = g_quic_runtime_start_calls;
@@ -198,17 +189,5 @@ int odin_cli_client_test_set_runtime_trigger_fd(int fd) {
   }
   g_runtime_trigger_fd = fd;
   g_runtime_trigger_released = 0;
-  return 0;
-}
-
-int odin_cli_client_test_set_idle_snapshot_fd(int fd,
-                                              size_t min_closed_sessions) {
-  if (fd < 0 || min_closed_sessions == 0) {
-    errno = EINVAL;
-    return -1;
-  }
-  g_idle_snapshot_fd = fd;
-  g_idle_snapshot_min_closed_sessions = min_closed_sessions;
-  g_idle_snapshot_reported = 0;
   return 0;
 }

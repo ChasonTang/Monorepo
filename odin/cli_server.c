@@ -21,15 +21,11 @@
 #include <unistd.h>
 
 #include "odin/event_loop.h"
-#include "odin/server_runtime.h"
 #include "odin/server_session.h"
 #include "odin/server_xqc_runtime.h"
 
 #if defined(ODIN_CLI_SERVER_TESTING)
 #include "odin/testing/cli_server_internal_test.h"
-#if defined(ODIN_SERVER_RUNTIME_TESTING)
-#include "odin/testing/server_runtime_internal_test.h"
-#endif
 #endif
 
 #define ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US 50000u
@@ -37,7 +33,6 @@
 typedef struct cli_server_state_t {
   int listen_fd;
   odin_event_loop_t *loop;
-  odin_server_runtime_t *runtime;
   odin_xqc_server_runtime_t *xqc_runtime;
   odin_event_timer_t *signal_timer;
   int sigint_replaced;
@@ -55,8 +50,6 @@ static volatile sig_atomic_t g_odin_cli_server_signal_seen;
 static odin_cli_server_test_failpoint_t g_failpoint;
 static int g_failpoint_errno;
 static size_t g_live_listeners;
-static size_t g_live_runtimes;
-static size_t g_last_cleanup_runtime_inflight;
 static size_t g_live_xqc_runtimes;
 static odin_cli_server_test_filter_record_t g_filter_record;
 static int g_last_bind_addr_recorded;
@@ -121,18 +114,6 @@ static int odin_cli_default_server_dial_filter(const struct sockaddr *addr,
   return default_filter_check(addr, addrlen);
 }
 
-static int startup_fail(cli_server_state_t *state, FILE *err, const char *step);
-
-static void install_tcp_default_dial_filter(odin_server_runtime_t *runtime) {
-#if defined(ODIN_CLI_SERVER_TESTING)
-  g_filter_record.tcp_set_count += 1;
-  g_filter_record.tcp_cb = odin_cli_default_server_dial_filter;
-  g_filter_record.tcp_user_data = NULL;
-#endif
-  odin_server_runtime_set_dial_filter(
-      runtime, odin_cli_default_server_dial_filter, NULL);
-}
-
 static void
 install_quic_default_dial_filter(odin_xqc_server_runtime_t *runtime) {
 #if defined(ODIN_CLI_SERVER_TESTING)
@@ -144,40 +125,15 @@ install_quic_default_dial_filter(odin_xqc_server_runtime_t *runtime) {
       runtime, odin_cli_default_server_dial_filter, NULL);
 }
 
-static void cli_runtime_on_error(odin_server_runtime_t *rt, int err,
-                                 void *user_data) {
-  (void)rt;
-  cli_server_state_t *state = (cli_server_state_t *)user_data;
-  state->runtime_error_seen = 1;
-  state->runtime_error_errno = err;
-  odin_event_loop_stop(state->loop);
-}
-
 static void cli_signal_poll_timer(odin_event_loop_t *loop,
                                   odin_event_timer_t *timer, void *user_data) {
   cli_server_state_t *state = (cli_server_state_t *)user_data;
 #if defined(ODIN_CLI_SERVER_TESTING)
-#if defined(ODIN_SERVER_RUNTIME_TESTING)
-  if (g_progress_fd >= 0 && !g_progress_reported && state->runtime != NULL &&
-      odin_server_runtime_test_inflight_count(state->runtime) > 0) {
-    const char b = 1;
-    (void)write(g_progress_fd, &b, 1);
-    g_progress_reported = 1;
-  }
-#endif
   if (g_progress_fd >= 0 && !g_progress_reported &&
       state->xqc_runtime != NULL) {
     const char b = 1;
     (void)write(g_progress_fd, &b, 1);
     g_progress_reported = 1;
-  }
-  if (g_failpoint == ODIN_CLI_SERVER_TEST_TRIGGER_RUNTIME_ERROR) {
-    const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    g_failpoint = (odin_cli_server_test_failpoint_t)0;
-    g_failpoint_errno = 0;
-    cli_runtime_on_error(state->runtime, err, state);
-    return;
   }
 #endif
   if (g_odin_cli_server_signal_seen == 0) {
@@ -233,17 +189,6 @@ static void cleanup_all(cli_server_state_t *state) {
     odin_event_timer_stop(state->signal_timer);
     state->signal_timer = NULL;
   }
-  if (state->runtime != NULL) {
-#if defined(ODIN_CLI_SERVER_TESTING) && defined(ODIN_SERVER_RUNTIME_TESTING)
-    g_last_cleanup_runtime_inflight =
-        (size_t)odin_server_runtime_test_inflight_count(state->runtime);
-#endif
-    odin_server_runtime_destroy(state->runtime);
-    state->runtime = NULL;
-#if defined(ODIN_CLI_SERVER_TESTING)
-    g_live_runtimes -= 1;
-#endif
-  }
   if (state->xqc_runtime != NULL) {
     odin_xqc_server_runtime_force_destroy(state->xqc_runtime);
     state->xqc_runtime = NULL;
@@ -265,15 +210,6 @@ static void cleanup_all(cli_server_state_t *state) {
   restore_signal_handlers(state);
 }
 
-static int startup_fail(cli_server_state_t *state, FILE *err,
-                        const char *step) {
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-  (void)fprintf(err, "odin: server startup failed at %s\n", step);
-  (void)fflush(err);
-  cleanup_all(state);
-  return 1;
-}
-
 static int startup_fail_quic(cli_server_state_t *state, FILE *err,
                              const char *step) {
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
@@ -287,173 +223,6 @@ static int startup_fail_config(FILE *err) {
   (void)fputs("odin: server startup failed at config\n", err);
   (void)fflush(err);
   return 1;
-}
-
-static int run_tcp_server(uint16_t listen_port, FILE *err) {
-  cli_server_state_t state;
-  memset(&state, 0, sizeof(state));
-  state.listen_fd = -1;
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  g_progress_reported = 0;
-#endif
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SOCKET) != 0) {
-    return startup_fail(&state, err, "socket");
-  }
-#endif
-  state.listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (state.listen_fd < 0) {
-    return startup_fail(&state, err, "socket");
-  }
-#if defined(ODIN_CLI_SERVER_TESTING)
-  g_live_listeners += 1;
-#endif
-
-  const int reuse = 1;
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SETSOCKOPT_REUSEADDR) !=
-      0) {
-    return startup_fail(&state, err, "setsockopt(SO_REUSEADDR)");
-  }
-#endif
-  if (setsockopt(state.listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
-                 sizeof(reuse)) != 0) {
-    return startup_fail(&state, err, "setsockopt(SO_REUSEADDR)");
-  }
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_FCNTL_GETFL) != 0) {
-    return startup_fail(&state, err, "fcntl(F_GETFL)");
-  }
-#endif
-  const int flags = fcntl(state.listen_fd, F_GETFL, 0);
-  if (flags == -1) {
-    return startup_fail(&state, err, "fcntl(F_GETFL)");
-  }
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_FCNTL_SETFL) != 0) {
-    return startup_fail(&state, err, "fcntl(F_SETFL)");
-  }
-#endif
-  if (fcntl(state.listen_fd, F_SETFL, flags | O_NONBLOCK) != 0) {
-    return startup_fail(&state, err, "fcntl(F_SETFL)");
-  }
-
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  addr.sin_port = htons(listen_port);
-#if defined(ODIN_CLI_SERVER_TESTING)
-  g_last_bind_addr = addr;
-  g_last_bind_addr_recorded = 1;
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_BIND) != 0) {
-    return startup_fail(&state, err, "bind");
-  }
-#endif
-  if (bind(state.listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-    return startup_fail(&state, err, "bind");
-  }
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_LISTEN) != 0) {
-    return startup_fail(&state, err, "listen");
-  }
-#endif
-  if (listen(state.listen_fd, SOMAXCONN) != 0) {
-    return startup_fail(&state, err, "listen");
-  }
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_GETSOCKNAME) != 0) {
-    return startup_fail(&state, err, "getsockname");
-  }
-#endif
-  struct sockaddr_in bound;
-  socklen_t blen = sizeof(bound);
-  if (getsockname(state.listen_fd, (struct sockaddr *)&bound, &blen) != 0) {
-    return startup_fail(&state, err, "getsockname");
-  }
-  const uint16_t actual_port = ntohs(bound.sin_port);
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_CREATE) !=
-      0) {
-    return startup_fail(&state, err, "event_loop_create");
-  }
-#endif
-  if (odin_event_loop_create(&state.loop) != 0) {
-    return startup_fail(&state, err, "event_loop_create");
-  }
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SERVER_RUNTIME_CREATE) !=
-      0) {
-    return startup_fail(&state, err, "server_runtime_create");
-  }
-#endif
-  if (odin_server_runtime_create(state.loop, state.listen_fd,
-                                 cli_runtime_on_error, &state,
-                                 &state.runtime) != 0) {
-    return startup_fail(&state, err, "server_runtime_create");
-  }
-#if defined(ODIN_CLI_SERVER_TESTING)
-  g_live_runtimes += 1;
-#endif
-
-  install_tcp_default_dial_filter(state.runtime);
-
-  const char *sig_fail = install_signal_handlers(&state);
-  if (sig_fail != NULL) {
-    return startup_fail(&state, err, sig_fail);
-  }
-
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START) !=
-      0) {
-    return startup_fail(&state, err, "signal_timer_start");
-  }
-#endif
-  if (odin_event_timer_start(
-          state.loop, ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US,
-          ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US, cli_signal_poll_timer,
-          &state, &state.signal_timer) != 0) {
-    return startup_fail(&state, err, "signal_timer_start");
-  }
-
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-  (void)fprintf(err, "odin: mode=server listen=%u\n", (unsigned)actual_port);
-  (void)fflush(err);
-
-  int run_rc = 0;
-#if defined(ODIN_CLI_SERVER_TESTING)
-  if (test_consume_failpoint(ODIN_CLI_SERVER_TEST_FAIL_EVENT_LOOP_RUN) != 0) {
-    run_rc = -1;
-  } else {
-    run_rc = odin_event_loop_run(state.loop);
-  }
-#else
-  run_rc = odin_event_loop_run(state.loop);
-#endif
-
-  if (state.runtime_error_seen) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-    (void)fprintf(err, "odin: server runtime failed at accept_loop\n");
-    (void)fflush(err);
-    cleanup_all(&state);
-    return 1;
-  }
-  if (run_rc != 0) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-    (void)fprintf(err, "odin: server runtime failed at event_loop_run\n");
-    (void)fflush(err);
-    cleanup_all(&state);
-    return 1;
-  }
-  cleanup_all(&state);
-  return state.shutdown_requested ? 0 : 1;
 }
 
 static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
@@ -605,9 +374,6 @@ static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
 int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *err) {
   if (config == NULL) {
     return startup_fail_config(err);
-  }
-  if (config->transport == ODIN_CLI_SERVER_TRANSPORT_TCP) {
-    return run_tcp_server(config->listen_port, err);
   }
   if (config->transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
     return run_quic_server(config, err);

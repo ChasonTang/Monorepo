@@ -46,7 +46,6 @@ source_set("odin") {
     ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
-    ":odin_server_runtime",
     ":odin_server_session",
     ":odin_server_xqc_runtime",
     ":odin_transport",
@@ -113,7 +112,6 @@ source_set("odin_cli_server") {
   public_deps = [
     ":odin_core",
     ":odin_event_loop",
-    ":odin_server_runtime",
     ":odin_server_xqc_runtime",
   ]
 }
@@ -160,19 +158,6 @@ source_set("odin_server_session") {
     ":odin_relay",
     ":odin_transport",
     ":odin_transport_fd",
-  ]
-}
-
-source_set("odin_server_runtime") {
-  sources = [
-    "server_runtime.c",
-    "server_runtime.h",
-  ]
-
-  public_deps = [
-    ":odin_accept_loop",
-    ":odin_event_loop",
-    ":odin_server_session",
   ]
 }
 
@@ -275,26 +260,6 @@ action("odin_transport_xqc_scope_check") {
   ]
 
   outputs = [ "$target_gen_dir/odin_transport_xqc_scope_check.stamp" ]
-
-  args = [
-    "--root",
-    rebase_path("//", root_build_dir),
-    "--stamp",
-    rebase_path(outputs[0], root_build_dir),
-  ]
-}
-
-action("odin_server_xqc_runtime_scope_check") {
-  script = "check_server_xqc_runtime_scope.py"
-
-  inputs = [
-    "server_runtime.c",
-    "server_runtime.h",
-    "cli_server.c",
-    "BUILD.gn",
-  ]
-
-  outputs = [ "$target_gen_dir/odin_server_xqc_runtime_scope_check.stamp" ]
 
   args = [
     "--root",

@@ -74,13 +74,11 @@ typedef enum odin_cli_mode_t {
 } odin_cli_mode_t;
 
 typedef enum odin_cli_server_transport_t {
-  ODIN_CLI_SERVER_TRANSPORT_TCP = 0,
-  ODIN_CLI_SERVER_TRANSPORT_QUIC,
+  ODIN_CLI_SERVER_TRANSPORT_QUIC = 0,
 } odin_cli_server_transport_t;
 
 typedef enum odin_cli_client_transport_t {
-  ODIN_CLI_CLIENT_TRANSPORT_TCP = 0,
-  ODIN_CLI_CLIENT_TRANSPORT_QUIC = 1,
+  ODIN_CLI_CLIENT_TRANSPORT_QUIC = 0,
 #if defined(ODIN_CLI_CLIENT_TESTING)
   ODIN_CLI_CLIENT_TRANSPORT_TEST_INVALID = 99,
 #endif

@@ -99,8 +99,8 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   out->server_host = NULL;
   out->server_host_len = 0;
   out->server_port = 0;
-  out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_TCP;
-  out->server_transport = ODIN_CLI_SERVER_TRANSPORT_TCP;
+  out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
+  out->server_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
   out->quic_cert_file = NULL;
   out->quic_key_file = NULL;
 
@@ -222,18 +222,10 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       (mode == ODIN_CLI_MODE_CLIENT && server_arg != NULL)
           ? odin_host_addr_parse(server_arg, &sr)
           : ODIN_HOST_ADDR_OK;
-  odin_cli_client_transport_t selected_client_transport =
-      ODIN_CLI_CLIENT_TRANSPORT_QUIC;
-  odin_cli_server_transport_t selected_transport =
-      ODIN_CLI_SERVER_TRANSPORT_QUIC;
-  const int quic_tls_present = quic_cert_arg != NULL || quic_key_arg != NULL;
   const int bad_quic_tls =
       mode == ODIN_CLI_MODE_SERVER &&
-      ((selected_transport == ODIN_CLI_SERVER_TRANSPORT_QUIC &&
-        (quic_cert_arg == NULL || quic_key_arg == NULL ||
-         quic_cert_arg[0] == '\0' || quic_key_arg[0] == '\0')) ||
-       (selected_transport == ODIN_CLI_SERVER_TRANSPORT_TCP &&
-        quic_tls_present));
+      (quic_cert_arg == NULL || quic_key_arg == NULL ||
+       quic_cert_arg[0] == '\0' || quic_key_arg[0] == '\0');
 
   odin_cli_status_t status;
   if (help_seen) {
@@ -259,13 +251,11 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       out->server_host = sr.host;
       out->server_host_len = sr.host_len;
       out->server_port = sr.port;
-      out->client_transport = selected_client_transport;
+      out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
     } else {
-      out->server_transport = selected_transport;
-      if (selected_transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
-        out->quic_cert_file = quic_cert_arg;
-        out->quic_key_file = quic_key_arg;
-      }
+      out->server_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
+      out->quic_cert_file = quic_cert_arg;
+      out->quic_key_file = quic_key_arg;
     }
     status = ODIN_CLI_OK;
   }
