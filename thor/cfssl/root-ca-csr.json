@@ -1,0 +1,19 @@
+{
+  "CN": "Thor Local Development Root CA",
+  "key": {
+    "algo": "rsa",
+    "size": 4096
+  },
+  "names": [
+    {
+      "C": "US",
+      "L": "Local",
+      "O": "Thor",
+      "OU": "Private CA",
+      "ST": "Local"
+    }
+  ],
+  "ca": {
+    "expiry": "87600h"
+  }
+}
