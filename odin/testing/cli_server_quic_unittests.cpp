@@ -400,7 +400,6 @@ LivenessSnapshot SnapshotLiveness() {
 void ExpectZeroLiveness(const LivenessSnapshot &snapshot) {
   EXPECT_EQ(snapshot.cli_rc, 0);
   EXPECT_EQ(snapshot.event_rc, 0);
-  EXPECT_EQ(snapshot.cli.live_listeners, 0u);
   EXPECT_EQ(snapshot.cli.live_xqc_runtimes, 0u);
   EXPECT_EQ(snapshot.event.loops, 0u);
   EXPECT_EQ(snapshot.event.io_handles, 0u);

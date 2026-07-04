@@ -31,7 +31,6 @@
 #define ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US 50000u
 
 typedef struct cli_server_state_t {
-  int listen_fd;
   odin_event_loop_t *loop;
   odin_xqc_server_runtime_t *xqc_runtime;
   odin_event_timer_t *signal_timer;
@@ -49,7 +48,6 @@ static volatile sig_atomic_t g_odin_cli_server_signal_seen;
 #if defined(ODIN_CLI_SERVER_TESTING)
 static odin_cli_server_test_failpoint_t g_failpoint;
 static int g_failpoint_errno;
-static size_t g_live_listeners;
 static size_t g_live_xqc_runtimes;
 static odin_cli_server_test_filter_record_t g_filter_record;
 static int g_last_bind_addr_recorded;
@@ -200,13 +198,6 @@ static void cleanup_all(cli_server_state_t *state) {
     odin_event_loop_destroy(state->loop);
     state->loop = NULL;
   }
-  if (state->listen_fd >= 0) {
-    close(state->listen_fd);
-    state->listen_fd = -1;
-#if defined(ODIN_CLI_SERVER_TESTING)
-    g_live_listeners -= 1;
-#endif
-  }
   restore_signal_handlers(state);
 }
 
@@ -228,7 +219,6 @@ static int startup_fail_config(FILE *err) {
 static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
   cli_server_state_t state;
   memset(&state, 0, sizeof(state));
-  state.listen_fd = -1;
 
 #if defined(ODIN_CLI_SERVER_TESTING)
   g_progress_reported = 0;

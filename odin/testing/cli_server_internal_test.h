@@ -34,7 +34,6 @@ typedef enum odin_cli_server_test_failpoint_t {
 } odin_cli_server_test_failpoint_t;
 
 typedef struct odin_cli_server_test_liveness_t {
-  size_t live_listeners;
   size_t live_xqc_runtimes;
 } odin_cli_server_test_liveness_t;
 
