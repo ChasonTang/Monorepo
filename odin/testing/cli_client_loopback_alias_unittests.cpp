@@ -9,6 +9,7 @@
 //
 //   sudo ifconfig lo0 -alias 127.0.0.2
 
+#include "odin/cli_client.h"
 #include "odin/protocol.h"
 
 #include <arpa/inet.h>
@@ -27,46 +28,14 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <vector>
 
 #include "gtest/gtest.h"
-
-extern "C" {
-extern char **environ;
-}
 
 namespace {
 
 constexpr int kShortDeadlineMs = 1500;
 constexpr int kLongDeadlineMs = 4000;
 constexpr char kHttp200[] = "HTTP/1.1 200 Connection Established\r\n\r\n";
-
-std::string g_test_argv0;
-
-class MutableArgv {
-public:
-  explicit MutableArgv(const std::vector<std::string> &tokens)
-      : storage_(tokens) {
-    for (auto &s : storage_) {
-      ptrs_.push_back(&s[0]);
-    }
-    ptrs_.push_back(nullptr);
-  }
-
-  char *const *argv_terminated() { return ptrs_.data(); }
-
-private:
-  std::vector<std::string> storage_;
-  std::vector<char *> ptrs_;
-};
-
-std::string Dirname(const std::string &path) {
-  const auto pos = path.find_last_of('/');
-  if (pos == std::string::npos) {
-    return ".";
-  }
-  return path.substr(0, pos);
-}
 
 class ChildGuard {
 public:
@@ -500,8 +469,20 @@ struct SpawnedChild {
   int stderr_fd;
 };
 
-SpawnedChild SpawnOdinClient(const std::string &client_path,
-                             const std::vector<std::string> &args) {
+int RunTcpClientConfig(uint16_t listen_port, const char *server_host,
+                       uint16_t server_port, FILE *err) {
+  const odin_cli_client_config_t config = {
+      listen_port,
+      server_host,
+      std::strlen(server_host),
+      server_port,
+      ODIN_CLI_CLIENT_TRANSPORT_TCP,
+  };
+  return odin_cli_run_client(&config, err);
+}
+
+SpawnedChild SpawnTcpClient(uint16_t listen_port, const char *server_host,
+                            uint16_t server_port) {
   int out_pipe[2];
   int err_pipe[2];
   EXPECT_EQ(pipe(out_pipe), 0) << std::strerror(errno);
@@ -521,14 +502,9 @@ SpawnedChild SpawnOdinClient(const std::string &client_path,
     dup2(err_pipe[1], STDERR_FILENO);
     close(out_pipe[1]);
     close(err_pipe[1]);
-    std::vector<std::string> tokens;
-    tokens.push_back(client_path);
-    for (const auto &arg : args) {
-      tokens.push_back(arg);
-    }
-    MutableArgv argv(tokens);
-    execve(client_path.c_str(), argv.argv_terminated(), environ);
-    _exit(127);
+    const int rc =
+        RunTcpClientConfig(listen_port, server_host, server_port, stderr);
+    _exit(rc);
   }
   close(out_pipe[1]);
   close(err_pipe[1]);
@@ -560,8 +536,6 @@ void ExerciseOneSuccessfulConnect(uint16_t proxy_port, int fake_listener,
 TEST(OdinCliClientLoopbackAliasTest,
      SequentialConnectsUseConfiguredServerOnly) {
   (void)signal(SIGPIPE, SIG_IGN);
-  ASSERT_FALSE(g_test_argv0.empty());
-  const std::string client_path = Dirname(g_test_argv0) + "/odin-client";
 
   uint16_t upstream_port = 0;
   const int fake = OpenIpv4Listener("127.0.0.2", 0, true, &upstream_port);
@@ -577,9 +551,7 @@ TEST(OdinCliClientLoopbackAliasTest,
   ASSERT_GE(target_sentry, 0) << std::strerror(errno);
   ASSERT_NE(target_port, upstream_port);
 
-  const SpawnedChild child = SpawnOdinClient(
-      client_path, {"--transport", "tcp", "--listen", "0", "--server",
-                    std::string("127.0.0.2:") + std::to_string(upstream_port)});
+  const SpawnedChild child = SpawnTcpClient(0, "127.0.0.2", upstream_port);
   ASSERT_NE(child.pid, -1);
   ChildGuard guard(child.pid);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
@@ -629,9 +601,6 @@ TEST(OdinCliClientLoopbackAliasTest,
 }
 
 int main(int argc, char **argv) {
-  if (argc > 0 && argv[0] != nullptr) {
-    g_test_argv0 = argv[0];
-  }
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

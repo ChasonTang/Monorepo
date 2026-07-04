@@ -54,8 +54,7 @@ volatile sig_atomic_t g_counted_sigterm;
 int g_t5_engine_create_port_fd = -1;
 
 constexpr const char kServerUsage[] =
-    "usage: odin-server --listen ADDR [--transport tcp|quic] "
-    "[--quic-cert FILE --quic-key FILE]";
+    "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
 constexpr const char kCertPath[] = "odin/testing/certs/odin_quic_test.crt";
 constexpr const char kKeyPath[] = "odin/testing/certs/odin_quic_test.key";
 
@@ -267,27 +266,6 @@ ChildHandle SpawnOdinServer(const std::vector<std::string> &extra_args) {
   return {pid, out_pipe[0], err_pipe[0]};
 }
 
-bool ParseTcpStartupLine(const std::string &line, uint16_t *out_port) {
-  static const char kPrefix[] = "odin: mode=server listen=";
-  if (line.rfind(kPrefix, 0) != 0 || line.empty() || line.back() != '\n') {
-    return false;
-  }
-  const std::string n =
-      line.substr(std::strlen(kPrefix), line.size() - std::strlen(kPrefix) - 1);
-  unsigned long port = 0;
-  for (char c : n) {
-    if (c < '0' || c > '9') {
-      return false;
-    }
-    port = port * 10 + static_cast<unsigned long>(c - '0');
-    if (port > 65535) {
-      return false;
-    }
-  }
-  *out_port = static_cast<uint16_t>(port);
-  return !n.empty();
-}
-
 bool ParseQuicStartupLine(const std::string &line, uint16_t *out_port) {
   static const char kPrefix[] = "odin: mode=server transport=quic listen=";
   if (line.rfind(kPrefix, 0) != 0 || line.empty() || line.back() != '\n') {
@@ -341,51 +319,6 @@ int OpenUdpAny(uint16_t want_port, uint16_t *out_port) {
 int TryBindUdpAny(uint16_t port) {
   uint16_t ignored = 0;
   return OpenUdpAny(port, &ignored);
-}
-
-int TcpConnectLoopback(uint16_t port, int deadline_ms) {
-  const int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    return -1;
-  }
-  const int flags = fcntl(fd, F_GETFL, 0);
-  if (flags == -1 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
-    close(fd);
-    return -1;
-  }
-  struct sockaddr_in addr;
-  std::memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = htons(port);
-  if (connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) ==
-      0) {
-    return fd;
-  }
-  if (errno != EINPROGRESS) {
-    const int saved = errno;
-    close(fd);
-    errno = saved;
-    return -1;
-  }
-  struct pollfd pfd;
-  pfd.fd = fd;
-  pfd.events = POLLOUT;
-  const int prc = poll(&pfd, 1, deadline_ms);
-  if (prc <= 0) {
-    close(fd);
-    errno = prc == 0 ? ETIMEDOUT : errno;
-    return -1;
-  }
-  int so_err = 0;
-  socklen_t slen = sizeof(so_err);
-  if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_err, &slen) != 0 ||
-      so_err != 0) {
-    close(fd);
-    errno = so_err != 0 ? so_err : errno;
-    return -1;
-  }
-  return fd;
 }
 
 int OpenLoopbackListener(uint16_t *out_port) {
@@ -1251,8 +1184,8 @@ void RunT7ChildCase(int delivered_sig, T7Variant variant) {
     sigemptyset(&sa_term.sa_mask);
     (void)sigaction(SIGTERM, &sa_term, nullptr);
 
-    MutableArgv argv({"odin-server", "--transport", "quic", "--listen", "0",
-                      "--quic-cert", kCertPath, "--quic-key", kKeyPath});
+    MutableArgv argv({"odin-server", "--listen", "0", "--quic-cert", kCertPath,
+                      "--quic-key", kKeyPath});
     const int rc = odin_cli_main(argv.argc(), argv.argv(), stdout, stderr);
     (void)fflush(stdout);
     (void)fflush(stderr);
@@ -1422,9 +1355,8 @@ odin_server_session_dial_filter_cb CaptureQuicCliFilter() {
           ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START, EIO) != 0) {
     return nullptr;
   }
-  const MainResult r =
-      RunMain({"odin-server", "--transport", "quic", "--listen", "0",
-               "--quic-cert", kCertPath, "--quic-key", kKeyPath});
+  const MainResult r = RunMain({"odin-server", "--listen", "0", "--quic-cert",
+                                kCertPath, "--quic-key", kKeyPath});
   EXPECT_EQ(r.rc, 1);
   odin_cli_server_test_filter_record_t record{};
   EXPECT_EQ(odin_cli_server_test_filter_record(&record), 0);
@@ -1434,7 +1366,7 @@ odin_server_session_dial_filter_cb CaptureQuicCliFilter() {
 
 } // namespace
 
-TEST(OdinCliServerQuicParserTest, T1QuicDefaultAndExplicitTcp) {
+TEST(OdinCliServerQuicParserTest, T1QuicDefault) {
   struct Case {
     std::vector<std::string> tokens;
     uint16_t expected_port;
@@ -1450,9 +1382,6 @@ TEST(OdinCliServerQuicParserTest, T1QuicDefaultAndExplicitTcp) {
       {{"odin-server", "--listen", "0", "--quic-cert", "C", "--quic-key", "K"},
        0,
        ODIN_CLI_SERVER_TRANSPORT_QUIC},
-      {{"odin-server", "--transport", "tcp", "--listen", "0"},
-       0,
-       ODIN_CLI_SERVER_TRANSPORT_TCP},
   };
   for (const Case &c : cases) {
     MutableArgv argv(c.tokens);
@@ -1461,64 +1390,36 @@ TEST(OdinCliServerQuicParserTest, T1QuicDefaultAndExplicitTcp) {
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
     EXPECT_EQ(out.listen_port, c.expected_port);
     EXPECT_EQ(out.server_transport, c.expected_transport);
-    if (c.expected_transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
-      EXPECT_STREQ(out.quic_cert_file, "C");
-      EXPECT_STREQ(out.quic_key_file, "K");
-    } else {
-      EXPECT_EQ(out.quic_cert_file, nullptr);
-      EXPECT_EQ(out.quic_key_file, nullptr);
-    }
+    EXPECT_STREQ(out.quic_cert_file, "C");
+    EXPECT_STREQ(out.quic_key_file, "K");
   }
-
-  ASSERT_FALSE(g_test_argv0.empty());
-  ChildHandle child = SpawnOdinServer({"--transport", "tcp", "--listen", "0"});
-  ASSERT_NE(child.pid, -1);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
-  uint16_t port = 0;
-  ASSERT_TRUE(ParseTcpStartupLine(line, &port)) << line;
-  EXPECT_GT(port, 0);
-  EXPECT_EQ(line.find("transport=tcp"), std::string::npos);
-  const int client = TcpConnectLoopback(port, 1500);
-  ASSERT_GE(client, 0) << std::strerror(errno);
-  close(client);
-  EXPECT_EQ(kill(child.pid, SIGTERM), 0);
-  int wstatus = 0;
-  ASSERT_EQ(WaitChildBounded(child.pid, 2000, &wstatus), 0);
-  close(child.stdout_fd);
-  close(child.stderr_fd);
-  ASSERT_TRUE(WIFEXITED(wstatus));
-  EXPECT_EQ(WEXITSTATUS(wstatus), 0);
 }
 
 TEST(OdinCliServerQuicParserTest, T2QuicParserAndUsageContract) {
   {
-    MutableArgv argv({"odin-server", "--transport", "quic", "--listen", "9443",
-                      "--quic-cert", "C", "--quic-key", "K"});
+    MutableArgv argv({"odin-server", "--listen", "9443", "--quic-cert", "C",
+                      "--quic-key", "K"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.listen_port, 9443);
     EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
-    EXPECT_EQ(out.quic_cert_file, argv.argv()[6]);
-    EXPECT_EQ(out.quic_key_file, argv.argv()[8]);
+    EXPECT_EQ(out.quic_cert_file, argv.argv()[4]);
+    EXPECT_EQ(out.quic_key_file, argv.argv()[6]);
   }
 
   for (const char *transport : {"udp", "QUIC", ""}) {
     MutableArgv argv({"odin-server", "--transport", transport});
     odin_cli_args_t out{};
     EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
-              ODIN_CLI_ERR_BAD_TRANSPORT)
+              ODIN_CLI_ERR_UNKNOWN_FLAG)
         << transport;
   }
 
   const std::vector<std::vector<std::string>> bad_tls = {
-      {"odin-server", "--transport", "quic", "--quic-cert", "C"},
-      {"odin-server", "--transport", "quic", "--quic-key", "K"},
-      {"odin-server", "--transport", "quic", "--quic-cert", "", "--quic-key",
-       "K"},
-      {"odin-server", "--transport", "quic", "--quic-cert", "C", "--quic-key",
-       ""},
-      {"odin-server", "--transport", "tcp", "--quic-cert", "C", "--quic-key",
-       "K"},
+      {"odin-server", "--quic-cert", "C"},
+      {"odin-server", "--quic-key", "K"},
+      {"odin-server", "--quic-cert", "", "--quic-key", "K"},
+      {"odin-server", "--quic-cert", "C", "--quic-key", ""},
       {"odin-server", "--listen", "0", "--quic-cert", "C"},
       {"odin-server", "--listen", "0", "--quic-key", "K"},
   };
@@ -1530,11 +1431,8 @@ TEST(OdinCliServerQuicParserTest, T2QuicParserAndUsageContract) {
   }
 
   const std::vector<std::vector<std::string>> mixed_precedence = {
-      {"odin-server", "--listen", "abc", "--transport", "udp"},
-      {"odin-server", "--listen", "abc", "--transport", "quic", "--quic-cert",
-       "C"},
-      {"odin-server", "--listen", "abc", "--transport", "tcp", "--quic-cert",
-       "C", "--quic-key", "K"},
+      {"odin-server", "--listen", "abc", "--quic-cert", "C"},
+      {"odin-server", "--listen", "abc", "--quic-cert", "C", "--quic-key", "K"},
   };
   for (const auto &tokens : mixed_precedence) {
     MutableArgv argv(tokens);
@@ -1566,14 +1464,14 @@ TEST(OdinCliServerQuicParserTest, T2QuicParserAndUsageContract) {
   EXPECT_EQ(help.out, std::string(kServerUsage) + "\n");
   EXPECT_EQ(help.err, "");
 
-  MainResult bad_transport = RunMain({"odin-server", "--transport", "udp"});
-  EXPECT_EQ(bad_transport.rc, 2);
-  EXPECT_EQ(bad_transport.out, "");
-  EXPECT_EQ(bad_transport.err,
-            std::string("odin: invalid --transport\n") + kServerUsage + "\n");
+  MainResult unknown_transport = RunMain({"odin-server", "--transport", "udp"});
+  EXPECT_EQ(unknown_transport.rc, 2);
+  EXPECT_EQ(unknown_transport.out, "");
+  EXPECT_EQ(unknown_transport.err,
+            std::string("odin: unknown or invalid flag\n") + kServerUsage +
+                "\n");
 
-  MainResult bad_quic_tls =
-      RunMain({"odin-server", "--transport", "quic", "--quic-cert", "C"});
+  MainResult bad_quic_tls = RunMain({"odin-server", "--quic-cert", "C"});
   EXPECT_EQ(bad_quic_tls.rc, 2);
   EXPECT_EQ(bad_quic_tls.out, "");
   EXPECT_EQ(bad_quic_tls.err,
@@ -1583,9 +1481,8 @@ TEST(OdinCliServerQuicParserTest, T2QuicParserAndUsageContract) {
 
 TEST(OdinCliServerQuicRuntimeTest, T3QuicStartupBindsUdpAndReportsPort) {
   ASSERT_FALSE(g_test_argv0.empty());
-  ChildHandle child =
-      SpawnOdinServer({"--transport", "quic", "--listen", "0", "--quic-cert",
-                       kCertPath, "--quic-key", kKeyPath});
+  ChildHandle child = SpawnOdinServer(
+      {"--listen", "0", "--quic-cert", kCertPath, "--quic-key", kKeyPath});
   ASSERT_NE(child.pid, -1);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 4000);
   uint16_t port = 0;
@@ -1611,8 +1508,8 @@ TEST(OdinCliServerQuicRuntimeTest, T4QuicUdpBindCollisionReportsFailure) {
   const int parent_udp = OpenUdpAny(0, &port);
   ASSERT_GE(parent_udp, 0) << std::strerror(errno);
   ChildHandle child =
-      SpawnOdinServer({"--transport", "quic", "--listen", std::to_string(port),
-                       "--quic-cert", kCertPath, "--quic-key", kKeyPath});
+      SpawnOdinServer({"--listen", std::to_string(port), "--quic-cert",
+                       kCertPath, "--quic-key", kKeyPath});
   ASSERT_NE(child.pid, -1);
   int wstatus = 0;
   ASSERT_EQ(WaitChildBounded(child.pid, 4000, &wstatus), 0);
@@ -1672,8 +1569,6 @@ TEST(OdinCliServerQuicRuntimeTest, T5QuicTlsAndPostBindFailuresCleanUdp) {
 
       std::vector<std::string> tokens = {
           "odin-server",
-          "--transport",
-          "quic",
           "--listen",
           "0",
           "--quic-cert",
@@ -1850,9 +1745,8 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
     MainResult r;
     {
       ScopedCountingSignalHandlers handlers;
-      r = RunMain({"odin-server", "--transport", "quic", "--listen",
-                   std::to_string(port), "--quic-cert", kCertPath, "--quic-key",
-                   kKeyPath});
+      r = RunMain({"odin-server", "--listen", std::to_string(port),
+                   "--quic-cert", kCertPath, "--quic-key", kKeyPath});
       EXPECT_EQ(raise(SIGINT), 0);
       EXPECT_EQ(raise(SIGTERM), 0);
       EXPECT_EQ(g_counted_sigint, 1);
@@ -1895,16 +1789,23 @@ TEST(OdinCliServerQuicSecurityTest, T8SharedDefaultFilterBeforeServing) {
   ASSERT_EQ(odin_cli_server_test_fail_next(
                 ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START, EIO),
             0);
-  MainResult tcp =
-      RunMain({"odin-server", "--transport", "tcp", "--listen", "0"});
-  EXPECT_EQ(tcp.rc, 1);
+  char tcp_err_buf[512] = {0};
+  FILE *tcp_err = fmemopen(tcp_err_buf, sizeof(tcp_err_buf), "w");
+  ASSERT_NE(tcp_err, nullptr);
+  const odin_cli_server_config_t tcp_config = {
+      0,
+      ODIN_CLI_SERVER_TRANSPORT_TCP,
+      nullptr,
+      nullptr,
+  };
+  EXPECT_EQ(odin_cli_run_server(&tcp_config, tcp_err), 1);
+  static_cast<void>(std::fclose(tcp_err));
 
   ASSERT_EQ(odin_cli_server_test_fail_next(
                 ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START, EIO),
             0);
-  MainResult quic =
-      RunMain({"odin-server", "--transport", "quic", "--listen", "0",
-               "--quic-cert", kCertPath, "--quic-key", kKeyPath});
+  MainResult quic = RunMain({"odin-server", "--listen", "0", "--quic-cert",
+                             kCertPath, "--quic-key", kKeyPath});
   EXPECT_EQ(quic.rc, 1);
 
   odin_cli_server_test_filter_record_t record{};

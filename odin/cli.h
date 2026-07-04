@@ -27,7 +27,8 @@
  *     `:port` suffix. Server mode never sets the three server fields.
  *   - `--help` / `-h` wins after a valid basename, returning HELP.
  *   - Long option names are accepted only when spelled exactly
- *     (`--listen`, `--server`, `--help`); abbreviated unique prefixes
+ *     (`--listen`, `--server`, `--quic-cert`, `--quic-key`, `--help`);
+ *     abbreviated unique prefixes
  *     (e.g. `--lis`, `--he`) return ERR_UNKNOWN_FLAG.
  *   - `--listen` accepts a bare ASCII-decimal port string matching
  *     `[0-9]+` with value ≤ 65535 (no sign, no `0x`/`0o` prefix, no
@@ -93,7 +94,6 @@ typedef enum odin_cli_status_t {
   ODIN_CLI_ERR_UNKNOWN_FLAG,
   ODIN_CLI_ERR_BAD_LISTEN_PORT,
   ODIN_CLI_ERR_BAD_SERVER,
-  ODIN_CLI_ERR_BAD_TRANSPORT,
   ODIN_CLI_ERR_BAD_QUIC_TLS,
 } odin_cli_status_t;
 
