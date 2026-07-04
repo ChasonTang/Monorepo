@@ -3775,7 +3775,6 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
             0)
       << std::strerror(errno);
   ASSERT_NE(out, nullptr);
-  ASSERT_EQ(odin_client_session_test_fail_next_dial(out, EDEADLK), 0);
   ASSERT_TRUE(WriteAllFd(peer, kHttpReq, sizeof(kHttpReq) - 1));
   ASSERT_TRUE(RunUntil(loop, [&] {
     return factory.calls == 1 &&
@@ -3820,7 +3819,6 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
                 ClientSessionFactoryOnClose, &close_state, &out),
             0)
       << std::strerror(errno);
-  ASSERT_EQ(odin_client_session_test_fail_next_dial(out, EDEADLK), 0);
   ASSERT_TRUE(WriteAllFd(peer, kHttpReq, sizeof(kHttpReq) - 1));
   std::string factory_failure;
   ASSERT_TRUE(RunUntil(loop, [&] {
@@ -3844,7 +3842,6 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
                 ClientSessionFactoryOnClose, &close_state, &out),
             0)
       << std::strerror(errno);
-  ASSERT_EQ(odin_client_session_test_fail_next_dial(out, EDEADLK), 0);
   ASSERT_TRUE(WriteAllFd(peer, kHttpReq, sizeof(kHttpReq) - 1));
   ASSERT_TRUE(RunUntil(loop, [&] {
     return factory.calls == 1 &&
@@ -3875,7 +3872,6 @@ TEST_F(OdinClientSessionUpstreamTransportTest, T4) {
                 ClientSessionFactoryOnClose, &close_state, &out),
             0)
       << std::strerror(errno);
-  ASSERT_EQ(odin_client_session_test_fail_next_dial(out, EDEADLK), 0);
   ASSERT_EQ(odin_connect_session_test_fail_next_create_client(ENOMEM), 0);
   ASSERT_TRUE(WriteAllFd(peer, kHttpReq, sizeof(kHttpReq) - 1));
   std::string post_factory_failure;
@@ -3947,77 +3943,6 @@ class OdinXqcClientRuntimeScopeTest : public ::testing::Test {};
 TEST_F(OdinXqcClientRuntimeScopeTest, T12) {
   odin_xqc_client_runtime_test_reset();
   const unsigned int before = odin_xqc_client_runtime_test_record()->call_count;
-
-  odin_event_loop_t *loop = nullptr;
-  ASSERT_EQ(odin_event_loop_create(&loop), 0) << std::strerror(errno);
-  uint16_t upstream_port = 0;
-  const int upstream_lfd = OpenLoopbackListener(&upstream_port);
-  ASSERT_GE(upstream_lfd, 0) << std::strerror(errno);
-
-  int owned = -1;
-  int local_peer = -1;
-  MakePair(&owned, &local_peer);
-  ClientSessionFactoryState close_state;
-  close_state.loop = loop;
-  odin_client_session_t *cs = nullptr;
-  ASSERT_EQ(odin_client_session_create(
-                loop, owned, "127.0.0.1", std::strlen("127.0.0.1"),
-                upstream_port, ClientSessionFactoryOnClose, &close_state, &cs),
-            0)
-      << std::strerror(errno);
-  ASSERT_NE(cs, nullptr);
-  ASSERT_TRUE(WriteAllFd(local_peer, kHttpReq, sizeof(kHttpReq) - 1));
-
-  int upstream_fd = -1;
-  std::string upstream_data;
-  const std::string encoded_req = EncodedConnectReq();
-  ASSERT_TRUE(RunUntil(
-      loop,
-      [&] {
-        if (upstream_fd < 0) {
-          upstream_fd = accept(upstream_lfd, nullptr, nullptr);
-          if (upstream_fd < 0 &&
-              (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
-            return false;
-          }
-          if (upstream_fd >= 0 && !SetNonblockNoAssert(upstream_fd)) {
-            return false;
-          }
-        }
-        if (upstream_fd >= 0) {
-          upstream_data += DrainFdNow(upstream_fd);
-        }
-        return upstream_data.find(encoded_req) != std::string::npos;
-      },
-      5000));
-  ASSERT_GE(upstream_fd, 0) << std::strerror(errno);
-  const std::string encoded_resp = EncodedConnectResp();
-  ASSERT_TRUE(
-      WriteAllFd(upstream_fd, encoded_resp.data(), encoded_resp.size()));
-
-  std::string local_data;
-  ASSERT_TRUE(RunUntil(
-      loop,
-      [&] {
-        local_data += DrainFdNow(local_peer);
-        return local_data.find(kHttp200) != std::string::npos;
-      },
-      5000));
-  const std::string payload = "tcp-loopback-payload";
-  ASSERT_TRUE(WriteAllFd(local_peer, payload.data(), payload.size()));
-  ASSERT_TRUE(RunUntil(
-      loop,
-      [&] {
-        upstream_data += DrainFdNow(upstream_fd);
-        return upstream_data.find(payload) != std::string::npos;
-      },
-      3000));
-  EXPECT_EQ(odin_xqc_client_runtime_test_record()->call_count, before);
-  odin_client_session_destroy(cs);
-  close(local_peer);
-  close(upstream_fd);
-  close(upstream_lfd);
-  odin_event_loop_destroy(loop);
 
   const std::string root = FindRepoRoot();
   ASSERT_EQ(RunScopeCheck(root), 0);

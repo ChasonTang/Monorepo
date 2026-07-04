@@ -40,7 +40,6 @@ source_set("odin") {
     ":odin_cli_client",
     ":odin_cli_server",
     ":odin_client_xqc_runtime",
-    ":odin_client_session",
     ":odin_connect_session",
     ":odin_core",
     ":odin_dial",
@@ -64,7 +63,6 @@ source_set("odin_cli_client") {
 
   public_deps = [
     ":odin_accept_loop",
-    ":odin_client_session",
     ":odin_client_xqc_runtime",
     ":odin_core",
     ":odin_event_loop",
@@ -80,7 +78,6 @@ source_set("odin_client_session") {
   public_deps = [
     ":odin_connect_session",
     ":odin_core",
-    ":odin_dial",
     ":odin_event_loop",
     ":odin_relay",
     ":odin_transport",

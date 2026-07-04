@@ -2,19 +2,15 @@
 
 #include "odin/client_session.h"
 
-#include <arpa/inet.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 #include "odin/connect_session.h"
-#include "odin/dial.h"
 #include "odin/http_connect.h"
-#include "odin/protocol.h"
 #include "odin/relay.h"
 #include "odin/transport.h"
 #include "odin/transport_fd.h"
@@ -29,41 +25,29 @@ static int g_client_session_fail_next_downstream_transport_create_errno;
 
 enum {
   ODIN_CLIENT_SESSION_S_PARSING = 1,
-  ODIN_CLIENT_SESSION_S_DIALING = 2,
-  ODIN_CLIENT_SESSION_S_HANDSHAKE = 3,
-  ODIN_CLIENT_SESSION_S_WRITING_OK_HTTP = 4,
-  ODIN_CLIENT_SESSION_S_WRITING_ERR_HTTP = 5,
-  ODIN_CLIENT_SESSION_S_RELAY = 6,
-  ODIN_CLIENT_SESSION_S_TERMINAL = 7,
-};
-
-enum {
-  ODIN_CLIENT_SESSION_UPSTREAM_TCP_DIAL = 1,
-  ODIN_CLIENT_SESSION_UPSTREAM_FACTORY = 2,
+  ODIN_CLIENT_SESSION_S_HANDSHAKE = 2,
+  ODIN_CLIENT_SESSION_S_WRITING_OK_HTTP = 3,
+  ODIN_CLIENT_SESSION_S_WRITING_ERR_HTTP = 4,
+  ODIN_CLIENT_SESSION_S_RELAY = 5,
+  ODIN_CLIENT_SESSION_S_TERMINAL = 6,
 };
 
 struct odin_client_session_t {
   odin_event_loop_t *loop;
   int conn_fd;
-  int dial_fd;
   int state;
-  int upstream_mode;
   int pending_err;
   int active_depth;
   int destroy_pending;
   int on_close_fired;
   odin_client_session_close_cb on_close;
   void *user_data;
-  odin_client_session_dial_filter_cb dial_filter;
-  void *dial_filter_ud;
   odin_client_session_upstream_transport_factory_cb create_upstream;
   void *create_upstream_ud;
   odin_client_session_upstream_transport_destroying_cb upstream_destroying;
-  struct sockaddr_in server_sa;
   odin_transport_t *downstream_t;
   odin_transport_t *upstream_t;
   odin_connect_session_t *s;
-  odin_dial_t *dial;
   odin_relay_t *relay;
   uint8_t http_buf[ODIN_HTTP_REQUEST_MAX];
   size_t http_buf_used;
@@ -72,12 +56,6 @@ struct odin_client_session_t {
   odin_http_response_t http_resp;
   size_t http_resp_off;
 #if defined(ODIN_CLIENT_SESSION_TESTING)
-  int fail_next_dial_armed;
-  int fail_next_dial_errno;
-  int fail_next_upstream_transport_create_armed;
-  int fail_next_upstream_transport_create_errno;
-  int fail_next_connect_session_create_armed;
-  int fail_next_connect_session_create_errno;
   int fail_next_http_parse_tail_write_armed;
   int fail_next_http_parse_tail_write_errno;
   int fail_next_client_tail_write_armed;
@@ -93,8 +71,6 @@ struct odin_client_session_t {
 
 static void client_session_ready(odin_transport_t *t, unsigned int events,
                                  void *user_data);
-static void dial_on_done(odin_dial_t *dial, odin_dial_status_t status, int fd,
-                         int err, void *user_data);
 static void session_on_done(odin_connect_session_t *s,
                             odin_connect_session_status_t status, int err,
                             void *user_data);
@@ -103,7 +79,6 @@ static void relay_on_done(odin_relay_t *relay, odin_relay_status_t status,
 static void finish_destroy(odin_client_session_t *cs);
 static void fire_terminal(odin_client_session_t *cs, int err);
 static void drive_parse_http(odin_client_session_t *cs, unsigned int events);
-static void start_dial(odin_client_session_t *cs);
 static void start_factory_upstream(odin_client_session_t *cs);
 static void handle_failure(odin_client_session_t *cs, odin_http_status_t status,
                            int err);
@@ -146,69 +121,10 @@ alloc_client_session(odin_event_loop_t *loop, int conn_fd,
   }
   cs->loop = loop;
   cs->conn_fd = conn_fd;
-  cs->dial_fd = -1;
   cs->state = ODIN_CLIENT_SESSION_S_PARSING;
   cs->on_close = on_close;
   cs->user_data = user_data;
   return cs;
-}
-
-int odin_client_session_create(odin_event_loop_t *loop, int conn_fd,
-                               const char *server_host, size_t server_host_len,
-                               uint16_t server_port,
-                               odin_client_session_close_cb on_close,
-                               void *user_data, odin_client_session_t **out) {
-#if defined(ODIN_CLIENT_SESSION_TESTING)
-  if (g_client_session_fail_next_create_errno != 0) {
-    const int err = g_client_session_fail_next_create_errno;
-    g_client_session_fail_next_create_errno = 0;
-    errno = err;
-    return -1;
-  }
-#endif
-  if (server_host_len == 0 || server_host_len > ODIN_PROTO_HOST_MAX) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  char server_host_cstr[ODIN_PROTO_HOST_MAX + 1];
-  memcpy(server_host_cstr, server_host, server_host_len);
-  server_host_cstr[server_host_len] = '\0';
-
-  struct sockaddr_in server_sa;
-  memset(&server_sa, 0, sizeof(server_sa));
-  server_sa.sin_family = AF_INET;
-  server_sa.sin_port = htons(server_port);
-  if (inet_pton(AF_INET, server_host_cstr, &server_sa.sin_addr) != 1) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  odin_client_session_t *cs =
-      alloc_client_session(loop, conn_fd, on_close, user_data);
-  if (cs == NULL) {
-    return -1;
-  }
-  cs->upstream_mode = ODIN_CLIENT_SESSION_UPSTREAM_TCP_DIAL;
-  cs->server_sa = server_sa;
-
-  if (odin_fd_transport_create(loop, conn_fd, client_session_ready, cs,
-                               &cs->downstream_t) != 0) {
-    const int saved = errno;
-    free(cs);
-    errno = saved;
-    return -1;
-  }
-  if (odin_transport_set_interest(cs->downstream_t, ODIN_TRANSPORT_READ) != 0) {
-    const int saved = errno;
-    odin_transport_destroy(cs->downstream_t);
-    free(cs);
-    errno = saved;
-    return -1;
-  }
-
-  *out = cs;
-  return 0;
 }
 
 int odin_client_session_create_with_upstream_transport(
@@ -237,7 +153,6 @@ int odin_client_session_create_with_upstream_transport(
   if (cs == NULL) {
     return -1;
   }
-  cs->upstream_mode = ODIN_CLIENT_SESSION_UPSTREAM_FACTORY;
   cs->create_upstream = create_upstream;
   cs->create_upstream_ud = factory_user_data;
   cs->upstream_destroying = upstream_destroying;
@@ -272,16 +187,6 @@ int odin_client_session_create_with_upstream_transport(
   return 0;
 }
 
-void odin_client_session_set_dial_filter(odin_client_session_t *cs,
-                                         odin_client_session_dial_filter_cb cb,
-                                         void *user_data) {
-  if (cs == NULL) {
-    return;
-  }
-  cs->dial_filter = cb;
-  cs->dial_filter_ud = user_data;
-}
-
 void odin_client_session_destroy(odin_client_session_t *cs) {
   if (cs == NULL) {
     return;
@@ -298,10 +203,6 @@ static void finish_destroy(odin_client_session_t *cs) {
     odin_relay_destroy(cs->relay);
     cs->relay = NULL;
   }
-  if (cs->dial != NULL) {
-    odin_dial_destroy(cs->dial);
-    cs->dial = NULL;
-  }
   if (cs->s != NULL) {
     odin_connect_session_destroy(cs->s);
     cs->s = NULL;
@@ -313,10 +214,6 @@ static void finish_destroy(odin_client_session_t *cs) {
   if (cs->downstream_t != NULL) {
     odin_transport_destroy(cs->downstream_t);
     cs->downstream_t = NULL;
-  }
-  if (cs->dial_fd >= 0) {
-    (void)close(cs->dial_fd);
-    cs->dial_fd = -1;
   }
   if (cs->conn_fd >= 0) {
     (void)close(cs->conn_fd);
@@ -401,11 +298,7 @@ static void drive_parse_http(odin_client_session_t *cs, unsigned int events) {
     if (st == ODIN_HTTP_OK) {
       cs->http_consumed = consumed;
       cs->http_view = view;
-      if (cs->upstream_mode == ODIN_CLIENT_SESSION_UPSTREAM_TCP_DIAL) {
-        start_dial(cs);
-      } else {
-        start_factory_upstream(cs);
-      }
+      start_factory_upstream(cs);
       return;
     }
     if (st == ODIN_HTTP_NEED_MORE) {
@@ -418,38 +311,6 @@ static void drive_parse_http(odin_client_session_t *cs, unsigned int events) {
     handle_failure(cs, st, EPROTO);
     return;
   }
-}
-
-static void start_dial(odin_client_session_t *cs) {
-  (void)odin_transport_set_interest(cs->downstream_t, 0);
-  if (cs->dial_filter != NULL) {
-    const int filter_err =
-        cs->dial_filter((const struct sockaddr *)&cs->server_sa,
-                        sizeof(cs->server_sa), cs->dial_filter_ud);
-    if (filter_err != 0) {
-      handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, filter_err);
-      return;
-    }
-  }
-
-#if defined(ODIN_CLIENT_SESSION_TESTING)
-  if (cs->fail_next_dial_armed) {
-    const int errnum = cs->fail_next_dial_errno;
-    cs->fail_next_dial_armed = 0;
-    cs->fail_next_dial_errno = 0;
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, errnum);
-    return;
-  }
-#endif
-
-  if (odin_dial_start(cs->loop, (const struct sockaddr *)&cs->server_sa,
-                      sizeof(cs->server_sa), dial_on_done, cs,
-                      &cs->dial) != 0) {
-    const int saved = errno;
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, saved);
-    return;
-  }
-  cs->state = ODIN_CLIENT_SESSION_S_DIALING;
 }
 
 static void start_factory_upstream(odin_client_session_t *cs) {
@@ -486,80 +347,6 @@ static void start_factory_upstream(odin_client_session_t *cs) {
   cs->state = ODIN_CLIENT_SESSION_S_HANDSHAKE;
   (void)odin_transport_set_interest(cs->upstream_t,
                                     odin_connect_session_wants(cs->s));
-}
-
-static void dial_on_done(odin_dial_t *dial, odin_dial_status_t status, int fd,
-                         int err, void *user_data) {
-  (void)dial;
-  odin_client_session_t *cs = (odin_client_session_t *)user_data;
-  cs_enter(cs);
-  if (cs->on_close_fired) {
-    cs_leave(cs);
-    return;
-  }
-  odin_dial_destroy(cs->dial);
-  cs->dial = NULL;
-  if (status == ODIN_DIAL_ERROR) {
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, err);
-    cs_leave(cs);
-    return;
-  }
-
-  cs->dial_fd = fd;
-#if defined(ODIN_CLIENT_SESSION_TESTING)
-  if (cs->fail_next_upstream_transport_create_armed) {
-    const int errnum = cs->fail_next_upstream_transport_create_errno;
-    cs->fail_next_upstream_transport_create_armed = 0;
-    cs->fail_next_upstream_transport_create_errno = 0;
-    (void)close(cs->dial_fd);
-    cs->dial_fd = -1;
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, errnum);
-    cs_leave(cs);
-    return;
-  }
-#endif
-  if (odin_fd_transport_create(cs->loop, cs->dial_fd, client_session_ready, cs,
-                               &cs->upstream_t) != 0) {
-    const int saved = errno;
-    (void)close(cs->dial_fd);
-    cs->dial_fd = -1;
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, saved);
-    cs_leave(cs);
-    return;
-  }
-
-#if defined(ODIN_CLIENT_SESSION_TESTING)
-  if (cs->fail_next_connect_session_create_armed) {
-    const int errnum = cs->fail_next_connect_session_create_errno;
-    cs->fail_next_connect_session_create_armed = 0;
-    cs->fail_next_connect_session_create_errno = 0;
-    destroy_upstream_transport(cs, cs->upstream_t);
-    cs->upstream_t = NULL;
-    (void)close(cs->dial_fd);
-    cs->dial_fd = -1;
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, errnum);
-    cs_leave(cs);
-    return;
-  }
-#endif
-
-  if (odin_connect_session_create_client(
-          (const char *)(cs->http_buf + cs->http_view.host_off),
-          cs->http_view.host_len, cs->http_view.port, session_on_done, cs,
-          &cs->s) != 0) {
-    const int saved = errno;
-    destroy_upstream_transport(cs, cs->upstream_t);
-    cs->upstream_t = NULL;
-    (void)close(cs->dial_fd);
-    cs->dial_fd = -1;
-    handle_failure(cs, ODIN_HTTP_ERR_BAD_REQUEST_TARGET, saved);
-    cs_leave(cs);
-    return;
-  }
-  cs->state = ODIN_CLIENT_SESSION_S_HANDSHAKE;
-  (void)odin_transport_set_interest(cs->upstream_t,
-                                    odin_connect_session_wants(cs->s));
-  cs_leave(cs);
 }
 
 static void session_on_done(odin_connect_session_t *s,
@@ -762,10 +549,6 @@ static void fire_terminal(odin_client_session_t *cs, int err) {
     odin_relay_destroy(cs->relay);
     cs->relay = NULL;
   }
-  if (cs->dial != NULL) {
-    odin_dial_destroy(cs->dial);
-    cs->dial = NULL;
-  }
   if (cs->s != NULL) {
     odin_connect_session_destroy(cs->s);
     cs->s = NULL;
@@ -777,10 +560,6 @@ static void fire_terminal(odin_client_session_t *cs, int err) {
   if (cs->downstream_t != NULL) {
     odin_transport_destroy(cs->downstream_t);
     cs->downstream_t = NULL;
-  }
-  if (cs->dial_fd >= 0) {
-    (void)close(cs->dial_fd);
-    cs->dial_fd = -1;
   }
   if (cs->conn_fd >= 0) {
     (void)close(cs->conn_fd);
@@ -796,47 +575,13 @@ static void destroy_upstream_transport(odin_client_session_t *cs,
   if (transport == NULL) {
     return;
   }
-  if (cs->upstream_mode == ODIN_CLIENT_SESSION_UPSTREAM_FACTORY &&
-      cs->upstream_destroying != NULL) {
+  if (cs->upstream_destroying != NULL) {
     cs->upstream_destroying(transport, cs->create_upstream_ud);
   }
   odin_transport_destroy(transport);
 }
 
 #if defined(ODIN_CLIENT_SESSION_TESTING)
-
-int odin_client_session_test_fail_next_dial(odin_client_session_t *cs,
-                                            int errnum) {
-  if (cs == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-  cs->fail_next_dial_armed = 1;
-  cs->fail_next_dial_errno = errnum;
-  return 0;
-}
-
-int odin_client_session_test_fail_next_upstream_transport_create(
-    odin_client_session_t *cs, int errnum) {
-  if (cs == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-  cs->fail_next_upstream_transport_create_armed = 1;
-  cs->fail_next_upstream_transport_create_errno = errnum;
-  return 0;
-}
-
-int odin_client_session_test_fail_next_connect_session_create(
-    odin_client_session_t *cs, int errnum) {
-  if (cs == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-  cs->fail_next_connect_session_create_armed = 1;
-  cs->fail_next_connect_session_create_errno = errnum;
-  return 0;
-}
 
 int odin_client_session_test_fail_next_http_parse_tail_write(
     odin_client_session_t *cs, int errnum) {

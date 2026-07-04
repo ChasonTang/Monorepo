@@ -11,12 +11,6 @@
 extern "C" {
 #endif
 
-int odin_client_session_test_fail_next_dial(odin_client_session_t *cs,
-                                            int errnum);
-int odin_client_session_test_fail_next_upstream_transport_create(
-    odin_client_session_t *cs, int errnum);
-int odin_client_session_test_fail_next_connect_session_create(
-    odin_client_session_t *cs, int errnum);
 int odin_client_session_test_fail_next_http_parse_tail_write(
     odin_client_session_t *cs, int errnum);
 int odin_client_session_test_fail_next_client_tail_write(
@@ -32,12 +26,11 @@ int odin_client_session_test_fail_next_create(int errnum);
 int odin_client_session_test_fail_next_downstream_transport_create(int errnum);
 
 #define ODIN_CLIENT_SESSION_TEST_STATE_PARSING 1
-#define ODIN_CLIENT_SESSION_TEST_STATE_DIALING 2
-#define ODIN_CLIENT_SESSION_TEST_STATE_HANDSHAKE 3
-#define ODIN_CLIENT_SESSION_TEST_STATE_WRITING_OK_HTTP 4
-#define ODIN_CLIENT_SESSION_TEST_STATE_WRITING_ERR_HTTP 5
-#define ODIN_CLIENT_SESSION_TEST_STATE_RELAY 6
-#define ODIN_CLIENT_SESSION_TEST_STATE_TERMINAL 7
+#define ODIN_CLIENT_SESSION_TEST_STATE_HANDSHAKE 2
+#define ODIN_CLIENT_SESSION_TEST_STATE_WRITING_OK_HTTP 3
+#define ODIN_CLIENT_SESSION_TEST_STATE_WRITING_ERR_HTTP 4
+#define ODIN_CLIENT_SESSION_TEST_STATE_RELAY 5
+#define ODIN_CLIENT_SESSION_TEST_STATE_TERMINAL 6
 
 #ifdef __cplusplus
 }

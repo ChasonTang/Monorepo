@@ -85,36 +85,6 @@ def find_c_function_body(text, name):
     raise RuntimeError(f"unterminated body for {name}")
 
 
-def find_balanced_block_at(text, open_brace):
-    if open_brace < 0 or open_brace >= len(text) or text[open_brace] != "{":
-        raise RuntimeError("missing block open brace")
-    depth = 0
-    for i in range(open_brace, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[open_brace + 1 : i], i + 1
-    raise RuntimeError("unterminated block")
-
-
-def find_drive_parse_http_factory_branch(client_session_text):
-    body = find_c_function_body(client_session_text, "drive_parse_http")
-    marker = "cs->upstream_mode == ODIN_CLIENT_SESSION_UPSTREAM_TCP_DIAL"
-    marker_at = body.find(marker)
-    if marker_at < 0:
-        raise RuntimeError("missing drive_parse_http upstream-mode branch")
-    tcp_open = body.find("{", marker_at)
-    _, tcp_close = find_balanced_block_at(body, tcp_open)
-    else_match = re.search(r"\belse\b\s*\{", body[tcp_close:])
-    if not else_match:
-        raise RuntimeError("missing drive_parse_http FACTORY branch")
-    factory_open = tcp_close + else_match.end() - 1
-    factory_body, _ = find_balanced_block_at(body, factory_open)
-    return factory_body
-
-
 def check_no_tokens(label, token_list, forbidden):
     found = []
     for tok in token_list:
@@ -172,6 +142,27 @@ def main():
     check_no_tokens("client xqc runtime scope", tokens(runtime_text), runtime_forbidden)
 
     client_session_text = (root / "odin" / "client_session.c").read_text()
+    client_session_scope_text = "\n".join(
+        [
+            (root / "odin" / "client_session.h").read_text(),
+            client_session_text,
+            find_target_body(build_text, "odin_client_session"),
+        ]
+    )
+    check_no_tokens(
+        "client session QUIC-only scope",
+        tokens(client_session_scope_text),
+        {
+            "odin_client_session_create",
+            "odin_client_session_set_dial_filter",
+            "odin_client_session_dial_filter_cb",
+            "ODIN_CLIENT_SESSION_UPSTREAM_TCP_DIAL",
+            "start_dial",
+            "odin_dial_start",
+            "odin_dial",
+        },
+    )
+
     factory_region = "\n".join(
         [
             find_c_function_body(
@@ -179,7 +170,7 @@ def main():
                 "odin_client_session_create_with_upstream_transport",
             ),
             find_c_function_body(client_session_text, "start_factory_upstream"),
-            find_drive_parse_http_factory_branch(client_session_text),
+            find_c_function_body(client_session_text, "drive_parse_http"),
         ]
     )
     check_no_tokens(
@@ -198,6 +189,7 @@ def main():
     pathlib.Path(args.stamp).write_text("ok\n")
     print("no forbidden CLI token in odin_cli_client")
     print("no forbidden local-resource token in odin_client_xqc_runtime")
+    print("no forbidden legacy TCP token in odin_client_session")
     print("no forbidden local-resource token in client_session factory")
     return 0
 
