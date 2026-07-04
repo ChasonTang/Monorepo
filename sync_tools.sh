@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # sync_tools.sh - Script to download build tools
-# Downloads specific versions of gn, ninja, and clang toolchain to the tool directory
+# Downloads specific versions of gn, ninja, clang toolchain, cfssl, and cfssljson to the tool directory
 
 set -e  # Exit on any error
 
@@ -9,19 +9,24 @@ set -e  # Exit on any error
 GN_GIT_REVISION="81b24e01531ecf0eff12ec9359a555ec3944ec4e"  # Fixed gn git revision
 NINJA_VERSION="version:2@1.11.1.chromium.4"  # Ninja CIPD tag
 CLANG_GIT_REVISION="80743bd43fd5b38fedc503308e7a652e23d3ec93"  # Clang git revision
+CFSSL_VERSION="1.6.5"  # Cloudflare CFSSL release version
 PLATFORM="mac"  # Target platform
 
-# Detect current machine architecture to download corresponding gn and clang versions
+# Detect current machine architecture to download corresponding tool versions
 ARCH=$(uname -m)
 if [ "$ARCH" = "arm64" ]; then
     GN_PLATFORM="mac-arm64"
     NINJA_PLATFORM="mac-arm64"
     CLANG_PLATFORM="mac-arm64"
+    CFSSL_PLATFORM="darwin_arm64"
+    CFSSLJSON_PLATFORM=""
     echo "Detected Apple Silicon (ARM64) architecture"
 elif [ "$ARCH" = "x86_64" ]; then
     GN_PLATFORM="mac-amd64"
     NINJA_PLATFORM="mac-amd64"
     CLANG_PLATFORM="mac-amd64"
+    CFSSL_PLATFORM="darwin_amd64"
+    CFSSLJSON_PLATFORM="darwin_amd64"
     echo "Detected Intel (x86_64) architecture"
 else
     echo "Error: Unsupported architecture $ARCH"
@@ -34,6 +39,37 @@ mkdir -p "$TOOL_DIR"
 
 echo "Syncing build tools..."
 echo "Target directory: $TOOL_DIR"
+
+download_cfssl_tool() {
+    local tool_name="$1"
+    local download_url="$2"
+    local output_path="$TOOL_DIR/$tool_name"
+    local temp_path="$TOOL_DIR/$tool_name.tmp"
+
+    if [ -f "$output_path" ]; then
+        echo "$tool_name already exists, skipping download"
+        return
+    fi
+
+    echo "Downloading $tool_name $CFSSL_VERSION..."
+    if curl -fL -o "$temp_path" "$download_url" 2>/dev/null && [ -s "$temp_path" ]; then
+        if file "$temp_path" | grep -q "Mach-O"; then
+            mv "$temp_path" "$output_path"
+            chmod +x "$output_path"
+            echo "$tool_name $CFSSL_VERSION downloaded successfully"
+        else
+            rm -f "$temp_path"
+            echo "Error: $tool_name download is not a valid macOS binary"
+            echo "Download URL: $download_url"
+            exit 1
+        fi
+    else
+        rm -f "$temp_path"
+        echo "Error: $tool_name download failed"
+        echo "Download URL: $download_url"
+        exit 1
+    fi
+}
 
 # Download gn
 echo "Downloading gn..."
@@ -167,12 +203,35 @@ else
     echo "clang toolchain already exists, skipping download"
 fi
 
+# Download cfssl and cfssljson
+echo "Downloading cfssl tools..."
+CFSSL_BASE_URL="https://github.com/cloudflare/cfssl/releases/download/v${CFSSL_VERSION}"
+CFSSL_URL="${CFSSL_BASE_URL}/cfssl_${CFSSL_VERSION}_${CFSSL_PLATFORM}"
+download_cfssl_tool "cfssl" "$CFSSL_URL"
+
+if [ -n "$CFSSLJSON_PLATFORM" ]; then
+    CFSSLJSON_URL="${CFSSL_BASE_URL}/cfssljson_${CFSSL_VERSION}_${CFSSLJSON_PLATFORM}"
+    download_cfssl_tool "cfssljson" "$CFSSLJSON_URL"
+else
+    echo "Skipping cfssljson download on ARM64: no darwin_arm64 prebuilt binary is published for cfssljson $CFSSL_VERSION"
+fi
+
 # Verify tools
 echo "Verifying tools..."
-if [ -f "$TOOL_DIR/gn" ] && [ -f "$TOOL_DIR/ninja" ] && [ -f "$CLANG_DIR/bin/clang" ]; then
+if [ -f "$TOOL_DIR/gn" ] && [ -f "$TOOL_DIR/ninja" ] && [ -f "$CLANG_DIR/bin/clang" ] && [ -f "$TOOL_DIR/cfssl" ]; then
     echo "gn version: $($TOOL_DIR/gn --version)"
     echo "ninja version: $($TOOL_DIR/ninja --version)"
     echo "clang version: $($CLANG_DIR/bin/clang --version | head -n 1)"
+    echo "cfssl version: $($TOOL_DIR/cfssl version | head -n 1)"
+    if [ -n "$CFSSLJSON_PLATFORM" ]; then
+        if [ ! -f "$TOOL_DIR/cfssljson" ]; then
+            echo "Error: cfssljson download failed"
+            exit 1
+        fi
+        echo "cfssljson version: $($TOOL_DIR/cfssljson -version | head -n 1)"
+    else
+        echo "cfssljson: skipped on ARM64"
+    fi
     echo "Tools synced successfully!"
 else
     echo "Error: Tool download failed"
@@ -183,8 +242,15 @@ echo "Tool paths:"
 echo "  gn: $TOOL_DIR/gn"
 echo "  ninja: $TOOL_DIR/ninja"
 echo "  clang: $CLANG_DIR/bin/clang"
+echo "  cfssl: $TOOL_DIR/cfssl"
+if [ -n "$CFSSLJSON_PLATFORM" ]; then
+    echo "  cfssljson: $TOOL_DIR/cfssljson"
+else
+    echo "  cfssljson: skipped on ARM64"
+fi
 echo ""
 echo "Usage:"
 echo "  1. Run ./tool/gn gen out to generate build files"
 echo "  2. Run ./tool/ninja -C out to build"
 echo "  3. Use ./tool/clang/bin/clang for C/C++ compilation"
+echo "  4. Use ./tool/cfssl for CFSSL operations"
