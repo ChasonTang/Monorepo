@@ -55,8 +55,8 @@ int g_t5_engine_create_port_fd = -1;
 
 constexpr const char kServerUsage[] =
     "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
-constexpr const char kCertPath[] = "odin/testing/certs/odin_quic_test.crt";
-constexpr const char kKeyPath[] = "odin/testing/certs/odin_quic_test.key";
+constexpr const char kCertPath[] = "thor/out/odin-server.pem";
+constexpr const char kKeyPath[] = "thor/out/odin-server-key.pem";
 
 class MutableArgv {
 public:

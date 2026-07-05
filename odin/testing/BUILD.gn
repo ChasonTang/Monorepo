@@ -152,6 +152,8 @@ executable("odin_unittests") {
 
   deps = [
     ":odin_event_loop_testing",
+    "//boringssl:crypto",
+    "//boringssl:ssl",
     "//googletest:gtest",
     "//odin:odin_core",
     "//xquic",

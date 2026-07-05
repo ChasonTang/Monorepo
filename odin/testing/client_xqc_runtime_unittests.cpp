@@ -26,6 +26,10 @@
 #include <unistd.h>
 #include <vector>
 
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
 #include "odin/client_session.h"
 #include "odin/event_loop.h"
 #include "odin/protocol.h"
@@ -375,22 +379,116 @@ struct ProductionCertState {
   int calls = 0;
   size_t certs_len = 0;
   void *conn_user_data = nullptr;
+  const char *ca_file = nullptr;
+  bool ca_verified = false;
+  bool host_verified = false;
 };
 
 ProductionCertState *g_production_cert_state = nullptr;
 
+X509 *ReadPemX509File(const char *path) {
+  BIO *bio = BIO_new_file(path, "r");
+  if (bio == nullptr) {
+    return nullptr;
+  }
+  X509 *cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+  BIO_free(bio);
+  return cert;
+}
+
+X509 *ReadDerX509(const unsigned char *data, size_t len) {
+  if (data == nullptr || len > static_cast<size_t>(LONG_MAX)) {
+    return nullptr;
+  }
+  const unsigned char *p = data;
+  return d2i_X509(nullptr, &p, static_cast<long>(len));
+}
+
+bool PushDerX509(STACK_OF(X509) * stack, const unsigned char *data,
+                 size_t len) {
+  X509 *cert = ReadDerX509(data, len);
+  if (cert == nullptr) {
+    return false;
+  }
+  if (!sk_X509_push(stack, cert)) {
+    X509_free(cert);
+    return false;
+  }
+  return true;
+}
+
+bool VerifyWithCaFile(const unsigned char *certs[], const size_t cert_len[],
+                      size_t certs_len, const char *ca_file,
+                      bool *host_verified) {
+  if (host_verified != nullptr) {
+    *host_verified = false;
+  }
+  if (certs == nullptr || cert_len == nullptr || certs_len == 0 ||
+      ca_file == nullptr) {
+    return false;
+  }
+
+  X509 *leaf = ReadDerX509(certs[0], cert_len[0]);
+  X509 *ca = ReadPemX509File(ca_file);
+  X509_STORE *store = X509_STORE_new();
+  X509_STORE_CTX *ctx = X509_STORE_CTX_new();
+  STACK_OF(X509) *intermediates = nullptr;
+  bool ok = false;
+
+  if (leaf == nullptr || ca == nullptr || store == nullptr || ctx == nullptr) {
+    goto done;
+  }
+  if (X509_check_host(leaf, "localhost", std::strlen("localhost"), 0,
+                      nullptr) != 1) {
+    goto done;
+  }
+  if (host_verified != nullptr) {
+    *host_verified = true;
+  }
+  if (!X509_STORE_add_cert(store, ca)) {
+    goto done;
+  }
+  if (certs_len > 1) {
+    intermediates = sk_X509_new_null();
+    if (intermediates == nullptr) {
+      goto done;
+    }
+    for (size_t i = 1; i < certs_len; ++i) {
+      if (!PushDerX509(intermediates, certs[i], cert_len[i])) {
+        goto done;
+      }
+    }
+  }
+  if (!X509_STORE_CTX_init(ctx, store, leaf, intermediates)) {
+    goto done;
+  }
+  ok = X509_verify_cert(ctx) == 1;
+
+done:
+  sk_X509_pop_free(intermediates, X509_free);
+  X509_STORE_CTX_free(ctx);
+  X509_STORE_free(store);
+  X509_free(ca);
+  X509_free(leaf);
+  return ok;
+}
+
 int ProductionCertVerify(const unsigned char *certs[], const size_t cert_len[],
                          size_t certs_len, void *conn_user_data) {
-  (void)cert_len;
   ProductionCertState *state = g_production_cert_state;
   if (state != nullptr) {
     state->calls += 1;
     state->certs_len = certs_len;
     state->conn_user_data = conn_user_data;
+    state->ca_verified = VerifyWithCaFile(
+        certs, cert_len, certs_len, state->ca_file, &state->host_verified);
   }
   EXPECT_NE(certs, nullptr);
   EXPECT_GT(certs_len, 0u);
-  return 0;
+  EXPECT_NE(state, nullptr);
+  EXPECT_TRUE(state != nullptr && state->host_verified);
+  EXPECT_TRUE(state != nullptr && state->ca_verified);
+  return state != nullptr && state->ca_verified ? 0 : -1;
 }
 
 struct ProductionDialFilterState {
@@ -2849,10 +2947,12 @@ TEST_F(OdinXqcClientRuntimeTest, T15) {
   filter.expected_port = upstream_port;
 
   const std::string root = FindRepoRoot();
-  const std::string cert = root + "/odin/testing/certs/odin_quic_test.crt";
-  const std::string key = root + "/odin/testing/certs/odin_quic_test.key";
+  const std::string cert = root + "/thor/out/odin-server.pem";
+  const std::string key = root + "/thor/out/odin-server-key.pem";
+  const std::string ca = root + "/thor/out/root-ca.pem";
   ASSERT_EQ(access(cert.c_str(), R_OK), 0) << cert;
   ASSERT_EQ(access(key.c_str(), R_OK), 0) << key;
+  ASSERT_EQ(access(ca.c_str(), R_OK), 0) << ca;
 
   xqc_engine_ssl_config_t server_ssl;
   std::memset(&server_ssl, 0, sizeof(server_ssl));
@@ -2891,6 +2991,7 @@ TEST_F(OdinXqcClientRuntimeTest, T15) {
       << std::strerror(errno);
 
   ProductionCertState cert_state;
+  cert_state.ca_file = ca.c_str();
   g_production_cert_state = &cert_state;
   xqc_transport_callbacks_t client_transport_callbacks;
   std::memset(&client_transport_callbacks, 0,
@@ -2967,17 +3068,29 @@ TEST_F(OdinXqcClientRuntimeTest, T15) {
   EXPECT_TRUE(saw_server_alpn);
 
   ASSERT_EQ(odin_xqc_client_runtime_start(client), 0) << std::strerror(errno);
+  odin_xqc_client_runtime_test_state_t handshake_state;
+  std::memset(&handshake_state, 0, sizeof(handshake_state));
   ASSERT_TRUE(RunUntil(
       h.loop,
       [&] {
-        odin_xqc_client_runtime_test_state_t state;
-        if (odin_xqc_client_runtime_test_state(client, &state) != 0) {
+        if (odin_xqc_client_runtime_test_state(client, &handshake_state) != 0) {
           return false;
         }
-        return state.conn != nullptr && state.cid_registered == 1 &&
-               state.handshake_done == 1;
+        return handshake_state.conn != nullptr &&
+               handshake_state.cid_registered == 1 &&
+               handshake_state.handshake_done == 1;
       },
-      5000));
+      5000))
+      << "state conn=" << handshake_state.conn
+      << " cid_registered=" << handshake_state.cid_registered
+      << " handshake_done=" << handshake_state.handshake_done
+      << " closing=" << handshake_state.closing
+      << " connect_errno=" << handshake_state.connect_errno
+      << " cert calls=" << cert_state.calls
+      << " certs_len=" << cert_state.certs_len
+      << " ca_verified=" << cert_state.ca_verified
+      << " host_verified=" << cert_state.host_verified
+      << " conn_user_data=" << cert_state.conn_user_data;
   record = odin_xqc_client_runtime_test_record();
   const odin_xqc_client_runtime_test_call_t *connect_call = nullptr;
   for (unsigned int i = 0; i < record->call_count; ++i) {
@@ -3033,9 +3146,11 @@ TEST_F(OdinXqcClientRuntimeTest, T15) {
         return local_data.find(kHttp200) != std::string::npos;
       },
       5000));
-  EXPECT_GE(cert_state.calls, 1);
+  EXPECT_GT(cert_state.calls, 0);
   EXPECT_GT(cert_state.certs_len, 0u);
   EXPECT_NE(cert_state.conn_user_data, nullptr);
+  EXPECT_TRUE(cert_state.ca_verified);
+  EXPECT_TRUE(cert_state.host_verified);
   EXPECT_EQ(filter.calls, 1);
   EXPECT_TRUE(filter.saw_expected_loopback);
 
