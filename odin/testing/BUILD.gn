@@ -159,7 +159,10 @@ executable("odin_unittests") {
     "//xquic",
   ]
 
-  data_deps = [ "//odin:odin_cli_artifacts" ]
+  data_deps = [
+    "//odin:odin_cli_artifacts",
+    "//thor:odin_test_certs",
+  ]
 
   configs += [
     ":odin_accept_loop_testing_config",

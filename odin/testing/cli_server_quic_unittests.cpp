@@ -55,8 +55,6 @@ int g_t5_engine_create_port_fd = -1;
 
 constexpr const char kServerUsage[] =
     "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
-constexpr const char kCertPath[] = "thor/out/odin-server.pem";
-constexpr const char kKeyPath[] = "thor/out/odin-server-key.pem";
 
 class MutableArgv {
 public:
@@ -95,6 +93,20 @@ std::string Dirname(const std::string &path) {
     return ".";
   }
   return path.substr(0, pos);
+}
+
+std::string BuildCertDir() {
+  return Dirname(g_test_argv0) + "/gen/thor/odin_test_certs";
+}
+
+const char *CertPath() {
+  static const std::string path = BuildCertDir() + "/odin-server.pem";
+  return path.c_str();
+}
+
+const char *KeyPath() {
+  static const std::string path = BuildCertDir() + "/odin-test-leaf-key.pem";
+  return path.c_str();
 }
 
 ssize_t ReadWithDeadline(int fd, void *buf, size_t len, int deadline_ms) {
@@ -1181,8 +1193,8 @@ void RunT7ChildCase(int delivered_sig, T7Variant variant) {
     sigemptyset(&sa_term.sa_mask);
     (void)sigaction(SIGTERM, &sa_term, nullptr);
 
-    MutableArgv argv({"odin-server", "--listen", "0", "--quic-cert", kCertPath,
-                      "--quic-key", kKeyPath});
+    MutableArgv argv({"odin-server", "--listen", "0", "--quic-cert", CertPath(),
+                      "--quic-key", KeyPath()});
     const int rc = odin_cli_main(argv.argc(), argv.argv(), stdout, stderr);
     (void)fflush(stdout);
     (void)fflush(stderr);
@@ -1353,7 +1365,7 @@ odin_server_session_dial_filter_cb CaptureQuicCliFilter() {
     return nullptr;
   }
   const MainResult r = RunMain({"odin-server", "--listen", "0", "--quic-cert",
-                                kCertPath, "--quic-key", kKeyPath});
+                                CertPath(), "--quic-key", KeyPath()});
   EXPECT_EQ(r.rc, 1);
   odin_cli_server_test_filter_record_t record{};
   EXPECT_EQ(odin_cli_server_test_filter_record(&record), 0);
@@ -1479,7 +1491,7 @@ TEST(OdinCliServerQuicParserTest, T2QuicParserAndUsageContract) {
 TEST(OdinCliServerQuicRuntimeTest, T3QuicStartupBindsUdpAndReportsPort) {
   ASSERT_FALSE(g_test_argv0.empty());
   ChildHandle child = SpawnOdinServer(
-      {"--listen", "0", "--quic-cert", kCertPath, "--quic-key", kKeyPath});
+      {"--listen", "0", "--quic-cert", CertPath(), "--quic-key", KeyPath()});
   ASSERT_NE(child.pid, -1);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 4000);
   uint16_t port = 0;
@@ -1506,7 +1518,7 @@ TEST(OdinCliServerQuicRuntimeTest, T4QuicUdpBindCollisionReportsFailure) {
   ASSERT_GE(parent_udp, 0) << std::strerror(errno);
   ChildHandle child =
       SpawnOdinServer({"--listen", std::to_string(port), "--quic-cert",
-                       kCertPath, "--quic-key", kKeyPath});
+                       CertPath(), "--quic-key", KeyPath()});
   ASSERT_NE(child.pid, -1);
   int wstatus = 0;
   ASSERT_EQ(WaitChildBounded(child.pid, 4000, &wstatus), 0);
@@ -1569,9 +1581,9 @@ TEST(OdinCliServerQuicRuntimeTest, T5QuicTlsAndPostBindFailuresCleanUdp) {
           "--listen",
           "0",
           "--quic-cert",
-          engine_create_fail ? kCertPath : "/tmp/odin-no-such.crt",
+          engine_create_fail ? CertPath() : "/tmp/odin-no-such.crt",
           "--quic-key",
-          engine_create_fail ? kKeyPath : "/tmp/odin-no-such.key",
+          engine_create_fail ? KeyPath() : "/tmp/odin-no-such.key",
       };
       MutableArgv argv(tokens);
       const int rc = odin_cli_main(argv.argc(), argv.argv(), stdout, stderr);
@@ -1682,10 +1694,10 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
 
   for (const odin_cli_server_config_t &cfg :
        std::vector<odin_cli_server_config_t>{
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, nullptr, kKeyPath},
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, kCertPath, nullptr},
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, "", kKeyPath},
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, kCertPath, ""},
+           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, nullptr, KeyPath()},
+           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, CertPath(), nullptr},
+           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, "", KeyPath()},
+           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, CertPath(), ""},
        }) {
     std::memset(err_buf, 0, sizeof(err_buf));
     err = fmemopen(err_buf, sizeof(err_buf), "w");
@@ -1743,7 +1755,7 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
     {
       ScopedCountingSignalHandlers handlers;
       r = RunMain({"odin-server", "--listen", std::to_string(port),
-                   "--quic-cert", kCertPath, "--quic-key", kKeyPath});
+                   "--quic-cert", CertPath(), "--quic-key", KeyPath()});
       EXPECT_EQ(raise(SIGINT), 0);
       EXPECT_EQ(raise(SIGTERM), 0);
       EXPECT_EQ(g_counted_sigint, 1);
@@ -1787,7 +1799,7 @@ TEST(OdinCliServerQuicSecurityTest, T8SharedDefaultFilterBeforeServing) {
                 ODIN_CLI_SERVER_TEST_FAIL_SIGNAL_TIMER_START, EIO),
             0);
   MainResult quic = RunMain({"odin-server", "--listen", "0", "--quic-cert",
-                             kCertPath, "--quic-key", kKeyPath});
+                             CertPath(), "--quic-key", KeyPath()});
   EXPECT_EQ(quic.rc, 1);
 
   odin_cli_server_test_filter_record_t record{};

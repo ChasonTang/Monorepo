@@ -47,6 +47,8 @@
 
 // NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
 
+extern std::string g_test_argv0;
+
 namespace {
 
 constexpr char kHttpReq[] = "CONNECT example.com:443 HTTP/1.1\r\n\r\n";
@@ -57,6 +59,8 @@ constexpr char kHttp405[] =
 constexpr char kLateLocal[] = "late-local!";
 
 std::string FindRepoRoot();
+std::string BuildCertDir();
+std::string CertFixturePath(const char *name);
 void RunLoopFor(odin_event_loop_t *loop, uint64_t usec);
 
 struct FakeConn {
@@ -3396,12 +3400,11 @@ TEST_F(OdinXqcClientRuntimeTest, T14) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, T15) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   CaFileProductionResult result;
-  RunCaFileProduction({root + "/thor/out/odin-server.pem",
-                       root + "/thor/out/odin-server-key.pem", "localhost", ca,
-                       false},
+  RunCaFileProduction({CertFixturePath("odin-server.pem"),
+                       CertFixturePath("odin-test-leaf-key.pem"), "localhost",
+                       ca, false},
                       true, &result);
   EXPECT_TRUE(result.saw_connect_alpn);
   EXPECT_EQ(result.cert_verify_flag, XQC_TLS_CERT_FLAG_NEED_VERIFY);
@@ -4253,6 +4256,22 @@ std::string FindRepoRoot() {
   }
 }
 
+std::string Dirname(const std::string &path) {
+  const auto pos = path.find_last_of('/');
+  if (pos == std::string::npos) {
+    return ".";
+  }
+  return path.substr(0, pos);
+}
+
+std::string BuildCertDir() {
+  return Dirname(g_test_argv0) + "/gen/thor/odin_test_certs";
+}
+
+std::string CertFixturePath(const char *name) {
+  return BuildCertDir() + "/" + name;
+}
+
 int RunScopeCheck(const std::string &root) {
   const std::string script = root + "/odin/check_client_xqc_runtime_scope.py";
   const std::string stamp =
@@ -4580,7 +4599,7 @@ TEST_F(OdinXqcClientRuntimeTest, RFC028T18DefaultCreateAddressShapes) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT4DefaultRuntimeDefaultsConfiguredPath) {
-  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   h.expected_server_host = "127.0.0.1";
   h.expected_no_crypto_flag = 0;
 
@@ -4627,9 +4646,8 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT4DefaultRuntimeDefaultsConfiguredPath) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT5RejectsAndCleansCaSetupFailures) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
-  const std::string missing = root + "/thor/out/does-not-exist-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
+  const std::string missing = CertFixturePath("does-not-exist-ca.pem");
   const std::string invalid = "/tmp/odin-rfc029-invalid-ca.pem";
   {
     ScopedFile f(std::fopen(invalid.c_str(), "w"));
@@ -4707,12 +4725,11 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT5RejectsAndCleansCaSetupFailures) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT6ProductionHandshakeDns) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   CaFileProductionResult result;
-  RunCaFileProduction({root + "/thor/out/odin-server.pem",
-                       root + "/thor/out/odin-server-key.pem", "localhost", ca,
-                       false},
+  RunCaFileProduction({CertFixturePath("odin-server.pem"),
+                       CertFixturePath("odin-test-leaf-key.pem"), "localhost",
+                       ca, false},
                       true, &result);
   EXPECT_TRUE(result.saw_connect_alpn);
   EXPECT_EQ(result.cert_verify_flag, XQC_TLS_CERT_FLAG_NEED_VERIFY);
@@ -4728,12 +4745,11 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT6ProductionHandshakeDns) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT7ProductionHandshakeIntermediateDns) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   CaFileProductionResult result;
-  RunCaFileProduction({root + "/thor/out/intermediate-server-chain.pem",
-                       root + "/thor/out/intermediate-server-key.pem",
-                       "localhost", ca, false},
+  RunCaFileProduction({CertFixturePath("intermediate-server-chain.pem"),
+                       CertFixturePath("odin-test-leaf-key.pem"), "localhost",
+                       ca, false},
                       true, &result);
   EXPECT_TRUE(result.saw_connect_alpn);
   EXPECT_EQ(result.cert_verify_flag, XQC_TLS_CERT_FLAG_NEED_VERIFY);
@@ -4748,9 +4764,9 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT7ProductionHandshakeIntermediateDns) {
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT8ProductionRejectsBadServers) {
   const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
-  const std::string odin_cert = root + "/thor/out/odin-server.pem";
-  const std::string odin_key = root + "/thor/out/odin-server-key.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
+  const std::string odin_cert = CertFixturePath("odin-server.pem");
+  const std::string odin_key = CertFixturePath("odin-test-leaf-key.pem");
 
   CaFileProductionResult dns_mismatch;
   RunCaFileProduction({odin_cert, odin_key, "example.com", ca, false}, false,
@@ -4784,8 +4800,8 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT8ProductionRejectsBadServers) {
   EXPECT_EQ(wrong_ca.stream_create_calls, 0u);
 
   CaFileProductionResult cn_only;
-  RunCaFileProduction({root + "/thor/out/cn-only-server.pem",
-                       root + "/thor/out/cn-only-server-key.pem", "localhost",
+  RunCaFileProduction({CertFixturePath("cn-only-server.pem"),
+                       CertFixturePath("odin-test-leaf-key.pem"), "localhost",
                        ca, false},
                       false, &cn_only);
   EXPECT_EQ(cn_only.state.handshake_done, 0);
@@ -4796,10 +4812,9 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT8ProductionRejectsBadServers) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT9VerifierRejectsLeafFailures) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   const std::vector<unsigned char> leaf =
-      ReadPemX509DerFile(root + "/thor/out/odin-server.pem");
+      ReadPemX509DerFile(CertFixturePath("odin-server.pem"));
   ASSERT_FALSE(leaf.empty());
   xqc_cert_verify_pt cb = nullptr;
   void *user_data = nullptr;
@@ -4839,17 +4854,17 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT9VerifierRejectsLeafFailures) {
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT10VerifierRejectsContextAndSetup) {
   const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   const std::vector<unsigned char> root_leaf =
-      ReadPemX509DerFile(root + "/thor/out/odin-server.pem");
+      ReadPemX509DerFile(CertFixturePath("odin-server.pem"));
   const std::vector<unsigned char> intermediate_leaf =
-      ReadPemX509DerFile(root + "/thor/out/intermediate-server.pem");
+      ReadPemX509DerFile(CertFixturePath("intermediate-server-chain.pem"), 0);
   const std::vector<unsigned char> intermediate =
-      ReadPemX509DerFile(root + "/thor/out/intermediate-ca.pem");
-  const std::vector<unsigned char> untrusted_leaf =
-      ReadPemX509DerFile(root + "/thor/out/untrusted-intermediate-server.pem");
-  const std::vector<unsigned char> untrusted_intermediate =
-      ReadPemX509DerFile(root + "/thor/out/untrusted-intermediate-ca.pem");
+      ReadPemX509DerFile(CertFixturePath("intermediate-server-chain.pem"), 1);
+  const std::vector<unsigned char> untrusted_leaf = ReadPemX509DerFile(
+      CertFixturePath("untrusted-intermediate-server-chain.pem"), 0);
+  const std::vector<unsigned char> untrusted_intermediate = ReadPemX509DerFile(
+      CertFixturePath("untrusted-intermediate-server-chain.pem"), 1);
   ASSERT_FALSE(root_leaf.empty());
   ASSERT_FALSE(intermediate_leaf.empty());
   ASSERT_FALSE(intermediate.empty());
@@ -4966,12 +4981,11 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT10VerifierRejectsContextAndSetup) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT13RejectsMissingServerAuthEku) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   CaFileProductionResult result;
-  RunCaFileProduction({root + "/thor/out/odin-client-auth-only.pem",
-                       root + "/thor/out/odin-client-auth-only-key.pem",
-                       "localhost", ca, false},
+  RunCaFileProduction({CertFixturePath("odin-client-auth-only.pem"),
+                       CertFixturePath("odin-test-leaf-key.pem"), "localhost",
+                       ca, false},
                       false, &result);
   EXPECT_EQ(result.state.handshake_done, 0);
   EXPECT_EQ(result.cert_verify_successes, 0u);
@@ -4981,12 +4995,11 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT13RejectsMissingServerAuthEku) {
 }
 
 TEST_F(OdinXqcClientRuntimeTest, CaFileT14VerifierAcceptsIntermediateChain) {
-  const std::string root = FindRepoRoot();
-  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string ca = CertFixturePath("root-ca.pem");
   const std::vector<unsigned char> leaf =
-      ReadPemX509DerFile(root + "/thor/out/intermediate-server.pem");
+      ReadPemX509DerFile(CertFixturePath("intermediate-server-chain.pem"), 0);
   const std::vector<unsigned char> intermediate =
-      ReadPemX509DerFile(root + "/thor/out/intermediate-ca.pem");
+      ReadPemX509DerFile(CertFixturePath("intermediate-server-chain.pem"), 1);
   ASSERT_FALSE(leaf.empty());
   ASSERT_FALSE(intermediate.empty());
   const auto row_before = TempCounters();

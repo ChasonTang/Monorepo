@@ -7,7 +7,6 @@
 #include "odin/cli.h"
 
 #include <cerrno>
-#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -85,6 +84,10 @@ std::string Dirname(const std::string &path) {
   return path.substr(0, pos);
 }
 
+std::string BuildCertDir() {
+  return Dirname(g_test_argv0) + "/gen/thor/odin_test_certs";
+}
+
 std::string Basename(const std::string &path) {
   const auto pos = path.find_last_of('/');
   if (pos == std::string::npos) {
@@ -100,25 +103,6 @@ constexpr const char kUS[] =
 constexpr const char kUBoth[] =
     "usage: 'odin-client --listen ADDR --server ADDR' or "
     "'odin-server --listen ADDR --quic-cert FILE --quic-key FILE'";
-
-std::string FindRepoRoot() {
-  char cwd_buf[PATH_MAX];
-  if (getcwd(cwd_buf, sizeof(cwd_buf)) == nullptr) {
-    return ".";
-  }
-  std::string dir = cwd_buf;
-  for (;;) {
-    const std::string candidate = dir + "/odin/docs/rfc_029_client_ca_file.md";
-    if (access(candidate.c_str(), R_OK) == 0) {
-      return dir;
-    }
-    const size_t slash = dir.find_last_of('/');
-    if (slash == std::string::npos || slash == 0) {
-      return ".";
-    }
-    dir.resize(slash);
-  }
-}
 
 } // namespace
 
@@ -800,7 +784,7 @@ TEST(OdinCliServerHostTest, T8MainBannerServerHostPort) {
 }
 
 TEST(OdinCliCaFileTest, T1ClientParserAcceptsCaFileAndOmission) {
-  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  const std::string ca = BuildCertDir() + "/root-ca.pem";
   {
     MutableArgv argv(
         {"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433"});
@@ -835,7 +819,7 @@ TEST(OdinCliCaFileTest, T1ClientParserAcceptsCaFileAndOmission) {
 }
 
 TEST(OdinCliCaFileTest, T2BadCaFileFormsAndPrecedence) {
-  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  const std::string ca = BuildCertDir() + "/root-ca.pem";
   const std::string usage =
       "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]\n";
   auto expect_parse = [](const std::vector<std::string> &tokens,

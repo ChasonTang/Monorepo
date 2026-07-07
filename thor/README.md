@@ -23,6 +23,7 @@ thor/
   scripts/
     init-ca.sh
     issue-server.sh
+    issue-ca-file-test-fixtures.py
     verify-server.sh
   out/
     .gitignore
@@ -74,6 +75,36 @@ odin-server --listen 9443 \
   --quic-cert thor/out/odin-server.pem \
   --quic-key thor/out/odin-server-key.pem
 ```
+
+## Odin Test Fixtures
+
+Odin unit and integration tests use a compact fixture set generated under the
+GN build directory:
+
+```bash
+./tool/ninja -C out tests
+```
+
+That build invokes `//thor:odin_test_certs`, which runs the Python generator
+`thor/scripts/issue-ca-file-test-fixtures.py` and refreshes only the files the
+tests need.
+
+For the default `out` build, the files are written under
+`out/gen/thor/odin_test_certs/`:
+
+- `root-ca.pem`
+- `root-ca-key.pem`
+- `odin-test-leaf-key.pem`
+- `odin-server.pem`
+- `intermediate-server-chain.pem`
+- `untrusted-intermediate-server-chain.pem`
+- `cn-only-server.pem`
+- `odin-client-auth-only.pem`
+
+The test server leaves intentionally share `odin-test-leaf-key.pem`; their
+separate certificate files carry the SAN, EKU, and chain differences under
+test. For manual generation, pass `--out-dir <build-dir>/gen/thor/odin_test_certs`
+to the Python script.
 
 ## Issue A Generic Server Certificate
 

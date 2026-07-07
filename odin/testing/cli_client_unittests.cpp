@@ -13,7 +13,6 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
-#include <climits>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -35,6 +34,8 @@
 
 // NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
 
+extern std::string g_test_argv0;
+
 namespace {
 
 constexpr int kShortDeadlineMs = 1500;
@@ -43,23 +44,16 @@ constexpr int kLongDeadlineMs = 4000;
 volatile sig_atomic_t g_child_sigint_count = 0;
 volatile sig_atomic_t g_child_sigterm_count = 0;
 
-std::string FindRepoRoot() {
-  char cwd_buf[PATH_MAX];
-  if (getcwd(cwd_buf, sizeof(cwd_buf)) == nullptr) {
+std::string Dirname(const std::string &path) {
+  const auto pos = path.find_last_of('/');
+  if (pos == std::string::npos) {
     return ".";
   }
-  std::string dir = cwd_buf;
-  for (;;) {
-    const std::string candidate = dir + "/odin/docs/rfc_029_client_ca_file.md";
-    if (access(candidate.c_str(), R_OK) == 0) {
-      return dir;
-    }
-    const size_t slash = dir.find_last_of('/');
-    if (slash == std::string::npos || slash == 0) {
-      return ".";
-    }
-    dir.resize(slash);
-  }
+  return path.substr(0, pos);
+}
+
+std::string BuildCertDir() {
+  return Dirname(g_test_argv0) + "/gen/thor/odin_test_certs";
 }
 
 void CountingSigint(int) { g_child_sigint_count += 1; }
@@ -899,7 +893,7 @@ TEST(OdinRFC028ClientTransportTest, T3QuicStartupCreatesRuntimeAfterListener) {
 }
 
 TEST(OdinCliClientCaFileTest, T3RunnerForwardsSuppliedCaFileAndPreservesOmit) {
-  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  const std::string ca = BuildCertDir() + "/root-ca.pem";
   Rfc028QuicChild supplied =
       SpawnRfc028QuicChild({"odin-client", "--listen", "0", "--server",
                             "127.0.0.1:4433", "--ca-file", ca});

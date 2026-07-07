@@ -1,0 +1,30 @@
+# Thor test fixture generation.
+
+action("odin_test_certs") {
+  testonly = true
+
+  script = "scripts/issue-ca-file-test-fixtures.py"
+
+  inputs = [ script ]
+
+  cert_dir = "$target_gen_dir/odin_test_certs"
+
+  outputs = [
+    "$cert_dir/root-ca.pem",
+    "$cert_dir/root-ca-key.pem",
+    "$cert_dir/odin-test-leaf-key.pem",
+    "$cert_dir/odin-server.pem",
+    "$cert_dir/intermediate-server-chain.pem",
+    "$cert_dir/untrusted-intermediate-server-chain.pem",
+    "$cert_dir/cn-only-server.pem",
+    "$cert_dir/odin-client-auth-only.pem",
+    "$cert_dir/odin_test_certs.stamp",
+  ]
+
+  args = [
+    "--out-dir",
+    rebase_path(cert_dir, root_build_dir),
+    "--stamp",
+    rebase_path("$cert_dir/odin_test_certs.stamp", root_build_dir),
+  ]
+}
