@@ -4,8 +4,8 @@
  * row below is what odin_cli_main writes and returns when odin_cli_parse
  * yields the corresponding status.
  *
- *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR"
- *   <U_S>    = "usage: odin-server --listen ADDR "
+ *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR [--ca-file
+ * FILE]" <U_S>    = "usage: odin-server --listen ADDR "
  *              "--quic-cert FILE --quic-key FILE"
  *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR' or "
  *              "'odin-server --listen ADDR --quic-cert FILE "
@@ -80,6 +80,7 @@ static const char *cli_basename(const char *path) {
 static const struct option kClientLong[] = {
     {"listen", required_argument, NULL, 'l'},
     {"server", required_argument, NULL, 's'},
+    {"ca-file", required_argument, NULL, 1003},
     {"help", no_argument, NULL, 'h'},
     {NULL, 0, NULL, 0},
 };
@@ -103,6 +104,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   out->server_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
   out->quic_cert_file = NULL;
   out->quic_key_file = NULL;
+  out->quic_ca_file = NULL;
 
   if (argc < 1 || argv[0] == NULL) {
     return ODIN_CLI_ERR_UNKNOWN_MODE;
@@ -149,6 +151,8 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   const char *server_arg = NULL;
   const char *quic_cert_arg = NULL;
   const char *quic_key_arg = NULL;
+  const char *quic_ca_arg = NULL;
+  int bad_client_ca = 0;
 
   for (;;) {
     int longindex = -1;
@@ -156,6 +160,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     if (c == -1) {
       break;
     }
+    int missing_required_long_arg = 0;
     if (longindex >= 0) {
       /* getopt_long accepts any unique prefix of a long option by default,
        * so --lis, --serv, and --he would otherwise dispatch as --listen,
@@ -184,6 +189,15 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
         unknown_flag_seen = 1;
         continue;
       }
+      if (c == 1003 && tok[2 + exp_len] == '\0' &&
+          !(optarg != NULL && optind >= 1 && optind <= argc &&
+            optarg == argv[optind - 1])) {
+        missing_required_long_arg = 1;
+      }
+    }
+    if (missing_required_long_arg) {
+      unknown_flag_seen = 1;
+      continue;
     }
     switch (c) {
     case 'l':
@@ -197,6 +211,15 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       break;
     case 1002:
       quic_key_arg = optarg;
+      break;
+    case 1003:
+      if (optarg == NULL || (uintptr_t)optarg == UINTPTR_MAX) {
+        unknown_flag_seen = 1;
+      } else if (optarg[0] == '\0') {
+        bad_client_ca = 1;
+      } else {
+        quic_ca_arg = optarg;
+      }
       break;
     case 'h':
       help_seen = 1;
@@ -238,7 +261,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     status = ODIN_CLI_ERR_BAD_SERVER;
   } else if (mode == ODIN_CLI_MODE_CLIENT && server_arg == NULL) {
     status = ODIN_CLI_ERR_MISSING_REQUIRED;
-  } else if (bad_quic_tls) {
+  } else if (bad_quic_tls || (mode == ODIN_CLI_MODE_CLIENT && bad_client_ca)) {
     status = ODIN_CLI_ERR_BAD_QUIC_TLS;
   } else {
     out->listen_port =
@@ -252,6 +275,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       out->server_host_len = sr.host_len;
       out->server_port = sr.port;
       out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
+      out->quic_ca_file = quic_ca_arg;
     } else {
       out->server_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
       out->quic_cert_file = quic_cert_arg;
@@ -274,7 +298,8 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   odin_cli_args_t args;
   const odin_cli_status_t status = odin_cli_parse(argc, argv, &args);
 
-  static const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
+  static const char kUC[] =
+      "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]";
   static const char kUS[] =
       "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
   static const char kUBoth[] =
@@ -289,7 +314,7 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
     if (args.mode == ODIN_CLI_MODE_CLIENT) {
       const odin_cli_client_config_t config = {
           args.listen_port, args.server_host,      args.server_host_len,
-          args.server_port, args.client_transport,
+          args.server_port, args.client_transport, args.quic_ca_file,
       };
       (void)fflush(out);
       return odin_cli_run_client(&config, err);

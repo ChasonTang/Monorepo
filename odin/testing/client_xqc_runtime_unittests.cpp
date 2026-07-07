@@ -29,6 +29,7 @@
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include "odin/client_session.h"
 #include "odin/event_loop.h"
@@ -490,6 +491,281 @@ int ProductionCertVerify(const unsigned char *certs[], const size_t cert_len[],
   EXPECT_TRUE(state != nullptr && state->ca_verified);
   return state != nullptr && state->ca_verified ? 0 : -1;
 }
+
+std::vector<unsigned char> ReadPemX509DerFile(const std::string &path,
+                                              size_t index = 0) {
+  BIO *bio = BIO_new_file(path.c_str(), "r");
+  if (bio == nullptr) {
+    return {};
+  }
+  X509 *cert = nullptr;
+  for (size_t i = 0; i <= index; ++i) {
+    if (cert != nullptr) {
+      X509_free(cert);
+      cert = nullptr;
+    }
+    cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+    if (cert == nullptr) {
+      BIO_free(bio);
+      return {};
+    }
+  }
+  BIO_free(bio);
+  const int len = i2d_X509(cert, nullptr);
+  if (len <= 0) {
+    X509_free(cert);
+    return {};
+  }
+  std::vector<unsigned char> der(static_cast<size_t>(len));
+  unsigned char *p = der.data();
+  if (i2d_X509(cert, &p) != len) {
+    der.clear();
+  }
+  X509_free(cert);
+  return der;
+}
+
+int CallVerifier(xqc_cert_verify_pt cb, void *user_data,
+                 const std::vector<std::vector<unsigned char>> &chain) {
+  std::vector<const unsigned char *> certs;
+  std::vector<size_t> lens;
+  certs.reserve(chain.size());
+  lens.reserve(chain.size());
+  for (const auto &cert : chain) {
+    certs.push_back(cert.data());
+    lens.push_back(cert.size());
+  }
+  return cb(certs.data(), lens.data(), chain.size(), user_data);
+}
+
+odin_xqc_client_runtime_test_temp_counters_t TempCounters() {
+  return odin_xqc_client_runtime_test_record()->verifier_temps;
+}
+
+void ExpectTempDelta(const odin_xqc_client_runtime_test_temp_counters_t &before,
+                     uint64_t leaf, uint64_t intermediate, uint64_t stack,
+                     uint64_t ctx) {
+  const auto after = TempCounters();
+  EXPECT_EQ(after.leaf_x509_allocs - before.leaf_x509_allocs, leaf);
+  EXPECT_EQ(after.leaf_x509_frees - before.leaf_x509_frees, leaf);
+  EXPECT_EQ(after.intermediate_x509_allocs - before.intermediate_x509_allocs,
+            intermediate);
+  EXPECT_EQ(after.intermediate_x509_frees - before.intermediate_x509_frees,
+            intermediate);
+  EXPECT_EQ(after.intermediate_stack_allocs - before.intermediate_stack_allocs,
+            stack);
+  EXPECT_EQ(after.intermediate_stack_frees - before.intermediate_stack_frees,
+            stack);
+  EXPECT_EQ(after.store_ctx_allocs - before.store_ctx_allocs, ctx);
+  EXPECT_EQ(after.store_ctx_frees - before.store_ctx_frees, ctx);
+}
+
+void ExpectRawVerifierDelta(xqc_cert_verify_pt cb, const unsigned char *certs[],
+                            const size_t lens[], size_t certs_len,
+                            void *user_data, bool expect_ok, uint64_t leaf,
+                            uint64_t intermediate, uint64_t stack,
+                            uint64_t ctx) {
+  const auto before = TempCounters();
+  const int rc = cb(certs, lens, certs_len, user_data);
+  if (expect_ok) {
+    EXPECT_EQ(rc, 0);
+  } else {
+    EXPECT_NE(rc, 0);
+  }
+  ExpectTempDelta(before, leaf, intermediate, stack, ctx);
+}
+
+void ExpectVerifierDelta(xqc_cert_verify_pt cb, void *user_data,
+                         const std::vector<std::vector<unsigned char>> &chain,
+                         bool expect_ok, uint64_t leaf, uint64_t intermediate,
+                         uint64_t stack, uint64_t ctx) {
+  const auto before = TempCounters();
+  const int rc = CallVerifier(cb, user_data, chain);
+  if (expect_ok) {
+    EXPECT_EQ(rc, 0);
+  } else {
+    EXPECT_NE(rc, 0);
+  }
+  ExpectTempDelta(before, leaf, intermediate, stack, ctx);
+}
+
+bool CopyFileBytes(const std::string &src, const std::string &dst) {
+  FILE *in = std::fopen(src.c_str(), "rb");
+  if (in == nullptr) {
+    return false;
+  }
+  FILE *out = std::fopen(dst.c_str(), "wb");
+  if (out == nullptr) {
+    (void)std::fclose(in);
+    return false;
+  }
+  char buf[4096];
+  bool ok = true;
+  for (;;) {
+    const size_t n = std::fread(buf, 1, sizeof(buf), in);
+    if (n > 0 && std::fwrite(buf, 1, n, out) != n) {
+      ok = false;
+      break;
+    }
+    if (n < sizeof(buf)) {
+      if (std::ferror(in)) {
+        ok = false;
+      }
+      break;
+    }
+  }
+  ok = std::fclose(out) == 0 && ok;
+  ok = std::fclose(in) == 0 && ok;
+  return ok;
+}
+
+class ScopedFile {
+public:
+  explicit ScopedFile(FILE *file) : file_(file) {}
+  ~ScopedFile() { reset(); }
+
+  FILE *get() const { return file_; }
+  int close() {
+    FILE *file = file_;
+    file_ = nullptr;
+    return std::fclose(file);
+  }
+
+private:
+  void reset() {
+    if (file_ != nullptr) {
+      (void)std::fclose(file_);
+    }
+    file_ = nullptr;
+  }
+
+  FILE *file_ = nullptr;
+};
+
+class ScopedFd {
+public:
+  ScopedFd() = default;
+  explicit ScopedFd(int fd) : fd_(fd) {}
+  ~ScopedFd() { reset(); }
+
+  int get() const { return fd_; }
+  void reset(int fd = -1) {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+    fd_ = fd;
+  }
+  int release() {
+    const int fd = fd_;
+    fd_ = -1;
+    return fd;
+  }
+
+private:
+  int fd_ = -1;
+};
+
+class ScopedClientRuntime {
+public:
+  ~ScopedClientRuntime() {
+    if (rt_ != nullptr) {
+      odin_xqc_client_runtime_force_destroy(rt_);
+    }
+  }
+
+  odin_xqc_client_runtime_t *get() const { return rt_; }
+  odin_xqc_client_runtime_t **out() { return &rt_; }
+  void force_destroy() {
+    if (rt_ != nullptr) {
+      odin_xqc_client_runtime_force_destroy(rt_);
+      rt_ = nullptr;
+    }
+  }
+
+private:
+  odin_xqc_client_runtime_t *rt_ = nullptr;
+};
+
+class ScopedServerRuntime {
+public:
+  ~ScopedServerRuntime() {
+    if (rt_ != nullptr) {
+      odin_xqc_server_runtime_force_destroy(rt_);
+    }
+  }
+
+  odin_xqc_server_runtime_t *get() const { return rt_; }
+  odin_xqc_server_runtime_t **out() { return &rt_; }
+  void force_destroy() {
+    if (rt_ != nullptr) {
+      odin_xqc_server_runtime_force_destroy(rt_);
+      rt_ = nullptr;
+    }
+  }
+
+private:
+  odin_xqc_server_runtime_t *rt_ = nullptr;
+};
+
+class ScopedXqcUdp {
+public:
+  ~ScopedXqcUdp() {
+    if (xu_ != nullptr) {
+      odin_xqc_udp_destroy(xu_);
+    }
+  }
+
+  odin_xqc_udp_t *get() const { return xu_; }
+  odin_xqc_udp_t **out() { return &xu_; }
+
+private:
+  odin_xqc_udp_t *xu_ = nullptr;
+};
+
+const odin_xqc_client_runtime_test_call_t *
+LastClientCall(odin_xqc_client_runtime_test_call_kind_t kind) {
+  const odin_xqc_client_runtime_test_record_t *record =
+      odin_xqc_client_runtime_test_record();
+  for (unsigned int i = record->call_count; i > 0; --i) {
+    const odin_xqc_client_runtime_test_call_t *call = &record->calls[i - 1u];
+    if (call->kind == kind) {
+      return call;
+    }
+  }
+  return nullptr;
+}
+
+void *LastClientXqcUserData() {
+  const odin_xqc_client_runtime_test_call_t *call =
+      LastClientCall(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_CREATE);
+  return call != nullptr && call->xu != nullptr
+             ? odin_xqc_udp_xqc_user_data(call->xu)
+             : nullptr;
+}
+
+struct CaFileProductionCase {
+  std::string cert_file;
+  std::string key_file;
+  std::string server_host;
+  std::string ca_file;
+  bool ipv6 = false;
+};
+
+struct CaFileProductionResult {
+  odin_xqc_client_runtime_test_state_t state{};
+  uint64_t cert_verify_successes = 0;
+  uint64_t cert_verify_failures = 0;
+  int last_verifier_x509_error = 0;
+  unsigned int xqc_connect_calls = 0;
+  unsigned int stream_create_calls = 0;
+  bool saw_connect_alpn = false;
+  uint8_t cert_verify_flag = 0;
+  bool cert_verify_cb_present = false;
+  std::string downstream;
+  std::string upstream;
+  int filter_calls = 0;
+  bool saw_expected_loopback = false;
+};
 
 struct ProductionDialFilterState {
   int calls = 0;
@@ -1127,6 +1403,316 @@ protected:
     ASSERT_NE(h.rt, nullptr);
     ASSERT_NE(h.app_callbacks, nullptr);
     ASSERT_NE(h.xu_user_data, nullptr);
+  }
+
+  void CreateDefaultRuntimeOwned(const char *server_host, const char *ca_file,
+                                 odin_xqc_client_runtime_t **rt) {
+    h.expected_server_host = server_host;
+    h.expected_no_crypto_flag = 0;
+    h.expected_cert_verify_flag =
+        ca_file != nullptr ? XQC_TLS_CERT_FLAG_NEED_VERIFY : 0;
+    odin_xqc_client_runtime_default_config_t config{};
+    config.loop = h.loop;
+    config.local_addr =
+        reinterpret_cast<const struct sockaddr *>(&h.local_addr);
+    config.local_addrlen = sizeof(h.local_addr);
+    config.peer_addr = reinterpret_cast<const struct sockaddr *>(&h.peer_addr);
+    config.peer_addrlen = sizeof(h.peer_addr);
+    config.server_host = server_host;
+    config.ca_file = ca_file;
+    ASSERT_EQ(odin_xqc_client_runtime_create_default(&config, rt), 0)
+        << std::strerror(errno);
+    ASSERT_NE(*rt, nullptr);
+  }
+
+  void CreateCaDefaultRuntimeOwned(const char *server_host,
+                                   const std::string &ca,
+                                   odin_xqc_client_runtime_t **rt,
+                                   xqc_cert_verify_pt *cb, void **user_data) {
+    CreateDefaultRuntimeOwned(server_host, ca.c_str(), rt);
+    const odin_xqc_client_runtime_test_record_t *record =
+        odin_xqc_client_runtime_test_record();
+    ASSERT_NE(
+        record->last_default_create.transport_callbacks_value.cert_verify_cb,
+        nullptr);
+    ASSERT_NE(record->verifier_user_data, nullptr);
+    *cb = record->last_default_create.transport_callbacks_value.cert_verify_cb;
+    *user_data = record->verifier_user_data;
+  }
+
+  void CreateCaDefaultRuntime(const char *server_host, const std::string &ca,
+                              xqc_cert_verify_pt *cb, void **user_data) {
+    CreateCaDefaultRuntimeOwned(server_host, ca, &h.rt, cb, user_data);
+  }
+
+  void UseProductionXqcOps() {
+    ClearOps();
+    odin_xqc_client_runtime_test_reset();
+    odin_xqc_server_runtime_test_reset();
+    odin_xqc_server_runtime_test_set_ops(nullptr);
+    odin_xqc_udp_test_set_ops(nullptr);
+    static const odin_xqc_stream_transport_test_ops_t kRealStreamOps = {
+        RealStreamRecv,
+        RealStreamSend,
+        RealStreamSetUserData,
+    };
+    odin_xqc_stream_transport_test_set_ops(&kRealStreamOps);
+  }
+
+  void RunCaFileProduction(const CaFileProductionCase &tc, bool expect_success,
+                           CaFileProductionResult *out) {
+    ASSERT_NE(out, nullptr);
+    (void)signal(SIGPIPE, SIG_IGN);
+    UseProductionXqcOps();
+
+    ASSERT_EQ(access(tc.cert_file.c_str(), R_OK), 0) << tc.cert_file;
+    ASSERT_EQ(access(tc.key_file.c_str(), R_OK), 0) << tc.key_file;
+    ASSERT_EQ(access(tc.ca_file.c_str(), R_OK), 0) << tc.ca_file;
+
+    uint16_t upstream_port = 0;
+    ScopedFd upstream_lfd(OpenLoopbackListener(&upstream_port));
+    ASSERT_GE(upstream_lfd.get(), 0) << std::strerror(errno);
+    ProductionDialFilterState filter;
+    filter.expected_port = upstream_port;
+
+    xqc_engine_ssl_config_t server_ssl;
+    std::memset(&server_ssl, 0, sizeof(server_ssl));
+    server_ssl.private_key_file = const_cast<char *>(tc.key_file.c_str());
+    server_ssl.cert_file = const_cast<char *>(tc.cert_file.c_str());
+    server_ssl.ciphers = const_cast<char *>(XQC_TLS_CIPHERS);
+    server_ssl.groups = const_cast<char *>(XQC_TLS_GROUPS);
+    xqc_config_t server_engine_config;
+    std::memset(&server_engine_config, 0, sizeof(server_engine_config));
+    xqc_engine_callback_t server_engine_callbacks;
+    std::memset(&server_engine_callbacks, 0, sizeof(server_engine_callbacks));
+
+    struct sockaddr_in server_bind4 = Loopback4(0);
+    struct sockaddr_in6 server_bind6 = Loopback6(0);
+    const struct sockaddr *server_bind =
+        tc.ipv6 ? reinterpret_cast<const struct sockaddr *>(&server_bind6)
+                : reinterpret_cast<const struct sockaddr *>(&server_bind4);
+    const socklen_t server_bind_len =
+        tc.ipv6 ? static_cast<socklen_t>(sizeof(server_bind6))
+                : static_cast<socklen_t>(sizeof(server_bind4));
+
+    odin_xqc_server_runtime_config_t server_config;
+    std::memset(&server_config, 0, sizeof(server_config));
+    server_config.loop = h.loop;
+    server_config.local_addr = server_bind;
+    server_config.local_addrlen = server_bind_len;
+    server_config.engine_config = &server_engine_config;
+    server_config.ssl_config = &server_ssl;
+    server_config.engine_callbacks = &server_engine_callbacks;
+
+    ScopedServerRuntime server;
+    ASSERT_EQ(odin_xqc_server_runtime_create(&server_config, server.out()), 0)
+        << std::strerror(errno);
+    ASSERT_NE(server.get(), nullptr);
+    odin_xqc_server_runtime_set_dial_filter(server.get(), ProductionDialFilter,
+                                            &filter);
+    ASSERT_EQ(odin_xqc_server_runtime_start(server.get()), 0)
+        << std::strerror(errno);
+
+    struct sockaddr_storage server_addr;
+    std::memset(&server_addr, 0, sizeof(server_addr));
+    socklen_t server_addrlen = sizeof(server_addr);
+    ASSERT_EQ(odin_xqc_server_runtime_local_addr(
+                  server.get(),
+                  reinterpret_cast<struct sockaddr *>(&server_addr),
+                  &server_addrlen),
+              0)
+        << std::strerror(errno);
+
+    struct sockaddr_in client_bind4 = Loopback4(0);
+    struct sockaddr_in6 client_bind6 = Loopback6(0);
+    const struct sockaddr *client_bind =
+        tc.ipv6 ? reinterpret_cast<const struct sockaddr *>(&client_bind6)
+                : reinterpret_cast<const struct sockaddr *>(&client_bind4);
+    const socklen_t client_bind_len =
+        tc.ipv6 ? static_cast<socklen_t>(sizeof(client_bind6))
+                : static_cast<socklen_t>(sizeof(client_bind4));
+
+    odin_xqc_client_runtime_default_config_t client_config{};
+    client_config.loop = h.loop;
+    client_config.local_addr = client_bind;
+    client_config.local_addrlen = client_bind_len;
+    client_config.peer_addr =
+        reinterpret_cast<const struct sockaddr *>(&server_addr);
+    client_config.peer_addrlen = server_addrlen;
+    client_config.server_host = tc.server_host.c_str();
+    client_config.ca_file = tc.ca_file.c_str();
+
+    ScopedClientRuntime client;
+    ASSERT_EQ(
+        odin_xqc_client_runtime_create_default(&client_config, client.out()), 0)
+        << std::strerror(errno);
+    ASSERT_NE(client.get(), nullptr);
+    const odin_xqc_client_runtime_test_record_t *record =
+        odin_xqc_client_runtime_test_record();
+    EXPECT_EQ(
+        record->last_default_create.conn_ssl_config_value.cert_verify_flag,
+        XQC_TLS_CERT_FLAG_NEED_VERIFY);
+    EXPECT_NE(
+        record->last_default_create.transport_callbacks_value.cert_verify_cb,
+        nullptr);
+
+    ASSERT_EQ(odin_xqc_client_runtime_start(client.get()), 0)
+        << std::strerror(errno);
+
+    CaFileProductionResult result;
+    auto refresh_state = [&] {
+      if (odin_xqc_client_runtime_test_state(client.get(), &result.state) !=
+          0) {
+        return false;
+      }
+      record = odin_xqc_client_runtime_test_record();
+      return true;
+    };
+    const bool reached_terminal = RunUntil(
+        h.loop,
+        [&] {
+          if (!refresh_state()) {
+            return false;
+          }
+          if (expect_success) {
+            return result.state.handshake_done == 1;
+          }
+          return result.state.closing || result.state.connect_errno != 0 ||
+                 record->cert_verify_failures > 0 ||
+                 record->cert_verify_successes > 0;
+        },
+        2000);
+    if (expect_success) {
+      ASSERT_TRUE(reached_terminal)
+          << "state conn=" << result.state.conn
+          << " cid_registered=" << result.state.cid_registered
+          << " handshake_done=" << result.state.handshake_done
+          << " closing=" << result.state.closing
+          << " connect_errno=" << result.state.connect_errno
+          << " cert successes=" << record->cert_verify_successes
+          << " cert failures=" << record->cert_verify_failures;
+    }
+    ASSERT_TRUE(refresh_state());
+
+    const odin_xqc_client_runtime_test_call_t *connect_call =
+        LastClientCall(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_XQC_CONNECT);
+    ASSERT_NE(connect_call, nullptr);
+    if (connect_call != nullptr && connect_call->alpn != nullptr) {
+      result.saw_connect_alpn =
+          connect_call->alpn_len == sizeof(ODIN_XQC_CLIENT_ALPN) - 1u &&
+          std::string(connect_call->alpn, connect_call->alpn_len) ==
+              ODIN_XQC_CLIENT_ALPN;
+    }
+
+    if (result.state.handshake_done == 1) {
+      ScopedFd owned;
+      ScopedFd local_peer;
+      int owned_raw = -1;
+      int peer_raw = -1;
+      MakePair(&owned_raw, &peer_raw);
+      owned.reset(owned_raw);
+      local_peer.reset(peer_raw);
+      ASSERT_EQ(
+          odin_xqc_client_runtime_add_connection(client.get(), owned.get()), 0)
+          << std::strerror(errno);
+      (void)owned.release();
+      const std::string req = HttpConnectReq("127.0.0.1", upstream_port);
+      const std::string client_tail = "client-tail!";
+      const std::string server_tail = "server-tail!";
+      ASSERT_TRUE(WriteAllFd(local_peer.get(), req.data(), req.size()));
+      ASSERT_TRUE(
+          WriteAllFd(local_peer.get(), client_tail.data(), client_tail.size()));
+
+      ScopedFd upstream_fd;
+      ASSERT_TRUE(RunUntil(
+          h.loop,
+          [&] {
+            if (upstream_fd.get() >= 0) {
+              return true;
+            }
+            const int fd = accept(upstream_lfd.get(), nullptr, nullptr);
+            if (fd < 0 &&
+                (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+              return false;
+            }
+            if (fd >= 0) {
+              upstream_fd.reset(fd);
+            }
+            return upstream_fd.get() >= 0;
+          },
+          2000));
+      ASSERT_GE(upstream_fd.get(), 0) << std::strerror(errno);
+      ASSERT_TRUE(SetNonblockNoAssert(upstream_fd.get()))
+          << std::strerror(errno);
+
+      ASSERT_TRUE(RunUntil(
+          h.loop,
+          [&] {
+            result.downstream += DrainFdNow(local_peer.get());
+            return result.downstream.find(kHttp200) != std::string::npos;
+          },
+          2000));
+      ASSERT_TRUE(RunUntil(
+          h.loop,
+          [&] {
+            result.upstream += DrainFdNow(upstream_fd.get());
+            return result.upstream.size() >= client_tail.size();
+          },
+          2000));
+
+      if (expect_success) {
+        EXPECT_EQ(result.upstream, client_tail);
+      } else {
+        ADD_FAILURE() << "handshake unexpectedly completed";
+        EXPECT_EQ(result.downstream.find(kHttp200), std::string::npos);
+      }
+
+      if (expect_success) {
+        ASSERT_TRUE(WriteAllFd(upstream_fd.get(), server_tail.data(),
+                               server_tail.size()));
+        ASSERT_TRUE(RunUntil(
+            h.loop,
+            [&] {
+              result.downstream += DrainFdNow(local_peer.get());
+              return result.downstream.find(std::string(kHttp200) +
+                                            server_tail) != std::string::npos;
+            },
+            2000));
+        EXPECT_EQ(result.downstream, std::string(kHttp200) + server_tail);
+      }
+    } else if (expect_success) {
+      ADD_FAILURE() << "handshake did not complete";
+    } else {
+      RunLoopFor(h.loop, 20000);
+      const int fd = accept(upstream_lfd.get(), nullptr, nullptr);
+      if (fd >= 0) {
+        close(fd);
+        ADD_FAILURE() << "origin accepted a connection before TLS success";
+      } else {
+        EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
+      }
+    }
+
+    record = odin_xqc_client_runtime_test_record();
+    result.cert_verify_successes = record->cert_verify_successes;
+    result.cert_verify_failures = record->cert_verify_failures;
+    result.last_verifier_x509_error = record->last_verifier_x509_error;
+    result.cert_verify_flag =
+        record->last_default_create.conn_ssl_config_value.cert_verify_flag;
+    result.xqc_connect_calls =
+        CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_XQC_CONNECT);
+    result.stream_create_calls =
+        CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_STREAM_CREATE_BIDI);
+    result.cert_verify_cb_present =
+        record->last_default_create.transport_callbacks_value.cert_verify_cb !=
+        nullptr;
+    result.filter_calls = filter.calls;
+    result.saw_expected_loopback = filter.saw_expected_loopback;
+
+    client.force_destroy();
+    RunLoopFor(h.loop, 50000);
+    server.force_destroy();
+    *out = result;
   }
 
   void StartRuntime() {
@@ -4351,6 +4937,442 @@ TEST_F(OdinXqcClientRuntimeTest, RFC028T18DefaultCreateAddressShapes) {
   EXPECT_EQ(odin_xqc_client_runtime_test_record()->runtime_free_calls, 2u);
   EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_UDP_DESTROY),
             2u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT4DefaultRuntimeDefaultsConfiguredPath) {
+  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  h.expected_server_host = "127.0.0.1";
+  h.expected_no_crypto_flag = 0;
+
+  odin_xqc_client_runtime_default_config_t config{};
+  config.loop = h.loop;
+  config.local_addr = reinterpret_cast<const struct sockaddr *>(&h.local_addr);
+  config.local_addrlen = sizeof(h.local_addr);
+  config.peer_addr = reinterpret_cast<const struct sockaddr *>(&h.peer_addr);
+  config.peer_addrlen = sizeof(h.peer_addr);
+  config.server_host = "127.0.0.1";
+  ASSERT_EQ(odin_xqc_client_runtime_create_default(&config, &h.rt), 0)
+      << std::strerror(errno);
+  const odin_xqc_client_runtime_test_record_t *record =
+      odin_xqc_client_runtime_test_record();
+  EXPECT_EQ(record->last_default_create.ca_file, nullptr);
+  EXPECT_EQ(record->last_default_create.transport_callbacks, nullptr);
+  EXPECT_EQ(record->last_default_create.conn_ssl_config_value.cert_verify_flag,
+            0);
+  EXPECT_EQ(record->ca_store_load_successes, 0u);
+  odin_xqc_client_runtime_destroy(h.rt);
+  h.rt = nullptr;
+  EXPECT_EQ(record->ca_store_free_calls, 0u);
+
+  InstallOps();
+  config.ca_file = ca.c_str();
+  ASSERT_EQ(odin_xqc_client_runtime_create_default(&config, &h.rt), 0)
+      << std::strerror(errno);
+  record = odin_xqc_client_runtime_test_record();
+  EXPECT_STREQ(record->last_default_create.ca_file_value, ca.c_str());
+  EXPECT_EQ(record->ca_store_load_successes, 1u);
+  EXPECT_TRUE(record->runtime_owned_ca_store_present);
+  EXPECT_EQ(record->last_default_create.conn_ssl_config_value.cert_verify_flag,
+            XQC_TLS_CERT_FLAG_NEED_VERIFY);
+  EXPECT_EQ(record->last_default_create.conn_ssl_config_value.cert_verify_flag &
+                XQC_TLS_CERT_FLAG_ALLOW_SELF_SIGNED,
+            0);
+  EXPECT_NE(
+      record->last_default_create.transport_callbacks_value.cert_verify_cb,
+      nullptr);
+  EXPECT_NE(record->verifier_user_data, nullptr);
+  odin_xqc_client_runtime_destroy(h.rt);
+  h.rt = nullptr;
+  EXPECT_EQ(record->ca_store_free_calls, 1u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT5RejectsAndCleansCaSetupFailures) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string missing = root + "/thor/out/does-not-exist-ca.pem";
+  const std::string invalid = "/tmp/odin-rfc029-invalid-ca.pem";
+  {
+    ScopedFile f(std::fopen(invalid.c_str(), "w"));
+    ASSERT_NE(f.get(), nullptr);
+    ASSERT_GE(std::fputs("not a certificate\n", f.get()), 0);
+    ASSERT_EQ(f.close(), 0);
+  }
+
+  odin_xqc_client_runtime_default_config_t config{};
+  config.loop = h.loop;
+  config.local_addr = reinterpret_cast<const struct sockaddr *>(&h.local_addr);
+  config.local_addrlen = sizeof(h.local_addr);
+  config.peer_addr = reinterpret_cast<const struct sockaddr *>(&h.peer_addr);
+  config.peer_addrlen = sizeof(h.peer_addr);
+  config.server_host = "127.0.0.1";
+
+  auto expect_invalid_ca = [&](const char *path) {
+    odin_xqc_client_runtime_t *sentinel =
+        reinterpret_cast<odin_xqc_client_runtime_t *>(0x2929);
+    odin_xqc_client_runtime_default_config_t bad = config;
+    bad.ca_file = path;
+    errno = 0;
+    EXPECT_EQ(odin_xqc_client_runtime_create_default(&bad, &sentinel), -1);
+    EXPECT_EQ(errno, EINVAL);
+    EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x2929));
+    EXPECT_EQ(odin_xqc_client_runtime_test_record()->udp_create_calls, 0u);
+    EXPECT_EQ(CountClientCalls(ODIN_XQC_CLIENT_RUNTIME_TEST_CALL_XQC_CONNECT),
+              0u);
+  };
+
+  expect_invalid_ca("");
+  InstallOps();
+  expect_invalid_ca(missing.c_str());
+  InstallOps();
+  expect_invalid_ca(invalid.c_str());
+  InstallOps();
+
+  errno = 0;
+  EXPECT_EQ(odin_xqc_client_runtime_test_fail_next_x509_store_new(0), -1);
+  EXPECT_EQ(errno, EINVAL);
+  errno = 0;
+  EXPECT_EQ(odin_xqc_client_runtime_test_fail_next_x509_store_new(-1), -1);
+  EXPECT_EQ(errno, EINVAL);
+  odin_xqc_client_runtime_default_config_t valid = config;
+  valid.ca_file = ca.c_str();
+  ASSERT_EQ(odin_xqc_client_runtime_create_default(&valid, &h.rt), 0)
+      << std::strerror(errno);
+  odin_xqc_client_runtime_destroy(h.rt);
+  h.rt = nullptr;
+
+  InstallOps();
+  ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_x509_store_new(ENOMEM), 0);
+  odin_xqc_client_runtime_t *sentinel =
+      reinterpret_cast<odin_xqc_client_runtime_t *>(0x3030);
+  errno = 0;
+  EXPECT_EQ(odin_xqc_client_runtime_create_default(&valid, &sentinel), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x3030));
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->ca_store_alloc_failures, 1u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->ca_store_load_attempts, 0u);
+
+  InstallOps();
+  ASSERT_EQ(odin_xqc_client_runtime_test_fail_config_copy_alloc(
+                ODIN_XQC_CLIENT_RUNTIME_TEST_CONFIG_COPY_SERVER_HOST, ENOMEM),
+            0);
+  sentinel = reinterpret_cast<odin_xqc_client_runtime_t *>(0x3131);
+  errno = 0;
+  EXPECT_EQ(odin_xqc_client_runtime_create_default(&valid, &sentinel), -1);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(sentinel, reinterpret_cast<odin_xqc_client_runtime_t *>(0x3131));
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->ca_store_load_successes, 1u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->ca_store_free_calls, 1u);
+  EXPECT_EQ(odin_xqc_client_runtime_test_record()->udp_create_calls, 0u);
+  unlink(invalid.c_str());
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT6ProductionHandshakeDns) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  CaFileProductionResult result;
+  RunCaFileProduction({root + "/thor/out/odin-server.pem",
+                       root + "/thor/out/odin-server-key.pem", "localhost", ca,
+                       false},
+                      true, &result);
+  EXPECT_TRUE(result.saw_connect_alpn);
+  EXPECT_EQ(result.cert_verify_flag, XQC_TLS_CERT_FLAG_NEED_VERIFY);
+  EXPECT_TRUE(result.cert_verify_cb_present);
+  EXPECT_GT(result.cert_verify_successes, 0u);
+  EXPECT_EQ(result.cert_verify_failures, 0u);
+  EXPECT_EQ(result.downstream, std::string(kHttp200) + "server-tail!");
+  EXPECT_EQ(result.upstream, "client-tail!");
+  EXPECT_EQ(result.xqc_connect_calls, 1u);
+  EXPECT_EQ(result.stream_create_calls, 1u);
+  EXPECT_EQ(result.filter_calls, 1);
+  EXPECT_TRUE(result.saw_expected_loopback);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT7ProductionHandshakeIntermediateDns) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  CaFileProductionResult result;
+  RunCaFileProduction({root + "/thor/out/intermediate-server-chain.pem",
+                       root + "/thor/out/intermediate-server-key.pem",
+                       "localhost", ca, false},
+                      true, &result);
+  EXPECT_TRUE(result.saw_connect_alpn);
+  EXPECT_EQ(result.cert_verify_flag, XQC_TLS_CERT_FLAG_NEED_VERIFY);
+  EXPECT_TRUE(result.cert_verify_cb_present);
+  EXPECT_GT(result.cert_verify_successes, 0u);
+  EXPECT_EQ(result.cert_verify_failures, 0u);
+  EXPECT_EQ(result.downstream, std::string(kHttp200) + "server-tail!");
+  EXPECT_EQ(result.upstream, "client-tail!");
+  EXPECT_EQ(result.xqc_connect_calls, 1u);
+  EXPECT_EQ(result.stream_create_calls, 1u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT8ProductionRejectsBadServers) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::string odin_cert = root + "/thor/out/odin-server.pem";
+  const std::string odin_key = root + "/thor/out/odin-server-key.pem";
+
+  CaFileProductionResult dns_mismatch;
+  RunCaFileProduction({odin_cert, odin_key, "example.com", ca, false}, false,
+                      &dns_mismatch);
+  EXPECT_EQ(dns_mismatch.state.handshake_done, 0);
+  EXPECT_EQ(dns_mismatch.cert_verify_successes, 0u);
+  EXPECT_GT(dns_mismatch.cert_verify_failures, 0u);
+  EXPECT_EQ(dns_mismatch.last_verifier_x509_error, 0);
+  EXPECT_EQ(dns_mismatch.stream_create_calls, 0u);
+
+  CaFileProductionResult ip_mismatch;
+  RunCaFileProduction({odin_cert, odin_key, "127.0.0.2", ca, false}, false,
+                      &ip_mismatch);
+  EXPECT_EQ(ip_mismatch.state.handshake_done, 0);
+  EXPECT_EQ(ip_mismatch.cert_verify_successes, 0u);
+  EXPECT_GT(ip_mismatch.cert_verify_failures, 0u);
+  EXPECT_EQ(ip_mismatch.last_verifier_x509_error, 0);
+  EXPECT_EQ(ip_mismatch.stream_create_calls, 0u);
+
+  CaFileProductionResult wrong_ca;
+  RunCaFileProduction(
+      {odin_cert, odin_key, "localhost",
+       root + "/boringssl/pki/testdata/cert_issuer_source_static_unittest/"
+              "root.pem",
+       false},
+      false, &wrong_ca);
+  EXPECT_EQ(wrong_ca.state.handshake_done, 0);
+  EXPECT_EQ(wrong_ca.cert_verify_successes, 0u);
+  EXPECT_GT(wrong_ca.cert_verify_failures, 0u);
+  EXPECT_NE(wrong_ca.last_verifier_x509_error, 0);
+  EXPECT_EQ(wrong_ca.stream_create_calls, 0u);
+
+  CaFileProductionResult cn_only;
+  RunCaFileProduction({root + "/thor/out/cn-only-server.pem",
+                       root + "/thor/out/cn-only-server-key.pem", "localhost",
+                       ca, false},
+                      false, &cn_only);
+  EXPECT_EQ(cn_only.state.handshake_done, 0);
+  EXPECT_EQ(cn_only.cert_verify_successes, 0u);
+  EXPECT_GT(cn_only.cert_verify_failures, 0u);
+  EXPECT_EQ(cn_only.last_verifier_x509_error, 0);
+  EXPECT_EQ(cn_only.stream_create_calls, 0u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT9VerifierRejectsLeafFailures) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::vector<unsigned char> leaf =
+      ReadPemX509DerFile(root + "/thor/out/odin-server.pem");
+  ASSERT_FALSE(leaf.empty());
+  xqc_cert_verify_pt cb = nullptr;
+  void *user_data = nullptr;
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("localhost", ca, rt.out(), &cb, &user_data);
+    const unsigned char *certs[] = {leaf.data()};
+    const unsigned char *null_leaf[] = {nullptr};
+    const size_t lens[] = {leaf.size()};
+    ExpectRawVerifierDelta(cb, nullptr, lens, 1, user_data, false, 0, 0, 0, 0);
+    ExpectRawVerifierDelta(cb, certs, nullptr, 1, user_data, false, 0, 0, 0, 0);
+    ExpectRawVerifierDelta(cb, certs, lens, 0, user_data, false, 0, 0, 0, 0);
+    ExpectRawVerifierDelta(cb, null_leaf, lens, 1, user_data, false, 0, 0, 0,
+                           0);
+
+    const std::vector<unsigned char> malformed = {0x30, 0x03, 0x01};
+    ExpectVerifierDelta(cb, user_data, {malformed}, false, 0, 0, 0, 0);
+
+    std::vector<unsigned char> trailing = leaf;
+    trailing.push_back(0);
+    ExpectVerifierDelta(cb, user_data, {trailing}, false, 1, 0, 0, 0);
+  }
+
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("example.com", ca, rt.out(), &cb, &user_data);
+    ExpectVerifierDelta(cb, user_data, {leaf}, false, 1, 0, 0, 0);
+  }
+
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("127.0.0.2", ca, rt.out(), &cb, &user_data);
+    ExpectVerifierDelta(cb, user_data, {leaf}, false, 1, 0, 0, 0);
+  }
+  EXPECT_GT(odin_xqc_client_runtime_test_record()->cert_verify_failures, 0u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT10VerifierRejectsContextAndSetup) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::vector<unsigned char> root_leaf =
+      ReadPemX509DerFile(root + "/thor/out/odin-server.pem");
+  const std::vector<unsigned char> intermediate_leaf =
+      ReadPemX509DerFile(root + "/thor/out/intermediate-server.pem");
+  const std::vector<unsigned char> intermediate =
+      ReadPemX509DerFile(root + "/thor/out/intermediate-ca.pem");
+  const std::vector<unsigned char> untrusted_leaf =
+      ReadPemX509DerFile(root + "/thor/out/untrusted-intermediate-server.pem");
+  const std::vector<unsigned char> untrusted_intermediate =
+      ReadPemX509DerFile(root + "/thor/out/untrusted-intermediate-ca.pem");
+  ASSERT_FALSE(root_leaf.empty());
+  ASSERT_FALSE(intermediate_leaf.empty());
+  ASSERT_FALSE(intermediate.empty());
+  ASSERT_FALSE(untrusted_leaf.empty());
+  ASSERT_FALSE(untrusted_intermediate.empty());
+  xqc_cert_verify_pt cb = nullptr;
+  void *user_data = nullptr;
+
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("localhost", ca, rt.out(), &cb, &user_data);
+    const unsigned char *certs[] = {root_leaf.data()};
+    const size_t lens[] = {root_leaf.size()};
+
+    errno = 0;
+    EXPECT_EQ(odin_xqc_client_runtime_test_fail_next_x509_store_ctx(
+                  ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_INVALID),
+              -1);
+    EXPECT_EQ(errno, EINVAL);
+    ExpectVerifierDelta(cb, user_data, {root_leaf}, true, 1, 0, 0, 1);
+    EXPECT_EQ(
+        odin_xqc_client_runtime_test_record()->last_verifier_setup_failure_kind,
+        0);
+
+    ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_x509_store_ctx(
+                  ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_NEW),
+              0);
+    ExpectRawVerifierDelta(cb, certs, lens, 1, nullptr, false, 0, 0, 0, 0);
+    EXPECT_EQ(
+        odin_xqc_client_runtime_test_record()->last_verifier_setup_failure_kind,
+        0);
+    ExpectVerifierDelta(cb, user_data, {root_leaf}, true, 1, 0, 0, 1);
+    EXPECT_EQ(
+        odin_xqc_client_runtime_test_record()->last_verifier_setup_failure_kind,
+        0);
+
+    ExpectRawVerifierDelta(cb, certs, lens, 1, nullptr, false, 0, 0, 0, 0);
+    ExpectRawVerifierDelta(cb, certs, lens, 1,
+                           reinterpret_cast<void *>(0x12345), false, 0, 0, 0,
+                           0);
+
+    xqc_engine_callback_t udp_engine_callbacks;
+    std::memset(&udp_engine_callbacks, 0, sizeof(udp_engine_callbacks));
+    xqc_transport_callbacks_t udp_transport_callbacks;
+    std::memset(&udp_transport_callbacks, 0, sizeof(udp_transport_callbacks));
+    odin_xqc_udp_config_t udp_config;
+    std::memset(&udp_config, 0, sizeof(udp_config));
+    udp_config.loop = h.loop;
+    udp_config.local_addr =
+        reinterpret_cast<const struct sockaddr *>(&h.local_addr);
+    udp_config.local_addrlen = sizeof(h.local_addr);
+    udp_config.engine_type = XQC_ENGINE_CLIENT;
+    udp_config.engine_callbacks = &udp_engine_callbacks;
+    udp_config.transport_callbacks = &udp_transport_callbacks;
+    udp_config.app_user_data = nullptr;
+    ScopedXqcUdp null_app_udp;
+    ASSERT_EQ(odin_xqc_udp_create(&udp_config, null_app_udp.out()), 0)
+        << std::strerror(errno);
+    ExpectRawVerifierDelta(cb, certs, lens, 1,
+                           odin_xqc_udp_xqc_user_data(null_app_udp.get()),
+                           false, 0, 0, 0, 0);
+
+    ScopedClientRuntime omitted;
+    CreateDefaultRuntimeOwned("localhost", nullptr, omitted.out());
+    void *omitted_user_data = LastClientXqcUserData();
+    ASSERT_NE(omitted_user_data, nullptr);
+    ExpectVerifierDelta(cb, omitted_user_data, {root_leaf}, false, 0, 0, 0, 0);
+
+    const std::vector<unsigned char> bad_intermediate = {0x30, 0x03, 0x01};
+    ExpectVerifierDelta(cb, user_data, {intermediate_leaf, bad_intermediate},
+                        false, 1, 0, 1, 0);
+    std::vector<unsigned char> trailing_intermediate = intermediate;
+    trailing_intermediate.push_back(0);
+    ExpectVerifierDelta(cb, user_data,
+                        {intermediate_leaf, trailing_intermediate}, false, 1, 1,
+                        1, 0);
+
+    struct FailCase {
+      odin_xqc_client_runtime_test_x509_store_ctx_failpoint_t fp;
+      uint64_t ctx_delta;
+    };
+    const FailCase cases[] = {
+        {ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_NEW, 0},
+        {ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_INIT, 1},
+        {ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_SET_DEFAULT, 1},
+    };
+    for (const FailCase &c : cases) {
+      ASSERT_EQ(odin_xqc_client_runtime_test_fail_next_x509_store_ctx(c.fp), 0);
+      ExpectVerifierDelta(cb, user_data, {intermediate_leaf, intermediate},
+                          false, 1, 1, 1, c.ctx_delta);
+      EXPECT_EQ(odin_xqc_client_runtime_test_record()
+                    ->last_verifier_setup_failure_kind,
+                static_cast<int>(c.fp));
+    }
+  }
+
+  {
+    ScopedClientRuntime unrelated;
+    CreateCaDefaultRuntimeOwned(
+        "localhost",
+        root + "/boringssl/pki/testdata/cert_issuer_source_static_unittest/"
+               "root.pem",
+        unrelated.out(), &cb, &user_data);
+    ExpectVerifierDelta(cb, user_data, {root_leaf}, false, 1, 0, 0, 1);
+  }
+
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("localhost", ca, rt.out(), &cb, &user_data);
+    ExpectVerifierDelta(cb, user_data, {untrusted_leaf, untrusted_intermediate},
+                        false, 1, 1, 1, 1);
+  }
+  EXPECT_GT(odin_xqc_client_runtime_test_record()->cert_verify_failures, 0u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT13RejectsMissingServerAuthEku) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  CaFileProductionResult result;
+  RunCaFileProduction({root + "/thor/out/odin-client-auth-only.pem",
+                       root + "/thor/out/odin-client-auth-only-key.pem",
+                       "localhost", ca, false},
+                      false, &result);
+  EXPECT_EQ(result.state.handshake_done, 0);
+  EXPECT_EQ(result.cert_verify_successes, 0u);
+  EXPECT_GT(result.cert_verify_failures, 0u);
+  EXPECT_EQ(result.last_verifier_x509_error, X509_V_ERR_INVALID_PURPOSE);
+  EXPECT_EQ(result.stream_create_calls, 0u);
+}
+
+TEST_F(OdinXqcClientRuntimeTest, CaFileT14VerifierAcceptsIntermediateChain) {
+  const std::string root = FindRepoRoot();
+  const std::string ca = root + "/thor/out/root-ca.pem";
+  const std::vector<unsigned char> leaf =
+      ReadPemX509DerFile(root + "/thor/out/intermediate-server.pem");
+  const std::vector<unsigned char> intermediate =
+      ReadPemX509DerFile(root + "/thor/out/intermediate-ca.pem");
+  ASSERT_FALSE(leaf.empty());
+  ASSERT_FALSE(intermediate.empty());
+  const auto row_before = TempCounters();
+  xqc_cert_verify_pt cb = nullptr;
+  void *user_data = nullptr;
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("localhost", ca, rt.out(), &cb, &user_data);
+    ExpectVerifierDelta(cb, user_data, {leaf}, false, 1, 0, 0, 1);
+    ExpectVerifierDelta(cb, user_data, {leaf, intermediate}, true, 1, 1, 1, 1);
+  }
+
+  ExpectVerifierDelta(cb, user_data, {leaf, intermediate}, false, 0, 0, 0, 0);
+
+  const std::string temp_ca = std::string("/tmp/odin-rfc029-root-copy-") +
+                              std::to_string(getpid()) + ".pem";
+  ASSERT_TRUE(CopyFileBytes(ca, temp_ca));
+  {
+    ScopedClientRuntime rt;
+    CreateCaDefaultRuntimeOwned("localhost", temp_ca, rt.out(), &cb,
+                                &user_data);
+    ASSERT_EQ(unlink(temp_ca.c_str()), 0) << std::strerror(errno);
+    ExpectVerifierDelta(cb, user_data, {leaf, intermediate}, true, 1, 1, 1, 1);
+  }
+  ExpectTempDelta(row_before, 3, 2, 2, 3);
+  EXPECT_GT(odin_xqc_client_runtime_test_record()->cert_verify_successes, 0u);
 }
 
 } // namespace

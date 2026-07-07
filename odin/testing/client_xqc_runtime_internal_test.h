@@ -7,6 +7,7 @@
 
 #include "odin/client_xqc_runtime.h"
 #include "odin/xqc_udp.h"
+#include <stdint.h>
 #include <xquic/xquic.h>
 
 #ifdef __cplusplus
@@ -64,12 +65,16 @@ typedef struct odin_xqc_client_runtime_test_udp_create_record_t {
 } odin_xqc_client_runtime_test_udp_create_record_t;
 
 typedef struct odin_xqc_client_runtime_test_default_create_record_t {
+  const char *ca_file;
+  size_t ca_file_len;
+  char ca_file_value[4096];
   const xqc_config_t *engine_config;
   const xqc_engine_ssl_config_t *engine_ssl_config;
   xqc_engine_ssl_config_t engine_ssl_config_value;
   const xqc_engine_callback_t *engine_callbacks;
   xqc_engine_callback_t engine_callbacks_value;
   const xqc_transport_callbacks_t *transport_callbacks;
+  xqc_transport_callbacks_t transport_callbacks_value;
   const xqc_conn_settings_t *conn_settings;
   xqc_conn_settings_t conn_settings_value;
   const xqc_conn_ssl_config_t *conn_ssl_config;
@@ -78,6 +83,24 @@ typedef struct odin_xqc_client_runtime_test_default_create_record_t {
   unsigned int token_len;
   int no_crypto_flag;
 } odin_xqc_client_runtime_test_default_create_record_t;
+
+typedef struct odin_xqc_client_runtime_test_temp_counters_t {
+  uint64_t leaf_x509_allocs;
+  uint64_t leaf_x509_frees;
+  uint64_t intermediate_x509_allocs;
+  uint64_t intermediate_x509_frees;
+  uint64_t intermediate_stack_allocs;
+  uint64_t intermediate_stack_frees;
+  uint64_t store_ctx_allocs;
+  uint64_t store_ctx_frees;
+} odin_xqc_client_runtime_test_temp_counters_t;
+
+typedef enum odin_xqc_client_runtime_test_x509_store_ctx_failpoint_t {
+  ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_INVALID = 0,
+  ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_NEW = 1,
+  ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_INIT = 2,
+  ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_SET_DEFAULT = 3
+} odin_xqc_client_runtime_test_x509_store_ctx_failpoint_t;
 
 typedef struct odin_xqc_client_runtime_test_record_t {
   unsigned int call_count;
@@ -90,6 +113,18 @@ typedef struct odin_xqc_client_runtime_test_record_t {
   odin_xqc_client_runtime_test_default_create_record_t last_default_create;
   unsigned int runtime_free_calls;
   unsigned int force_destroy_null_calls;
+  uint64_t ca_store_alloc_attempts;
+  uint64_t ca_store_alloc_failures;
+  uint64_t ca_store_load_attempts;
+  uint64_t ca_store_load_successes;
+  uint64_t ca_store_free_calls;
+  void *verifier_user_data;
+  int runtime_owned_ca_store_present;
+  uint64_t cert_verify_successes;
+  uint64_t cert_verify_failures;
+  int last_verifier_x509_error;
+  int last_verifier_setup_failure_kind;
+  odin_xqc_client_runtime_test_temp_counters_t verifier_temps;
 } odin_xqc_client_runtime_test_record_t;
 
 typedef struct odin_xqc_client_runtime_test_state_t {
@@ -101,6 +136,7 @@ typedef struct odin_xqc_client_runtime_test_state_t {
   int connect_errno;
   size_t pending_fds;
   size_t live_sessions;
+  int ca_store_present;
 } odin_xqc_client_runtime_test_state_t;
 
 typedef enum odin_xqc_client_runtime_test_config_copy_alloc_t {
@@ -153,6 +189,9 @@ int odin_xqc_client_runtime_test_append_pending_fd(
     odin_xqc_client_runtime_t *rt, int conn_fd);
 int odin_xqc_client_runtime_test_fail_config_copy_alloc(
     odin_xqc_client_runtime_test_config_copy_alloc_t site, int errnum);
+int odin_xqc_client_runtime_test_fail_next_x509_store_new(int errnum);
+int odin_xqc_client_runtime_test_fail_next_x509_store_ctx(
+    odin_xqc_client_runtime_test_x509_store_ctx_failpoint_t failpoint);
 
 #ifdef __cplusplus
 }

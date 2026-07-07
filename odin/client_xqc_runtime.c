@@ -2,13 +2,18 @@
 
 #include "odin/client_xqc_runtime.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include <openssl/err.h>
+#include <openssl/x509.h>
 
 #include "odin/client_session.h"
 #include "odin/transport.h"
@@ -50,6 +55,7 @@ struct odin_xqc_client_runtime_t {
   xqc_conn_settings_t conn_settings;
   xqc_conn_ssl_config_t conn_ssl_config;
   char empty_session_ticket;
+  X509_STORE *ca_store;
   int no_crypto_flag;
 
   xqc_connection_t *conn;
@@ -116,6 +122,9 @@ static odin_xqc_client_runtime_test_record_t g_client_xqc_test_record;
 static odin_xqc_client_runtime_test_ops_t g_client_xqc_test_ops;
 static int g_config_copy_alloc_site;
 static int g_config_copy_alloc_errno;
+static int g_fail_next_x509_store_new_armed;
+static int g_fail_next_x509_store_new_errno;
+static int g_fail_next_x509_store_ctx_failpoint;
 static odin_xqc_client_runtime_t *g_client_xqc_test_live_runtimes;
 
 static void runtime_test_register_live(odin_xqc_client_runtime_t *rt) {
@@ -138,6 +147,17 @@ static void runtime_test_unregister_live(odin_xqc_client_runtime_t *rt) {
   }
   rt->test_live_prev = NULL;
   rt->test_live_next = NULL;
+}
+
+static odin_xqc_client_runtime_t *
+runtime_test_find_live_for_verifier_user_data(void *user_data) {
+  for (odin_xqc_client_runtime_t *rt = g_client_xqc_test_live_runtimes;
+       rt != NULL; rt = rt->test_live_next) {
+    if (rt->xu != NULL && odin_xqc_udp_xqc_user_data(rt->xu) == user_data) {
+      return rt;
+    }
+  }
+  return NULL;
 }
 
 static void runtime_test_clear_live_hooks(void) {
@@ -182,6 +202,9 @@ void odin_xqc_client_runtime_test_reset(void) {
   memset(&g_client_xqc_test_ops, 0, sizeof(g_client_xqc_test_ops));
   g_config_copy_alloc_site = 0;
   g_config_copy_alloc_errno = 0;
+  g_fail_next_x509_store_new_armed = 0;
+  g_fail_next_x509_store_new_errno = 0;
+  g_fail_next_x509_store_ctx_failpoint = 0;
 }
 
 void odin_xqc_client_runtime_test_set_ops(
@@ -223,6 +246,7 @@ int odin_xqc_client_runtime_test_state(
   out->connect_errno = rt->connect_errno;
   out->pending_fds = pending_fds;
   out->live_sessions = live_sessions;
+  out->ca_store_present = rt->ca_store != NULL;
   return 0;
 }
 
@@ -265,7 +289,341 @@ int odin_xqc_client_runtime_test_fail_config_copy_alloc(
   g_config_copy_alloc_errno = errnum;
   return 0;
 }
+
+int odin_xqc_client_runtime_test_fail_next_x509_store_new(int errnum) {
+  if (errnum <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  g_fail_next_x509_store_new_armed = 1;
+  g_fail_next_x509_store_new_errno = errnum;
+  return 0;
+}
+
+int odin_xqc_client_runtime_test_fail_next_x509_store_ctx(
+    odin_xqc_client_runtime_test_x509_store_ctx_failpoint_t failpoint) {
+  if (failpoint != ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_NEW &&
+      failpoint != ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_INIT &&
+      failpoint !=
+          ODIN_XQC_CLIENT_RUNTIME_TEST_X509_STORE_CTX_FAIL_SET_DEFAULT) {
+    errno = EINVAL;
+    return -1;
+  }
+  g_fail_next_x509_store_ctx_failpoint = (int)failpoint;
+  return 0;
+}
 #endif
+
+enum {
+  RUNTIME_X509_STORE_CTX_FAIL_NEW = 1,
+  RUNTIME_X509_STORE_CTX_FAIL_INIT = 2,
+  RUNTIME_X509_STORE_CTX_FAIL_SET_DEFAULT = 3
+};
+
+static void runtime_test_count_leaf_x509_alloc(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.leaf_x509_allocs += 1;
+#endif
+}
+
+static void runtime_test_count_leaf_x509_free(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.leaf_x509_frees += 1;
+#endif
+}
+
+static void runtime_test_count_intermediate_x509_alloc(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.intermediate_x509_allocs += 1;
+#endif
+}
+
+static void runtime_test_count_intermediate_x509_free(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.intermediate_x509_frees += 1;
+#endif
+}
+
+static void runtime_test_count_intermediate_stack_alloc(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.intermediate_stack_allocs += 1;
+#endif
+}
+
+static void runtime_test_count_intermediate_stack_free(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.intermediate_stack_frees += 1;
+#endif
+}
+
+static void runtime_test_count_store_ctx_alloc(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.store_ctx_allocs += 1;
+#endif
+}
+
+static void runtime_test_count_store_ctx_free(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.verifier_temps.store_ctx_frees += 1;
+#endif
+}
+
+static void runtime_test_record_cert_verify_result(int ok, int x509_error,
+                                                   int setup_failure_kind) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  if (ok) {
+    g_client_xqc_test_record.cert_verify_successes += 1;
+  } else {
+    g_client_xqc_test_record.cert_verify_failures += 1;
+  }
+  g_client_xqc_test_record.last_verifier_x509_error = x509_error;
+  g_client_xqc_test_record.last_verifier_setup_failure_kind =
+      setup_failure_kind;
+#else
+  (void)ok;
+  (void)x509_error;
+  (void)setup_failure_kind;
+#endif
+}
+
+static int runtime_test_take_store_ctx_failpoint(void) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  const int failpoint = g_fail_next_x509_store_ctx_failpoint;
+  g_fail_next_x509_store_ctx_failpoint = 0;
+  return failpoint;
+#endif
+  return 0;
+}
+
+static int runtime_test_store_ctx_failpoint_matches(int armed_failpoint,
+                                                    int failpoint) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  return armed_failpoint == failpoint;
+#else
+  (void)armed_failpoint;
+  (void)failpoint;
+  return 0;
+#endif
+}
+
+static void runtime_x509_free_leaf(X509 *x) {
+  if (x != NULL) {
+    runtime_test_count_leaf_x509_free();
+    X509_free(x);
+  }
+}
+
+static void runtime_x509_free_intermediate(X509 *x) {
+  if (x != NULL) {
+    runtime_test_count_intermediate_x509_free();
+    X509_free(x);
+  }
+}
+
+static X509 *runtime_parse_der_cert_exact(const unsigned char *der, size_t len,
+                                          int leaf) {
+  if (der == NULL || len == 0 || len > (size_t)LONG_MAX) {
+    return NULL;
+  }
+  const unsigned char *p = der;
+  X509 *x = d2i_X509(NULL, &p, (long)len);
+  if (x == NULL) {
+    return NULL;
+  }
+  if (leaf) {
+    runtime_test_count_leaf_x509_alloc();
+  } else {
+    runtime_test_count_intermediate_x509_alloc();
+  }
+  if (p != der + len) {
+    if (leaf) {
+      runtime_x509_free_leaf(x);
+    } else {
+      runtime_x509_free_intermediate(x);
+    }
+    return NULL;
+  }
+  return x;
+}
+
+static void runtime_intermediate_stack_free(STACK_OF(X509) * stack) {
+  if (stack != NULL) {
+    runtime_test_count_intermediate_stack_free();
+    sk_X509_pop_free(stack, runtime_x509_free_intermediate);
+  }
+}
+
+static int runtime_server_host_is_ip_literal(const char *host) {
+  struct in_addr addr4;
+  struct in6_addr addr6;
+  return inet_pton(AF_INET, host, &addr4) == 1 ||
+         inet_pton(AF_INET6, host, &addr6) == 1;
+}
+
+static int runtime_leaf_identity_matches(X509 *leaf, const char *server_host) {
+  if (runtime_server_host_is_ip_literal(server_host)) {
+    return X509_check_ip_asc(leaf, server_host, 0) == 1;
+  }
+  return X509_check_host(leaf, server_host, strlen(server_host),
+                         X509_CHECK_FLAG_NEVER_CHECK_SUBJECT, NULL) == 1;
+}
+
+static int runtime_ca_file_cert_verify(const unsigned char *certs[],
+                                       const size_t cert_len[],
+                                       size_t certs_len, void *conn_user_data) {
+  int ok = 0;
+  int x509_error = 0;
+  int setup_failure_kind = 0;
+  X509 *leaf = NULL;
+  STACK_OF(X509) *intermediates = NULL;
+  X509_STORE_CTX *ctx = NULL;
+  const int store_ctx_failpoint = runtime_test_take_store_ctx_failpoint();
+
+  odin_xqc_client_runtime_t *rt = NULL;
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  rt = runtime_test_find_live_for_verifier_user_data(conn_user_data);
+#else
+  odin_xqc_udp_t *xu = (odin_xqc_udp_t *)conn_user_data;
+  rt = xu != NULL ? (odin_xqc_client_runtime_t *)odin_xqc_udp_app_user_data(xu)
+                  : NULL;
+#endif
+  if (rt == NULL || rt->ca_store == NULL || certs == NULL || cert_len == NULL ||
+      certs_len == 0 || certs[0] == NULL) {
+    goto end;
+  }
+
+  leaf = runtime_parse_der_cert_exact(certs[0], cert_len[0], 1);
+  if (leaf == NULL) {
+    goto end;
+  }
+  if (!runtime_leaf_identity_matches(leaf, rt->server_host)) {
+    goto end;
+  }
+
+  if (certs_len > 1) {
+    intermediates = sk_X509_new_null();
+    if (intermediates == NULL) {
+      goto end;
+    }
+    runtime_test_count_intermediate_stack_alloc();
+    for (size_t i = 1; i < certs_len; ++i) {
+      X509 *cert = runtime_parse_der_cert_exact(certs[i], cert_len[i], 0);
+      if (cert == NULL) {
+        goto end;
+      }
+      if (sk_X509_push(intermediates, cert) <= 0) {
+        runtime_x509_free_intermediate(cert);
+        goto end;
+      }
+    }
+  }
+
+  if (runtime_test_store_ctx_failpoint_matches(
+          store_ctx_failpoint, RUNTIME_X509_STORE_CTX_FAIL_NEW)) {
+    setup_failure_kind = RUNTIME_X509_STORE_CTX_FAIL_NEW;
+    goto end;
+  }
+  ctx = X509_STORE_CTX_new();
+  if (ctx == NULL) {
+    setup_failure_kind = RUNTIME_X509_STORE_CTX_FAIL_NEW;
+    goto end;
+  }
+  runtime_test_count_store_ctx_alloc();
+
+  if (runtime_test_store_ctx_failpoint_matches(
+          store_ctx_failpoint, RUNTIME_X509_STORE_CTX_FAIL_INIT)) {
+    setup_failure_kind = RUNTIME_X509_STORE_CTX_FAIL_INIT;
+    goto end;
+  }
+  if (X509_STORE_CTX_init(ctx, rt->ca_store, leaf, intermediates) != 1) {
+    setup_failure_kind = RUNTIME_X509_STORE_CTX_FAIL_INIT;
+    goto end;
+  }
+
+  if (runtime_test_store_ctx_failpoint_matches(
+          store_ctx_failpoint, RUNTIME_X509_STORE_CTX_FAIL_SET_DEFAULT)) {
+    setup_failure_kind = RUNTIME_X509_STORE_CTX_FAIL_SET_DEFAULT;
+    goto end;
+  }
+  if (X509_STORE_CTX_set_default(ctx, "ssl_server") != 1) {
+    setup_failure_kind = RUNTIME_X509_STORE_CTX_FAIL_SET_DEFAULT;
+    goto end;
+  }
+
+  if (X509_verify_cert(ctx) == 1) {
+    ok = 1;
+  } else {
+    x509_error = X509_STORE_CTX_get_error(ctx);
+  }
+
+end:
+  if (ctx != NULL) {
+    runtime_test_count_store_ctx_free();
+    X509_STORE_CTX_free(ctx);
+  }
+  runtime_intermediate_stack_free(intermediates);
+  runtime_x509_free_leaf(leaf);
+  runtime_test_record_cert_verify_result(ok, x509_error, setup_failure_kind);
+  return ok ? XQC_OK : -1;
+}
+
+static void runtime_ca_store_free(X509_STORE *store) {
+  if (store != NULL) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+    g_client_xqc_test_record.ca_store_free_calls += 1;
+#endif
+    X509_STORE_free(store);
+  }
+}
+
+static int runtime_ca_store_new(X509_STORE **out) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  if (g_fail_next_x509_store_new_armed) {
+    const int errnum = g_fail_next_x509_store_new_errno;
+    g_fail_next_x509_store_new_armed = 0;
+    g_fail_next_x509_store_new_errno = 0;
+    g_client_xqc_test_record.ca_store_alloc_attempts += 1;
+    g_client_xqc_test_record.ca_store_alloc_failures += 1;
+    errno = errnum;
+    return -1;
+  }
+  g_client_xqc_test_record.ca_store_alloc_attempts += 1;
+#endif
+  *out = X509_STORE_new();
+  if (*out == NULL) {
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+    g_client_xqc_test_record.ca_store_alloc_failures += 1;
+#endif
+    errno = ENOMEM;
+    return -1;
+  }
+  return 0;
+}
+
+static int runtime_load_ca_store(const char *ca_file, X509_STORE **out) {
+  X509_STORE *store = NULL;
+  if (ca_file == NULL || ca_file[0] == '\0' || out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (runtime_ca_store_new(&store) != 0) {
+    return -1;
+  }
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.ca_store_load_attempts += 1;
+#endif
+  if (X509_STORE_load_locations(store, ca_file, NULL) != 1) {
+    runtime_ca_store_free(store);
+    ERR_clear_error();
+    errno = EINVAL;
+    return -1;
+  }
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+  g_client_xqc_test_record.ca_store_load_successes += 1;
+#endif
+  *out = store;
+  return 0;
+}
 
 static void runtime_noop_save_token(const unsigned char *token,
                                     uint32_t token_len, void *conn_user_data) {
@@ -763,6 +1121,8 @@ static void runtime_finish_destroy(odin_xqc_client_runtime_t *rt) {
     rt->xu = NULL;
   }
   rt->force_destroy_active = 0;
+  runtime_ca_store_free(rt->ca_store);
+  rt->ca_store = NULL;
   runtime_free_copied_config(rt);
 #if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
   (void)runtime_test_append_call(
@@ -1164,6 +1524,37 @@ int odin_xqc_client_runtime_create_default(
   g_client_xqc_test_record.default_create_calls += 1;
   memset(&g_client_xqc_test_record.last_default_create, 0,
          sizeof(g_client_xqc_test_record.last_default_create));
+  g_client_xqc_test_record.last_default_create.ca_file = config->ca_file;
+  if (config->ca_file != NULL) {
+    g_client_xqc_test_record.last_default_create.ca_file_len =
+        strlen(config->ca_file);
+    if (g_client_xqc_test_record.last_default_create.ca_file_len >=
+        sizeof(g_client_xqc_test_record.last_default_create.ca_file_value)) {
+      g_client_xqc_test_record.last_default_create.ca_file_len =
+          sizeof(g_client_xqc_test_record.last_default_create.ca_file_value) -
+          1u;
+    }
+    memcpy(g_client_xqc_test_record.last_default_create.ca_file_value,
+           config->ca_file,
+           g_client_xqc_test_record.last_default_create.ca_file_len);
+    g_client_xqc_test_record.last_default_create.ca_file_value
+        [g_client_xqc_test_record.last_default_create.ca_file_len] = '\0';
+  }
+#endif
+
+  X509_STORE *ca_store = NULL;
+  xqc_transport_callbacks_t transport_callbacks;
+  memset(&transport_callbacks, 0, sizeof(transport_callbacks));
+  if (config->ca_file != NULL) {
+    if (runtime_load_ca_store(config->ca_file, &ca_store) != 0) {
+      return -1;
+    }
+    conn_ssl_config.cert_verify_flag = XQC_TLS_CERT_FLAG_NEED_VERIFY;
+    transport_callbacks.cert_verify_cb = runtime_ca_file_cert_verify;
+    full_config.transport_callbacks = &transport_callbacks;
+  }
+
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
   g_client_xqc_test_record.last_default_create.engine_config =
       full_config.engine_config;
   g_client_xqc_test_record.last_default_create.engine_ssl_config =
@@ -1176,6 +1567,10 @@ int odin_xqc_client_runtime_create_default(
       engine_callbacks;
   g_client_xqc_test_record.last_default_create.transport_callbacks =
       full_config.transport_callbacks;
+  if (full_config.transport_callbacks != NULL) {
+    g_client_xqc_test_record.last_default_create.transport_callbacks_value =
+        *full_config.transport_callbacks;
+  }
   g_client_xqc_test_record.last_default_create.conn_settings =
       full_config.conn_settings;
   g_client_xqc_test_record.last_default_create.conn_settings_value =
@@ -1190,7 +1585,22 @@ int odin_xqc_client_runtime_create_default(
   g_client_xqc_test_record.last_default_create.no_crypto_flag =
       full_config.no_crypto_flag;
 #endif
-  return odin_xqc_client_runtime_create(&full_config, out);
+
+  if (odin_xqc_client_runtime_create(&full_config, out) != 0) {
+    const int saved = errno;
+    runtime_ca_store_free(ca_store);
+    errno = saved;
+    return -1;
+  }
+  if (ca_store != NULL) {
+    (*out)->ca_store = ca_store;
+#if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
+    g_client_xqc_test_record.runtime_owned_ca_store_present = 1;
+    g_client_xqc_test_record.verifier_user_data =
+        odin_xqc_udp_xqc_user_data((*out)->xu);
+#endif
+  }
+  return 0;
 }
 
 static void cleanup_failed_start_connection(odin_xqc_client_runtime_t *rt) {

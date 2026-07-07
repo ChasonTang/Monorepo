@@ -95,7 +95,15 @@ if ! BUNDLE_INFO="$("$CFSSL" bundle -loglevel=5 -ca-bundle "$CA_CERT" -cert "$SE
     exit 1
 fi
 
-if ! CERT_INFO="$("$CFSSL" certinfo -loglevel=5 -cert "$SERVER_CERT" 2>&1)"; then
+TMP_LEAF="$(mktemp "${TMPDIR:-/tmp}/thor-server-leaf.XXXXXX")"
+trap 'rm -f "$TMP_LEAF"' EXIT
+awk '
+    /-----BEGIN CERTIFICATE-----/ { in_cert = 1 }
+    in_cert { print }
+    /-----END CERTIFICATE-----/ { exit }
+' "$SERVER_CERT" >"$TMP_LEAF"
+
+if ! CERT_INFO="$("$CFSSL" certinfo -loglevel=5 -cert "$TMP_LEAF" 2>&1)"; then
     printf '%s\n' "$CERT_INFO" >&2
     echo "error: failed to inspect server certificate" >&2
     exit 1

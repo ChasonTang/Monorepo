@@ -42,6 +42,7 @@ typedef struct odin_xqc_client_runtime_default_config_t {
   const struct sockaddr *peer_addr;
   socklen_t peer_addrlen;
   const char *server_host;
+  const char *ca_file;
 } odin_xqc_client_runtime_default_config_t;
 
 int odin_xqc_client_runtime_create(

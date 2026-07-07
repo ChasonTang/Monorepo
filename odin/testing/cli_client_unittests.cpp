@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +42,25 @@ constexpr int kLongDeadlineMs = 4000;
 
 volatile sig_atomic_t g_child_sigint_count = 0;
 volatile sig_atomic_t g_child_sigterm_count = 0;
+
+std::string FindRepoRoot() {
+  char cwd_buf[PATH_MAX];
+  if (getcwd(cwd_buf, sizeof(cwd_buf)) == nullptr) {
+    return ".";
+  }
+  std::string dir = cwd_buf;
+  for (;;) {
+    const std::string candidate = dir + "/odin/docs/rfc_029_client_ca_file.md";
+    if (access(candidate.c_str(), R_OK) == 0) {
+      return dir;
+    }
+    const size_t slash = dir.find_last_of('/');
+    if (slash == std::string::npos || slash == 0) {
+      return ".";
+    }
+    dir.resize(slash);
+  }
+}
 
 void CountingSigint(int) { g_child_sigint_count += 1; }
 void CountingSigterm(int) { g_child_sigterm_count += 1; }
@@ -876,6 +896,60 @@ TEST(OdinRFC028ClientTransportTest, T3QuicStartupCreatesRuntimeAfterListener) {
   EXPECT_EQ(snap.runtime_record.last_default_create.no_crypto_flag, 0);
   EXPECT_EQ(snap.runtime_record.runtime_free_calls, 1u);
   ExpectRfc028QuicClean(snap);
+}
+
+TEST(OdinCliClientCaFileTest, T3RunnerForwardsSuppliedCaFileAndPreservesOmit) {
+  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  Rfc028QuicChild supplied =
+      SpawnRfc028QuicChild({"odin-client", "--listen", "0", "--server",
+                            "127.0.0.1:4433", "--ca-file", ca});
+  ChildGuard supplied_guard(supplied.pid);
+  std::string line = ReadLineWithDeadline(supplied.stderr_fd, 2000);
+  uint16_t proxy_port = 0;
+  std::string server;
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "127.0.0.1:4433");
+  Rfc028QuicChildSnapshot supplied_snap =
+      FinishRfc028QuicChild(&supplied, SIGTERM);
+  supplied_guard.disarm();
+  EXPECT_EQ(supplied_snap.rc, 0);
+  close(supplied.stderr_fd);
+  ASSERT_TRUE(supplied_snap.runtime_config_ok);
+  EXPECT_STREQ(supplied_snap.runtime_config.quic_ca_file_value, ca.c_str());
+  EXPECT_STREQ(supplied_snap.runtime_record.last_default_create.ca_file_value,
+               ca.c_str());
+  EXPECT_EQ(supplied_snap.runtime_record.last_default_create
+                .conn_ssl_config_value.cert_verify_flag,
+            XQC_TLS_CERT_FLAG_NEED_VERIFY);
+  EXPECT_NE(supplied_snap.runtime_record.last_default_create
+                .transport_callbacks_value.cert_verify_cb,
+            nullptr);
+  EXPECT_EQ(supplied_snap.runtime_record.ca_store_load_successes, 1u);
+  EXPECT_EQ(supplied_snap.runtime_record.ca_store_free_calls, 1u);
+  ExpectRfc028QuicClean(supplied_snap);
+
+  Rfc028QuicChild omitted = SpawnRfc028QuicChild(
+      {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
+  ChildGuard omitted_guard(omitted.pid);
+  line = ReadLineWithDeadline(omitted.stderr_fd, 2000);
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "127.0.0.1:4433");
+  Rfc028QuicChildSnapshot omitted_snap =
+      FinishRfc028QuicChild(&omitted, SIGTERM);
+  omitted_guard.disarm();
+  EXPECT_EQ(omitted_snap.rc, 0);
+  close(omitted.stderr_fd);
+  ASSERT_TRUE(omitted_snap.runtime_config_ok);
+  EXPECT_EQ(omitted_snap.runtime_config.quic_ca_file, nullptr);
+  EXPECT_EQ(omitted_snap.runtime_record.last_default_create.ca_file, nullptr);
+  EXPECT_EQ(omitted_snap.runtime_record.last_default_create.transport_callbacks,
+            nullptr);
+  EXPECT_EQ(omitted_snap.runtime_record.last_default_create
+                .conn_ssl_config_value.cert_verify_flag,
+            0);
+  EXPECT_EQ(omitted_snap.runtime_record.ca_store_load_successes, 0u);
+  EXPECT_EQ(omitted_snap.runtime_record.ca_store_free_calls, 0u);
+  ExpectRfc028QuicClean(omitted_snap);
 }
 
 TEST(OdinRFC028ClientTransportTest, T4QuicRejectsParsedNonIpv4BeforeResources) {

@@ -105,6 +105,7 @@ typedef struct odin_cli_args_t {
   odin_cli_server_transport_t server_transport;
   const char *quic_cert_file;
   const char *quic_key_file;
+  const char *quic_ca_file;
 } odin_cli_args_t;
 
 odin_cli_status_t odin_cli_parse(int argc, char *const *argv,

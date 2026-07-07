@@ -65,6 +65,9 @@ typedef struct odin_cli_client_test_runtime_config_record_t {
   const char *server_host;
   size_t server_host_len;
   char server_host_value[ODIN_PROTO_HOST_MAX + 1];
+  const char *quic_ca_file;
+  size_t quic_ca_file_len;
+  char quic_ca_file_value[4096];
 } odin_cli_client_test_runtime_config_record_t;
 
 int odin_cli_client_test_fail_next(odin_cli_client_test_failpoint_t fp,

@@ -7,6 +7,7 @@
 #include "odin/cli.h"
 
 #include <cerrno>
+#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -92,12 +93,32 @@ std::string Basename(const std::string &path) {
   return path.substr(pos + 1);
 }
 
-constexpr const char kUC[] = "usage: odin-client --listen ADDR --server ADDR";
+constexpr const char kUC[] =
+    "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]";
 constexpr const char kUS[] =
     "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
 constexpr const char kUBoth[] =
     "usage: 'odin-client --listen ADDR --server ADDR' or "
     "'odin-server --listen ADDR --quic-cert FILE --quic-key FILE'";
+
+std::string FindRepoRoot() {
+  char cwd_buf[PATH_MAX];
+  if (getcwd(cwd_buf, sizeof(cwd_buf)) == nullptr) {
+    return ".";
+  }
+  std::string dir = cwd_buf;
+  for (;;) {
+    const std::string candidate = dir + "/odin/docs/rfc_029_client_ca_file.md";
+    if (access(candidate.c_str(), R_OK) == 0) {
+      return dir;
+    }
+    const size_t slash = dir.find_last_of('/');
+    if (slash == std::string::npos || slash == 0) {
+      return ".";
+    }
+    dir.resize(slash);
+  }
+}
 
 } // namespace
 
@@ -775,6 +796,116 @@ TEST(OdinCliServerHostTest, T8MainBannerServerHostPort) {
     EXPECT_EQ(rc, r.expected_return);
     EXPECT_STREQ(out_buf, "");
     EXPECT_STREQ(err_buf, r.expected_err.c_str());
+  }
+}
+
+TEST(OdinCliCaFileTest, T1ClientParserAcceptsCaFileAndOmission) {
+  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  {
+    MutableArgv argv(
+        {"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433"});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
+    EXPECT_EQ(out.listen_port, 8080);
+    EXPECT_EQ(out.server_host, argv.argv()[4]);
+    EXPECT_EQ(out.server_host_len, std::strlen("127.0.0.1"));
+    EXPECT_EQ(out.server_port, 4433);
+    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
+    EXPECT_EQ(out.quic_ca_file, nullptr);
+  }
+  {
+    MutableArgv argv({"odin-client", "--listen", "8080", "--server",
+                      "127.0.0.1:4433", "--ca-file", ca.c_str()});
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.quic_ca_file, argv.argv()[6]);
+    EXPECT_STREQ(out.quic_ca_file, ca.c_str());
+  }
+  {
+    const std::vector<std::string> tokens = {
+        "odin-client", "--listen",       "8080",
+        "--server",    "127.0.0.1:4433", std::string("--ca-file=") + ca};
+    MutableArgv argv(tokens);
+    odin_cli_args_t out{};
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    EXPECT_EQ(out.quic_ca_file, argv.argv()[5] + std::strlen("--ca-file="));
+    EXPECT_STREQ(out.quic_ca_file, ca.c_str());
+  }
+}
+
+TEST(OdinCliCaFileTest, T2BadCaFileFormsAndPrecedence) {
+  const std::string ca = FindRepoRoot() + "/thor/out/root-ca.pem";
+  const std::string usage =
+      "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]\n";
+  auto expect_parse = [](const std::vector<std::string> &tokens,
+                         odin_cli_status_t expected,
+                         odin_cli_mode_t expected_mode) {
+    MutableArgv argv(tokens);
+    odin_cli_args_t out{};
+    EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), expected);
+    EXPECT_EQ(out.mode, expected_mode);
+    EXPECT_EQ(out.quic_ca_file, nullptr);
+  };
+  expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
+                "--ca-file", ""},
+               ODIN_CLI_ERR_BAD_QUIC_TLS, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
+                "--ca-file="},
+               ODIN_CLI_ERR_BAD_QUIC_TLS, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "abc", "--server", "127.0.0.1:4433",
+                "--ca-file", ""},
+               ODIN_CLI_ERR_BAD_LISTEN_PORT, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:bad",
+                "--ca-file", ""},
+               ODIN_CLI_ERR_BAD_SERVER, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "8080", "--ca-file", ""},
+               ODIN_CLI_ERR_MISSING_REQUIRED, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
+                "--ca-file"},
+               ODIN_CLI_ERR_UNKNOWN_FLAG, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
+                "--ca", ca},
+               ODIN_CLI_ERR_UNKNOWN_FLAG, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
+                "--ca-file", ca, "extra"},
+               ODIN_CLI_ERR_UNKNOWN_FLAG, ODIN_CLI_MODE_CLIENT);
+  expect_parse({"odin-server", "--ca-file", ca, "--listen", "4433",
+                "--quic-cert", "C", "--quic-key", "K"},
+               ODIN_CLI_ERR_UNKNOWN_FLAG, ODIN_CLI_MODE_SERVER);
+  expect_parse({"odin-client", "--help", "--ca-file", ""}, ODIN_CLI_HELP,
+               ODIN_CLI_MODE_CLIENT);
+
+  struct MainCase {
+    std::vector<std::string> tokens;
+    std::string err;
+  };
+  const MainCase main_cases[] = {
+      {{"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
+        "--ca-file", ""},
+       std::string("odin: invalid QUIC TLS configuration\n") + usage},
+      {{"odin-client", "--listen", "abc", "--server", "127.0.0.1:4433",
+        "--ca-file", ""},
+       std::string("odin: invalid --listen port\n") + usage},
+      {{"odin-client", "--listen", "8080", "--server", "127.0.0.1:bad",
+        "--ca-file", ""},
+       std::string("odin: invalid --server\n") + usage},
+      {{"odin-client", "--listen", "8080", "--ca-file", ""},
+       std::string("odin: missing required flag\n") + usage},
+  };
+  for (const MainCase &c : main_cases) {
+    char out_buf[512] = {};
+    char err_buf[512] = {};
+    FILE *out = fmemopen(out_buf, sizeof(out_buf), "w");
+    FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+    ASSERT_NE(out, nullptr);
+    ASSERT_NE(err, nullptr);
+    MutableArgv argv(c.tokens);
+    EXPECT_EQ(odin_cli_main(argv.argc(), argv.argv(), out, err), 2);
+    static_cast<void>(std::fclose(out));
+    static_cast<void>(std::fclose(err));
+    EXPECT_STREQ(out_buf, "");
+    EXPECT_STREQ(err_buf, c.err.c_str());
   }
 }
 

@@ -96,6 +96,7 @@ source_set("odin_client_xqc_runtime") {
     ":odin_event_loop",
     ":odin_transport_xqc",
     ":odin_xqc_udp",
+    "//boringssl:crypto",
     "//xquic",
   ]
 }

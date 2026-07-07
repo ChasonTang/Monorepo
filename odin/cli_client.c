@@ -200,6 +200,19 @@ static int quic_runtime_create_default_call(
       g_last_runtime_config
           .server_host_value[g_last_runtime_config.server_host_len] = '\0';
     }
+    g_last_runtime_config.quic_ca_file = config->ca_file;
+    if (config->ca_file != NULL) {
+      g_last_runtime_config.quic_ca_file_len = strlen(config->ca_file);
+      if (g_last_runtime_config.quic_ca_file_len >=
+          sizeof(g_last_runtime_config.quic_ca_file_value)) {
+        g_last_runtime_config.quic_ca_file_len =
+            sizeof(g_last_runtime_config.quic_ca_file_value) - 1u;
+      }
+      memcpy(g_last_runtime_config.quic_ca_file_value, config->ca_file,
+             g_last_runtime_config.quic_ca_file_len);
+      g_last_runtime_config
+          .quic_ca_file_value[g_last_runtime_config.quic_ca_file_len] = '\0';
+    }
     g_last_runtime_config_recorded = 1;
   }
   if (test_consume_failpoint(
@@ -668,6 +681,7 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
   runtime_config.peer_addr = (const struct sockaddr *)&peer_addr;
   runtime_config.peer_addrlen = (socklen_t)sizeof(peer_addr);
   runtime_config.server_host = server_host_cstr;
+  runtime_config.ca_file = config->quic_ca_file;
   if (quic_runtime_create_default_call(&runtime_config, &state.quic_rt) != 0) {
     return startup_fail(&state, err, "xqc_client_runtime_create");
   }

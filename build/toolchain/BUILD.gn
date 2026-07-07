@@ -122,21 +122,24 @@ template("clang_toolchain") {
       depfile = "{{output}}.d"
       command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
-      outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("cxx") {
       depfile = "{{output}}.d"
       command = "$cxx $compile_flags $cxx_header_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
-      outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("asm") {
       depfile = "{{output}}.d"
       command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
-      outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+      outputs =
+          [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]
     }
 
     tool("alink") {

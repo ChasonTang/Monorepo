@@ -22,6 +22,7 @@ typedef struct odin_cli_client_config_t {
   size_t server_host_len;
   uint16_t server_port;
   odin_cli_client_transport_t transport;
+  const char *quic_ca_file;
 } odin_cli_client_config_t;
 
 int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *err);
