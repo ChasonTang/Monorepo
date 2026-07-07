@@ -97,19 +97,21 @@ std::string Basename(const std::string &path) {
 }
 
 constexpr const char kUC[] =
-    "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]";
+    "usage: odin-client --listen ADDR --server ADDR --ca-file FILE";
 constexpr const char kUS[] =
     "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
 constexpr const char kUBoth[] =
-    "usage: 'odin-client --listen ADDR --server ADDR' or "
+    "usage: 'odin-client --listen ADDR --server ADDR --ca-file FILE' or "
     "'odin-server --listen ADDR --quic-cert FILE --quic-key FILE'";
 
 } // namespace
 
 // T1 — Client basename with both flags, short and long forms.
 TEST(OdinCliTest, T1ClientBasenameBothFlagsShortLong) {
+  const std::string ca = BuildCertDir() + "/root-ca.pem";
   {
-    MutableArgv argv({"odin-client", "-l", "8080", "-s", "quic.example.com"});
+    MutableArgv argv({"odin-client", "-l", "8080", "-s", "quic.example.com",
+                      "--ca-file", ca.c_str()});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
@@ -120,7 +122,7 @@ TEST(OdinCliTest, T1ClientBasenameBothFlagsShortLong) {
   }
   {
     MutableArgv argv({"./bin/odin-client", "--listen", "8080", "--server",
-                      "quic.example.com"});
+                      "quic.example.com", "--ca-file", ca.c_str()});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
@@ -187,9 +189,8 @@ TEST(OdinCliTest, T3UnknownOrMissingBasename) {
 }
 
 // T4 — Missing required flag carries mode for usage-line selection.
-// RFC-006 removes the `--listen` requirement, so the prior
-// `{"odin-client", "-s", …}` case is covered by RFC-006 T1; only the
-// `--server`-required case remains.
+// Client mode requires both `--server` and `--ca-file`; `--listen` is still
+// optional.
 TEST(OdinCliTest, T4MissingRequiredFlagCarriesMode) {
   struct Case {
     std::vector<std::string> tokens;
@@ -197,6 +198,7 @@ TEST(OdinCliTest, T4MissingRequiredFlagCarriesMode) {
   };
   const std::vector<Case> cases = {
       {{"odin-client", "-l", "8080"}, ODIN_CLI_MODE_CLIENT},
+      {{"odin-client", "-l", "8080", "-s", "S"}, ODIN_CLI_MODE_CLIENT},
   };
   for (const auto &c : cases) {
     MutableArgv argv(c.tokens);
@@ -292,7 +294,7 @@ TEST(OdinCliTest, T7GetoptGlobalsRestored) {
     odin_cli_mode_t expected_mode;
   };
   const std::vector<Case> sequence = {
-      {{"odin-client", "-l", "8080", "-s", "S"},
+      {{"odin-client", "-l", "8080", "-s", "S", "--ca-file", "CA"},
        ODIN_CLI_OK,
        ODIN_CLI_MODE_CLIENT},
       {{"odin-client", "--help"}, ODIN_CLI_HELP, ODIN_CLI_MODE_CLIENT},
@@ -419,8 +421,8 @@ namespace {
 
 TEST(OdinRFC028ClientTransportTest, T1ParserAndMainTransportContract) {
   {
-    MutableArgv argv(
-        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
+    MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                      "127.0.0.1:4433", "--ca-file", "CA"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
@@ -519,7 +521,7 @@ TEST(OdinRFC028ClientTransportTest, T16TransportFlagIsUnknown) {
 // T1 — Per-mode default fires when `--listen` is omitted.
 TEST(OdinCliListenPortTest, T1PerModeDefaultWhenListenOmitted) {
   {
-    MutableArgv argv({"odin-client", "-s", "S"});
+    MutableArgv argv({"odin-client", "-s", "S", "--ca-file", "CA"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
@@ -544,7 +546,7 @@ TEST(OdinCliListenPortTest, T1PerModeDefaultWhenListenOmitted) {
 // T2 — Empty `--listen` value resolves to per-mode default.
 TEST(OdinCliListenPortTest, T2EmptyListenValueResolvesToDefault) {
   {
-    MutableArgv argv({"odin-client", "-l", "", "-s", "S"});
+    MutableArgv argv({"odin-client", "-l", "", "-s", "S", "--ca-file", "CA"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT);
@@ -712,7 +714,8 @@ TEST(OdinCliServerHostTest, T6ServerHostIntegration) {
       {"[::1]", 1, 3, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER},
   };
   for (const auto &c : cases) {
-    MutableArgv argv({"odin-client", "-l", "8080", "-s", c.server});
+    MutableArgv argv(
+        {"odin-client", "-l", "8080", "-s", c.server, "--ca-file", "CA"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK)
         << "server=" << c.server;
@@ -783,19 +786,19 @@ TEST(OdinCliServerHostTest, T8MainBannerServerHostPort) {
   }
 }
 
-TEST(OdinCliCaFileTest, T1ClientParserAcceptsCaFileAndOmission) {
+TEST(OdinCliCaFileTest, T1ClientParserRequiresAndAcceptsCaFile) {
   const std::string ca = BuildCertDir() + "/root-ca.pem";
   {
     MutableArgv argv(
         {"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433"});
     odin_cli_args_t out{};
-    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
+    ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
+              ODIN_CLI_ERR_MISSING_REQUIRED);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_CLIENT);
-    EXPECT_EQ(out.listen_port, 8080);
-    EXPECT_EQ(out.server_host, argv.argv()[4]);
-    EXPECT_EQ(out.server_host_len, std::strlen("127.0.0.1"));
-    EXPECT_EQ(out.server_port, 4433);
-    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
+    EXPECT_EQ(out.listen_port, 0);
+    EXPECT_EQ(out.server_host, nullptr);
+    EXPECT_EQ(out.server_host_len, static_cast<size_t>(0));
+    EXPECT_EQ(out.server_port, 0);
     EXPECT_EQ(out.quic_ca_file, nullptr);
   }
   {
@@ -821,7 +824,7 @@ TEST(OdinCliCaFileTest, T1ClientParserAcceptsCaFileAndOmission) {
 TEST(OdinCliCaFileTest, T2BadCaFileFormsAndPrecedence) {
   const std::string ca = BuildCertDir() + "/root-ca.pem";
   const std::string usage =
-      "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]\n";
+      "usage: odin-client --listen ADDR --server ADDR --ca-file FILE\n";
   auto expect_parse = [](const std::vector<std::string> &tokens,
                          odin_cli_status_t expected,
                          odin_cli_mode_t expected_mode) {
@@ -831,6 +834,9 @@ TEST(OdinCliCaFileTest, T2BadCaFileFormsAndPrecedence) {
     EXPECT_EQ(out.mode, expected_mode);
     EXPECT_EQ(out.quic_ca_file, nullptr);
   };
+  expect_parse(
+      {"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433"},
+      ODIN_CLI_ERR_MISSING_REQUIRED, ODIN_CLI_MODE_CLIENT);
   expect_parse({"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
                 "--ca-file", ""},
                ODIN_CLI_ERR_BAD_QUIC_TLS, ODIN_CLI_MODE_CLIENT);
@@ -865,6 +871,8 @@ TEST(OdinCliCaFileTest, T2BadCaFileFormsAndPrecedence) {
     std::string err;
   };
   const MainCase main_cases[] = {
+      {{"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433"},
+       std::string("odin: missing required flag\n") + usage},
       {{"odin-client", "--listen", "8080", "--server", "127.0.0.1:4433",
         "--ca-file", ""},
        std::string("odin: invalid QUIC TLS configuration\n") + usage},

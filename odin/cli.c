@@ -4,10 +4,11 @@
  * row below is what odin_cli_main writes and returns when odin_cli_parse
  * yields the corresponding status.
  *
- *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR [--ca-file
- * FILE]" <U_S>    = "usage: odin-server --listen ADDR "
+ *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR --ca-file
+ * FILE" <U_S>    = "usage: odin-server --listen ADDR "
  *              "--quic-cert FILE --quic-key FILE"
- *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR' or "
+ *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR "
+ *              "--ca-file FILE' or "
  *              "'odin-server --listen ADDR --quic-cert FILE "
  *              "--quic-key FILE'"
  *
@@ -152,6 +153,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   const char *quic_cert_arg = NULL;
   const char *quic_key_arg = NULL;
   const char *quic_ca_arg = NULL;
+  int client_ca_seen = 0;
   int bad_client_ca = 0;
 
   for (;;) {
@@ -215,10 +217,13 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     case 1003:
       if (optarg == NULL || (uintptr_t)optarg == UINTPTR_MAX) {
         unknown_flag_seen = 1;
-      } else if (optarg[0] == '\0') {
-        bad_client_ca = 1;
       } else {
-        quic_ca_arg = optarg;
+        client_ca_seen = 1;
+        if (optarg[0] == '\0') {
+          bad_client_ca = 1;
+        } else {
+          quic_ca_arg = optarg;
+        }
       }
       break;
     case 'h':
@@ -259,7 +264,8 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     status = ODIN_CLI_ERR_BAD_LISTEN_PORT;
   } else if (sr_status != ODIN_HOST_ADDR_OK) {
     status = ODIN_CLI_ERR_BAD_SERVER;
-  } else if (mode == ODIN_CLI_MODE_CLIENT && server_arg == NULL) {
+  } else if (mode == ODIN_CLI_MODE_CLIENT &&
+             (server_arg == NULL || !client_ca_seen)) {
     status = ODIN_CLI_ERR_MISSING_REQUIRED;
   } else if (bad_quic_tls || (mode == ODIN_CLI_MODE_CLIENT && bad_client_ca)) {
     status = ODIN_CLI_ERR_BAD_QUIC_TLS;
@@ -299,11 +305,11 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   const odin_cli_status_t status = odin_cli_parse(argc, argv, &args);
 
   static const char kUC[] =
-      "usage: odin-client --listen ADDR --server ADDR [--ca-file FILE]";
+      "usage: odin-client --listen ADDR --server ADDR --ca-file FILE";
   static const char kUS[] =
       "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
   static const char kUBoth[] =
-      "usage: 'odin-client --listen ADDR --server ADDR' or "
+      "usage: 'odin-client --listen ADDR --server ADDR --ca-file FILE' or "
       "'odin-server --listen ADDR --quic-cert FILE --quic-key FILE'";
 
   const char *um = (args.mode == ODIN_CLI_MODE_CLIENT) ? kUC : kUS;

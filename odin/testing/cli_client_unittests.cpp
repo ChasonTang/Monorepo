@@ -56,6 +56,17 @@ std::string BuildCertDir() {
   return Dirname(g_test_argv0) + "/gen/thor/odin_test_certs";
 }
 
+std::string ClientCaFile() { return BuildCertDir() + "/root-ca.pem"; }
+
+std::vector<std::string> QuicClientArgs(const std::string &server) {
+  return {"odin-client", "--listen",  "0",           "--server",
+          server,        "--ca-file", ClientCaFile()};
+}
+
+std::vector<std::string> QuicClientArgs() {
+  return QuicClientArgs("127.0.0.1:4433");
+}
+
 void CountingSigint(int) { g_child_sigint_count += 1; }
 void CountingSigterm(int) { g_child_sigterm_count += 1; }
 
@@ -837,8 +848,8 @@ void ExpectRfc028QuicClean(const Rfc028QuicChildSnapshot &snap) {
 } // namespace
 
 TEST(OdinRFC028ClientTransportTest, T3QuicStartupCreatesRuntimeAfterListener) {
-  Rfc028QuicChild child = SpawnRfc028QuicChild(
-      {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
+  const std::string ca = ClientCaFile();
+  Rfc028QuicChild child = SpawnRfc028QuicChild(QuicClientArgs());
   ChildGuard guard(child.pid);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
   uint16_t proxy_port = 0;
@@ -875,28 +886,32 @@ TEST(OdinRFC028ClientTransportTest, T3QuicStartupCreatesRuntimeAfterListener) {
   EXPECT_EQ(ntohs(peer->sin_port), 4433);
   EXPECT_EQ(snap.runtime_config.server_host_len, std::strlen("127.0.0.1"));
   EXPECT_STREQ(snap.runtime_config.server_host_value, "127.0.0.1");
+  EXPECT_STREQ(snap.runtime_config.quic_ca_file_value, ca.c_str());
   EXPECT_EQ(snap.cli.quic_runtime_create_calls, 1u);
   EXPECT_EQ(snap.cli.quic_runtime_start_calls, 1u);
   EXPECT_EQ(snap.cli.quic_runtime_force_destroy_calls, 1u);
   EXPECT_EQ(snap.runtime_record.default_create_calls, 1u);
   EXPECT_EQ(snap.runtime_record.last_default_create.engine_config, nullptr);
-  EXPECT_EQ(snap.runtime_record.last_default_create.transport_callbacks,
-            nullptr);
+  EXPECT_STREQ(snap.runtime_record.last_default_create.ca_file_value,
+               ca.c_str());
   EXPECT_EQ(snap.runtime_record.last_default_create.token, nullptr);
   EXPECT_EQ(snap.runtime_record.last_default_create.token_len, 0u);
   EXPECT_EQ(snap.runtime_record.last_default_create.conn_ssl_config_value
                 .cert_verify_flag,
-            0);
+            XQC_TLS_CERT_FLAG_NEED_VERIFY);
+  EXPECT_NE(snap.runtime_record.last_default_create.transport_callbacks_value
+                .cert_verify_cb,
+            nullptr);
   EXPECT_EQ(snap.runtime_record.last_default_create.no_crypto_flag, 0);
+  EXPECT_EQ(snap.runtime_record.ca_store_load_successes, 1u);
+  EXPECT_EQ(snap.runtime_record.ca_store_free_calls, 1u);
   EXPECT_EQ(snap.runtime_record.runtime_free_calls, 1u);
   ExpectRfc028QuicClean(snap);
 }
 
-TEST(OdinCliClientCaFileTest, T3RunnerForwardsSuppliedCaFileAndPreservesOmit) {
-  const std::string ca = BuildCertDir() + "/root-ca.pem";
-  Rfc028QuicChild supplied =
-      SpawnRfc028QuicChild({"odin-client", "--listen", "0", "--server",
-                            "127.0.0.1:4433", "--ca-file", ca});
+TEST(OdinCliClientCaFileTest, T3RunnerForwardsRequiredCaFileAndRejectsOmit) {
+  const std::string ca = ClientCaFile();
+  Rfc028QuicChild supplied = SpawnRfc028QuicChild(QuicClientArgs());
   ChildGuard supplied_guard(supplied.pid);
   std::string line = ReadLineWithDeadline(supplied.stderr_fd, 2000);
   uint16_t proxy_port = 0;
@@ -922,36 +937,21 @@ TEST(OdinCliClientCaFileTest, T3RunnerForwardsSuppliedCaFileAndPreservesOmit) {
   EXPECT_EQ(supplied_snap.runtime_record.ca_store_free_calls, 1u);
   ExpectRfc028QuicClean(supplied_snap);
 
-  Rfc028QuicChild omitted = SpawnRfc028QuicChild(
+  Rfc028QuicDirectRun omitted = RunRfc028QuicDirect(
       {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
-  ChildGuard omitted_guard(omitted.pid);
-  line = ReadLineWithDeadline(omitted.stderr_fd, 2000);
-  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
-  EXPECT_EQ(server, "127.0.0.1:4433");
-  Rfc028QuicChildSnapshot omitted_snap =
-      FinishRfc028QuicChild(&omitted, SIGTERM);
-  omitted_guard.disarm();
-  EXPECT_EQ(omitted_snap.rc, 0);
-  close(omitted.stderr_fd);
-  ASSERT_TRUE(omitted_snap.runtime_config_ok);
-  EXPECT_EQ(omitted_snap.runtime_config.quic_ca_file, nullptr);
-  EXPECT_EQ(omitted_snap.runtime_record.last_default_create.ca_file, nullptr);
-  EXPECT_EQ(omitted_snap.runtime_record.last_default_create.transport_callbacks,
-            nullptr);
-  EXPECT_EQ(omitted_snap.runtime_record.last_default_create
-                .conn_ssl_config_value.cert_verify_flag,
-            0);
-  EXPECT_EQ(omitted_snap.runtime_record.ca_store_load_successes, 0u);
-  EXPECT_EQ(omitted_snap.runtime_record.ca_store_free_calls, 0u);
-  ExpectRfc028QuicClean(omitted_snap);
+  EXPECT_EQ(omitted.rc, 2);
+  EXPECT_EQ(omitted.err,
+            "odin: missing required flag\n"
+            "usage: odin-client --listen ADDR --server ADDR --ca-file FILE\n");
+  EXPECT_EQ(omitted.snapshot.runtime_record.default_create_calls, 0u);
+  ExpectRfc028QuicClean(omitted.snapshot);
 }
 
 TEST(OdinRFC028ClientTransportTest, T4QuicRejectsParsedNonIpv4BeforeResources) {
   const char *servers[] = {"example.com:443", "[::1]:443"};
   for (const char *server : servers) {
     SCOPED_TRACE(server);
-    Rfc028QuicDirectRun run = RunRfc028QuicDirect(
-        {"odin-client", "--listen", "0", "--server", server});
+    Rfc028QuicDirectRun run = RunRfc028QuicDirect(QuicClientArgs(server));
     EXPECT_EQ(run.rc, 1);
     EXPECT_EQ(run.err, "odin: client startup failed at server_endpoint\n");
     EXPECT_EQ(run.err.find("mode=client"), std::string::npos);
@@ -979,9 +979,7 @@ TEST(OdinRFC028ClientTransportTest, T5QuicListenerStartupFailureMatrix) {
   };
   for (const Case &c : cases) {
     SCOPED_TRACE(c.step);
-    Rfc028QuicDirectRun run = RunRfc028QuicDirect(
-        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"}, c.fp,
-        EIO);
+    Rfc028QuicDirectRun run = RunRfc028QuicDirect(QuicClientArgs(), c.fp, EIO);
     EXPECT_EQ(run.rc, 1);
     EXPECT_EQ(run.err,
               std::string("odin: client startup failed at ") + c.step + "\n");
@@ -1001,8 +999,7 @@ TEST(OdinRFC028ClientTransportTest, T6QuicAcceptedFdTransfersToRuntime) {
   uint16_t sentry_port = 0;
   const int sentry = OpenIpv4Listener("127.0.0.1", 0, true, &sentry_port);
   ASSERT_GE(sentry, 0) << std::strerror(errno);
-  Rfc028QuicChild child = SpawnRfc028QuicChild(
-      {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
+  Rfc028QuicChild child = SpawnRfc028QuicChild(QuicClientArgs());
   ChildGuard guard(child.pid);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
   uint16_t proxy_port = 0;
@@ -1029,7 +1026,7 @@ TEST(OdinRFC028ClientTransportTest, T6QuicAcceptedFdTransfersToRuntime) {
 
 TEST(OdinRFC028ClientTransportTest, T7QuicAddFailureClosesOnlyThatFd) {
   Rfc028QuicChild child = SpawnRfc028QuicChild(
-      {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"},
+      QuicClientArgs(),
       ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_ADD_CONNECTION, EIO);
   ChildGuard guard(child.pid);
   const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
@@ -1086,9 +1083,8 @@ TEST(OdinRFC028ClientTransportTest, T8QuicFatalRuntimeFailuresCleanUp) {
 #endif
   for (const Case &c : cases) {
     SCOPED_TRACE(c.name);
-    Rfc028QuicDirectRun run = RunRfc028QuicDirect(
-        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"}, c.fp,
-        c.errnum, c.trigger);
+    Rfc028QuicDirectRun run =
+        RunRfc028QuicDirect(QuicClientArgs(), c.fp, c.errnum, c.trigger);
     EXPECT_EQ(run.rc, 1);
     const size_t banner_end = run.err.find('\n');
     ASSERT_NE(banner_end, std::string::npos) << run.err;
@@ -1114,9 +1110,8 @@ TEST(OdinRFC028ClientTransportTest, T8QuicFatalRuntimeFailuresCleanUp) {
   };
   for (const FcntlCase &c : fcntl_cases) {
     SCOPED_TRACE(c.name);
-    Rfc028QuicChild child = SpawnRfc028QuicChild(
-        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"}, c.fp,
-        EIO, 0, true);
+    Rfc028QuicChild child =
+        SpawnRfc028QuicChild(QuicClientArgs(), c.fp, EIO, 0, true);
     ChildGuard guard(child.pid);
     const std::string banner = ReadLineWithDeadline(child.stderr_fd, 2000);
     uint16_t proxy_port = 0;
@@ -1149,8 +1144,7 @@ TEST(OdinRFC028ClientTransportTest, T9QuicSignalShutdownMirrorsTcpCleanup) {
   for (const int sig : signals) {
     SCOPED_TRACE(sig == SIGINT ? "SIGINT" : "SIGTERM");
     Rfc028QuicChild child = SpawnRfc028QuicChild(
-        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"},
-        ODIN_CLI_CLIENT_TEST_FAIL_NONE, 0, 1);
+        QuicClientArgs(), ODIN_CLI_CLIENT_TEST_FAIL_NONE, 0, 1);
     ChildGuard guard(child.pid);
     const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
     uint16_t proxy_port = 0;
@@ -1207,9 +1201,7 @@ TEST(OdinRFC028ClientTransportTest, T11QuicPostListenerStartupFailureMatrix) {
   };
   for (const Case &c : cases) {
     SCOPED_TRACE(c.step);
-    Rfc028QuicDirectRun run = RunRfc028QuicDirect(
-        {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"}, c.fp,
-        EIO);
+    Rfc028QuicDirectRun run = RunRfc028QuicDirect(QuicClientArgs(), c.fp, EIO);
     EXPECT_EQ(run.rc, 1);
     EXPECT_EQ(run.err,
               std::string("odin: client startup failed at ") + c.step + "\n");
@@ -1251,6 +1243,23 @@ TEST(OdinRFC028ClientTransportTest, T12ClientRunnerConfigPreconditions) {
   quic.server_host_len = std::strlen(quic.server_host);
   quic.server_port = 4433;
   quic.transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
+  char missing_ca_buf[128] = {0};
+  FILE *missing_ca_err = fmemopen(missing_ca_buf, sizeof(missing_ca_buf), "w");
+  ASSERT_NE(missing_ca_err, nullptr);
+  EXPECT_EQ(odin_cli_run_client(&quic, missing_ca_err), 1);
+  (void)fclose(missing_ca_err);
+  EXPECT_STREQ(missing_ca_buf, "odin: client startup failed at config\n");
+
+  quic.quic_ca_file = "";
+  char empty_ca_buf[128] = {0};
+  FILE *empty_ca_err = fmemopen(empty_ca_buf, sizeof(empty_ca_buf), "w");
+  ASSERT_NE(empty_ca_err, nullptr);
+  EXPECT_EQ(odin_cli_run_client(&quic, empty_ca_err), 1);
+  (void)fclose(empty_ca_err);
+  EXPECT_STREQ(empty_ca_buf, "odin: client startup failed at config\n");
+
+  const std::string ca = ClientCaFile();
+  quic.quic_ca_file = ca.c_str();
   EXPECT_EQ(odin_cli_run_client(&quic, nullptr), 1);
 
   odin_cli_client_test_liveness_t live{};
@@ -1292,8 +1301,7 @@ TEST(OdinRFC028ClientTransportTest, T15FailpointGapsAndPendingNullRejected) {
   ASSERT_EQ(odin_cli_client_test_pending_failpoint(&pending), 0);
   EXPECT_EQ(pending, ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE);
   Rfc028QuicDirectRun run = RunRfc028QuicDirect(
-      {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"},
-      ODIN_CLI_CLIENT_TEST_FAIL_NONE, 0, false, false);
+      QuicClientArgs(), ODIN_CLI_CLIENT_TEST_FAIL_NONE, 0, false, false);
   EXPECT_EQ(run.rc, 1);
   EXPECT_EQ(run.err,
             "odin: client startup failed at xqc_client_runtime_create\n");
