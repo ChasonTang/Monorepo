@@ -1,5 +1,8 @@
 .DS_Store
 
+# Standalone repositories split out of the monorepo
+/frigga/
+
 # Build output directory (absolute path from repo root)
 /out/
 
