@@ -36,6 +36,10 @@ config("odin_event_loop_testing_config") {
   defines = [ "ODIN_EVENT_LOOP_TESTING" ]
 }
 
+config("odin_dns_resolver_testing_config") {
+  defines = [ "ODIN_DNS_RESOLVER_TESTING" ]
+}
+
 config("odin_xqc_server_runtime_testing_config") {
   defines = [ "ODIN_XQC_SERVER_RUNTIME_TESTING" ]
 }
@@ -78,6 +82,29 @@ source_set("odin_event_loop_testing") {
   ]
 
   configs += [ ":odin_event_loop_testing_config" ]
+}
+
+source_set("odin_dns_resolver_testing") {
+  testonly = true
+
+  sources = [
+    "../dns_resolver.c",
+    "../dns_resolver.h",
+    "dns_resolver_internal_test.h",
+    "dns_resolver_unittests.cpp",
+  ]
+
+  deps = [
+    ":odin_event_loop_testing",
+    "//c-ares:cares",
+    "//googletest:gtest",
+  ]
+
+  configs += [
+    ":odin_dns_resolver_testing_config",
+    ":odin_event_loop_testing_config",
+    "//build:cxx17",
+  ]
 }
 
 executable("odin_unittests") {
@@ -151,6 +178,7 @@ executable("odin_unittests") {
   ]
 
   deps = [
+    ":odin_dns_resolver_testing",
     ":odin_event_loop_testing",
     "//boringssl:crypto",
     "//boringssl:ssl",

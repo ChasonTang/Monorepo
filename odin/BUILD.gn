@@ -43,6 +43,7 @@ source_set("odin") {
     ":odin_connect_session",
     ":odin_core",
     ":odin_dial",
+    ":odin_dns_resolver",
     ":odin_event_loop",
     ":odin_relay",
     ":odin_server_session",
@@ -123,6 +124,18 @@ source_set("odin_event_loop") {
   if (target_os == "linux") {
     libs = [ "pthread" ]
   }
+}
+
+source_set("odin_dns_resolver") {
+  sources = [
+    "dns_resolver.c",
+    "dns_resolver.h",
+  ]
+
+  public_deps = [
+    ":odin_event_loop",
+    "//c-ares:cares",
+  ]
 }
 
 source_set("odin_udp") {
