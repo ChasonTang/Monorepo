@@ -21,6 +21,8 @@ typedef struct odin_dns_resolver_test_liveness_t {
   size_t timers;
   size_t cares_channels;
   size_t cares_results;
+  size_t resolver_create_calls;
+  size_t resolver_destroy_calls;
 } odin_dns_resolver_test_liveness_t;
 
 typedef struct odin_dns_resolver_test_cares_observation_t {
@@ -45,6 +47,7 @@ typedef struct odin_dns_resolver_test_cares_observation_t {
 #define ODIN_DNS_TEST_CARES_TIMEOUT_TIMEVAL 6
 #define ODIN_DNS_TEST_CARES_SOCK_STATE 7
 #define ODIN_DNS_TEST_CARES_TIMEOUT_NULL 8
+#define ODIN_DNS_TEST_CARES_RESULT_EMPTY_SUCCESS 9
 
 typedef struct odin_dns_resolver_test_cares_step_t {
   int op;

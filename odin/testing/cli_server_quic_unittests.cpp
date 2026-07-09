@@ -687,6 +687,62 @@ std::string DataSends(const FakeStream &stream) {
   return out;
 }
 
+struct HarnessPumpCtx {
+  std::function<bool()> *predicate = nullptr;
+  odin_event_timer_t *poll_timer = nullptr;
+  odin_event_timer_t *watchdog = nullptr;
+  bool reached = false;
+  bool timed_out = false;
+};
+
+void StopHarnessPump(HarnessPumpCtx *ctx) {
+  if (ctx->poll_timer != nullptr) {
+    odin_event_timer_stop(ctx->poll_timer);
+    ctx->poll_timer = nullptr;
+  }
+  if (ctx->watchdog != nullptr) {
+    odin_event_timer_stop(ctx->watchdog);
+    ctx->watchdog = nullptr;
+  }
+}
+
+void HarnessPumpPollCb(odin_event_loop_t *loop, odin_event_timer_t *,
+                       void *user_data) {
+  HarnessPumpCtx *ctx = static_cast<HarnessPumpCtx *>(user_data);
+  if ((*ctx->predicate)()) {
+    ctx->reached = true;
+    StopHarnessPump(ctx);
+    odin_event_loop_stop(loop);
+  }
+}
+
+void HarnessPumpWatchdogCb(odin_event_loop_t *loop, odin_event_timer_t *,
+                           void *user_data) {
+  HarnessPumpCtx *ctx = static_cast<HarnessPumpCtx *>(user_data);
+  ctx->timed_out = true;
+  StopHarnessPump(ctx);
+  odin_event_loop_stop(loop);
+}
+
+void RunHarnessUntil(odin_event_loop_t *loop, std::function<bool()> predicate) {
+  if (predicate()) {
+    return;
+  }
+  HarnessPumpCtx ctx;
+  ctx.predicate = &predicate;
+  ASSERT_EQ(odin_event_timer_start(loop, 5000, 5000, HarnessPumpPollCb, &ctx,
+                                   &ctx.poll_timer),
+            0)
+      << std::strerror(errno);
+  ASSERT_EQ(odin_event_timer_start(loop, 1500000, 0, HarnessPumpWatchdogCb,
+                                   &ctx, &ctx.watchdog),
+            0)
+      << std::strerror(errno);
+  ASSERT_EQ(odin_event_loop_run(loop), 0) << std::strerror(errno);
+  EXPECT_TRUE(ctx.reached);
+  EXPECT_FALSE(ctx.timed_out);
+}
+
 xqc_cid_t Cid(uint8_t tag) {
   xqc_cid_t cid;
   std::memset(&cid, 0, sizeof(cid));
@@ -761,7 +817,7 @@ void CreateHarnessRuntime(QuicHarness *h) {
 
 void DestroyHarness(QuicHarness *h) {
   if (h->rt != nullptr) {
-    odin_xqc_server_runtime_destroy(h->rt);
+    odin_xqc_server_runtime_force_destroy(h->rt);
     h->rt = nullptr;
   }
   ClearHarnessOps();
@@ -1925,6 +1981,12 @@ TEST(OdinCliServerQuicSecurityTest, T9QuicConnectReqPolicyStreamPaths) {
   ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
                 AsStream(&deny_stream), deny_stream.user_data),
             XQC_OK);
+  const std::string deny_resp =
+      EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_OTHER);
+  RunHarnessUntil(h.loop, [&] {
+    return DataSends(deny_stream).rfind(deny_resp, 0) == 0 &&
+           deny_stream.user_data == nullptr;
+  });
   EXPECT_TRUE(DataSends(deny_stream)
                   .rfind(EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_OTHER), 0) ==
               0);
@@ -1945,6 +2007,11 @@ TEST(OdinCliServerQuicSecurityTest, T9QuicConnectReqPolicyStreamPaths) {
   ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(
                 AsStream(&public_stream), public_stream.user_data),
             XQC_OK);
+  const std::string timeout_resp =
+      EncodedResp(ODIN_SERVER_SESSION_RESP_CODE_ETIMEDOUT);
+  RunHarnessUntil(h.loop, [&] {
+    return DataSends(public_stream).rfind(timeout_resp, 0) == 0;
+  });
   odin_cli_server_test_dial_start_t rec{};
   ASSERT_EQ(ReadWithDeadline(probe_pipe[0], &rec, sizeof(rec), 1000),
             static_cast<ssize_t>(sizeof(rec)));

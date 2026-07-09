@@ -3,6 +3,7 @@
 #include "odin/server_xqc_runtime.h"
 
 #include <algorithm>
+#include <ares.h>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
@@ -18,12 +19,14 @@
 #include <poll.h>
 #include <string>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
 
 #include "odin/event_loop.h"
 #include "odin/protocol.h"
+#include "odin/testing/dns_resolver_internal_test.h"
 #include "odin/transport.h"
 #if defined(ODIN_CONNECT_SESSION_TESTING)
 #include "odin/testing/connect_session_internal_test.h"
@@ -1028,19 +1031,166 @@ void FinishStagedValidStream(RuntimeHarness *h, FakeStream *stream,
 void RunDeniedStream(RuntimeHarness *h, FakeStream *stream, uint16_t port,
                      uint16_t resp_code) {
   QueueCompleteReq(stream, port, "", 0);
-  bool in_read_notify = true;
-  stream->send_must_be_inside_flag = &in_read_notify;
-  stream->send_must_be_inside_bytes = EncodedResp(resp_code);
   ASSERT_EQ(h->app_callbacks->stream_cbs.stream_read_notify(AsStream(stream),
                                                             stream->user_data),
             XQC_OK);
-  in_read_notify = false;
-  EXPECT_EQ(stream->send_must_be_inside_checks, 1);
+  const std::string resp = EncodedResp(resp_code);
+  RunUntil(h->loop, [&] {
+    return StartsWith(DataSends(*stream), resp) && stream->user_data == nullptr;
+  });
   EXPECT_EQ(DataSends(*stream), EncodedResp(resp_code));
   EXPECT_EQ(stream->user_data, nullptr);
 }
 
 } // namespace
+
+namespace {
+
+class RuntimeDnsRunDeadline {
+public:
+  template <typename Fn> static void Run(Fn fn) {
+    const pid_t pid = fork();
+    ASSERT_NE(pid, -1) << std::strerror(errno);
+    if (pid == 0) {
+      (void)odin_dns_resolver_test_reset_liveness();
+      fn();
+      _exit(::testing::Test::HasFailure() ? 1 : 0);
+    }
+
+    int wstatus = 0;
+    bool exited = false;
+    for (int i = 0; i < 200; ++i) {
+      const pid_t got = waitpid(pid, &wstatus, WNOHANG);
+      if (got == pid) {
+        exited = true;
+        break;
+      }
+      if (got == -1 && errno != EINTR) {
+        break;
+      }
+      usleep(10000);
+    }
+    if (!exited) {
+      kill(pid, SIGKILL);
+      waitpid(pid, &wstatus, 0);
+      FAIL() << "RuntimeDnsRunDeadline exceeded 2 seconds";
+    }
+    ASSERT_TRUE(WIFEXITED(wstatus));
+    EXPECT_EQ(WEXITSTATUS(wstatus), 0);
+  }
+};
+
+void ExpectRuntimeDnsLiveBaseline(
+    const odin_dns_resolver_test_liveness_t &base) {
+  odin_dns_resolver_test_liveness_t post;
+  ASSERT_EQ(odin_dns_resolver_test_liveness(&post), 0);
+  EXPECT_EQ(post.resolvers, base.resolvers);
+  EXPECT_EQ(post.queries, base.queries);
+  EXPECT_EQ(post.watches, base.watches);
+  EXPECT_EQ(post.timers, base.timers);
+  EXPECT_EQ(post.cares_channels, base.cares_channels);
+  EXPECT_EQ(post.cares_results, base.cares_results);
+}
+
+} // namespace
+
+TEST(OdinXqcServerRuntimeDnsTest, T10RuntimeReusesOneResolver) {
+  RuntimeDnsRunDeadline::Run([] {
+    RuntimeHarness h;
+    InitHarness(&h);
+    odin_dns_resolver_test_liveness_t base;
+    ASSERT_EQ(odin_dns_resolver_test_liveness(&base), 0);
+    CreateRuntime(&h);
+    odin_dns_resolver_test_liveness_t after_rt;
+    ASSERT_EQ(odin_dns_resolver_test_liveness(&after_rt), 0);
+    EXPECT_EQ(after_rt.resolvers, base.resolvers + 1);
+    EXPECT_EQ(after_rt.resolver_create_calls, base.resolver_create_calls + 1);
+
+    FakeConn conn;
+    const xqc_cid_t cid = Cid(0xD1);
+    AcceptConn(&h, &conn, cid);
+#if defined(ODIN_SERVER_SESSION_TESTING)
+    const unsigned int session_base = odin_server_session_test_live_count();
+#endif
+    FakeStream stream;
+    CreateBidiStream(&h, &conn, &stream);
+#if defined(ODIN_SERVER_SESSION_TESTING)
+    EXPECT_EQ(odin_server_session_test_live_count(), session_base + 1);
+#endif
+    odin_dns_resolver_test_liveness_t after_stream;
+    ASSERT_EQ(odin_dns_resolver_test_liveness(&after_stream), 0);
+    EXPECT_EQ(after_stream.resolvers, after_rt.resolvers);
+
+    odin_xqc_server_runtime_destroy(h.rt);
+    EXPECT_EQ(stream.user_data, nullptr);
+#if defined(ODIN_SERVER_SESSION_TESTING)
+    EXPECT_EQ(odin_server_session_test_live_count(), session_base);
+#endif
+    CloseConn(&h, &conn, cid);
+    h.rt = nullptr;
+    odin_dns_resolver_test_liveness_t post;
+    ASSERT_EQ(odin_dns_resolver_test_liveness(&post), 0);
+    EXPECT_EQ(post.resolver_destroy_calls, base.resolver_destroy_calls + 1);
+    ExpectRuntimeDnsLiveBaseline(base);
+    ClearOps();
+    odin_event_loop_destroy(h.loop);
+  });
+}
+
+TEST(OdinXqcServerRuntimeDnsTest, T15RuntimeResolverRollback) {
+  for (int subcase = 0; subcase < 3; ++subcase) {
+    RuntimeDnsRunDeadline::Run([subcase] {
+      RuntimeHarness h;
+      InitHarness(&h);
+      odin_dns_resolver_test_liveness_t base;
+      ASSERT_EQ(odin_dns_resolver_test_liveness(&base), 0);
+      if (subcase == 0) {
+        odin_dns_resolver_test_cares_step_t step = {};
+        step.op = ODIN_DNS_TEST_CARES_LIBRARY_INIT;
+        step.status = ARES_ENOMEM;
+        ASSERT_EQ(odin_dns_resolver_test_push_cares_step(&step), 0);
+      } else if (subcase == 1) {
+        h.engine_create_returns_null = true;
+        h.engine_create_errno = EIO;
+      } else {
+        h.alpn_register_fails = true;
+      }
+      odin_xqc_server_runtime_t *out =
+          reinterpret_cast<odin_xqc_server_runtime_t *>(0xDEADBEEF);
+      const odin_xqc_server_runtime_config_t config = MakeRuntimeConfig(&h);
+      EXPECT_EQ(odin_xqc_server_runtime_create(&config, &out), -1);
+      EXPECT_EQ(out, reinterpret_cast<odin_xqc_server_runtime_t *>(0xDEADBEEF));
+      if (subcase == 0) {
+        EXPECT_EQ(errno, ENOMEM);
+        odin_dns_resolver_test_cares_observation_t obs;
+        ASSERT_EQ(odin_dns_resolver_test_cares_observation(&obs), 0);
+        EXPECT_EQ(obs.ares_library_init_calls, 1u);
+        EXPECT_EQ(CountCalls(ODIN_XQC_SERVER_RUNTIME_TEST_CALL_UDP_CREATE), 0u);
+        odin_dns_resolver_test_liveness_t post;
+        ASSERT_EQ(odin_dns_resolver_test_liveness(&post), 0);
+        EXPECT_EQ(post.resolver_create_calls, base.resolver_create_calls);
+        EXPECT_EQ(post.resolver_destroy_calls, base.resolver_destroy_calls);
+      } else {
+        if (subcase == 1) {
+          EXPECT_EQ(errno, EIO);
+          EXPECT_EQ(CountCalls(
+                        ODIN_XQC_SERVER_RUNTIME_TEST_CALL_ENGINE_REGISTER_ALPN),
+                    0u);
+        } else {
+          EXPECT_EQ(errno, EIO);
+          EXPECT_EQ(h.engine_destroy_calls, 1);
+        }
+        odin_dns_resolver_test_liveness_t post;
+        ASSERT_EQ(odin_dns_resolver_test_liveness(&post), 0);
+        EXPECT_EQ(post.resolver_create_calls, base.resolver_create_calls + 1);
+        EXPECT_EQ(post.resolver_destroy_calls, base.resolver_destroy_calls + 1);
+        ExpectRuntimeDnsLiveBaseline(base);
+      }
+      ClearOps();
+      odin_event_loop_destroy(h.loop);
+    });
+  }
+}
 
 TEST(OdinServerSessionTransportTest, T1) {
   odin_event_loop_t *loop = nullptr;
@@ -1596,10 +1746,16 @@ TEST(OdinXqcServerRuntimeTest, T8) {
   EXPECT_EQ(odin_server_session_test_live_count(), session_base + 1);
   EXPECT_EQ(odin_connect_session_test_live_count(), connect_base + 1);
 #endif
-  RunDeniedStream(&h, &stream_f, destroy_port,
-                  ODIN_SERVER_SESSION_RESP_CODE_OTHER);
+  QueueCompleteReq(&stream_f, destroy_port, "", 0);
+  ASSERT_EQ(h.app_callbacks->stream_cbs.stream_read_notify(AsStream(&stream_f),
+                                                           stream_f.user_data),
+            XQC_OK);
+  RunUntil(h.loop, [&] {
+    return destroy_f.calls == 1 && stream_f.user_data == nullptr;
+  });
   EXPECT_EQ(destroy_f.calls, 1);
   EXPECT_TRUE(destroy_f.saw_expected_addr);
+  EXPECT_TRUE(DataSends(stream_f).empty());
   ExpectNoAccept(destroy_lfd);
   EXPECT_EQ(close(destroy_lfd), 0);
   ASSERT_EQ(h.conn_close_cids.size(), 1u);

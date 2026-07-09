@@ -82,12 +82,14 @@ static int g_fail_next_result_alloc;
 static void test_live_resolvers_add(void) {
   pthread_mutex_lock(&g_test_mu);
   g_live.resolvers += 1;
+  g_live.resolver_create_calls += 1;
   pthread_mutex_unlock(&g_test_mu);
 }
 
 static void test_live_resolvers_sub(void) {
   pthread_mutex_lock(&g_test_mu);
   g_live.resolvers -= 1;
+  g_live.resolver_destroy_calls += 1;
   pthread_mutex_unlock(&g_test_mu);
 }
 
@@ -364,6 +366,21 @@ static void complete_test_result(odin_dns_query_t *query, int status) {
   test_live_results_add();
 }
 
+static void complete_test_empty_success(odin_dns_query_t *query) {
+  if (query->suppress_callbacks) {
+    return;
+  }
+  query->result_status = ARES_SUCCESS;
+  query->completion_pending = 1;
+  query->result = (struct ares_addrinfo *)calloc(1, sizeof(*query->result));
+  if (query->result == NULL) {
+    query->result_status = ARES_ENOMEM;
+    return;
+  }
+  query->test_result_allocated = 1;
+  test_live_results_add();
+}
+
 static void dns_ares_getaddrinfo(odin_dns_query_t *query, const char *node,
                                  const char *service,
                                  const struct ares_addrinfo_hints *hints) {
@@ -373,6 +390,11 @@ static void dns_ares_getaddrinfo(odin_dns_query_t *query, const char *node,
   g_obs.last_ai_flags = hints != NULL ? hints->ai_flags : 0;
   g_obs.last_ai_family = hints != NULL ? hints->ai_family : 0;
   pthread_mutex_unlock(&g_test_mu);
+
+  if (test_pop_step(ODIN_DNS_TEST_CARES_RESULT_EMPTY_SUCCESS, &step)) {
+    complete_test_empty_success(query);
+    return;
+  }
 
   if (test_pop_step(ODIN_DNS_TEST_CARES_RESULT_STATUS, &step)) {
     complete_test_result(query, step.status);
@@ -1221,10 +1243,15 @@ int odin_dns_resolver_test_reset_liveness(void) {
     errno = EBUSY;
     return -1;
   }
+  memset(&g_live, 0, sizeof(g_live));
   memset(&g_obs, 0, sizeof(g_obs));
   g_steps_len = 0;
   g_fail_next_result_alloc = 0;
   pthread_mutex_unlock(&g_test_mu);
+  pthread_mutex_lock(&g_library_mu);
+  g_library_state = 0;
+  g_library_errno = 0;
+  pthread_mutex_unlock(&g_library_mu);
   return 0;
 }
 

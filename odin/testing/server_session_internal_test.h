@@ -39,6 +39,7 @@ int odin_server_session_test_state(const odin_server_session_t *ss);
 #define ODIN_SERVER_SESSION_TEST_STATE_WRITING_ERR_RESP 4
 #define ODIN_SERVER_SESSION_TEST_STATE_RELAY 5
 #define ODIN_SERVER_SESSION_TEST_STATE_TERMINAL 6
+#define ODIN_SERVER_SESSION_TEST_STATE_RESOLVING 7
 
 #ifdef __cplusplus
 }

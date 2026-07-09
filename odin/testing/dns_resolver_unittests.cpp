@@ -42,6 +42,7 @@ bool IsDirectChildOnlyFilter(const std::string &filter, const char *test_name) {
 }
 
 void AssertParentCaresInitUnchanged() {
+  ASSERT_EQ(odin_dns_resolver_test_reset_liveness(), 0) << std::strerror(errno);
   odin_dns_resolver_test_cares_observation_t obs;
   ASSERT_EQ(odin_dns_resolver_test_cares_observation(&obs), 0)
       << std::strerror(errno);

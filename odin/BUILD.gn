@@ -165,6 +165,7 @@ source_set("odin_server_session") {
   public_deps = [
     ":odin_connect_session",
     ":odin_dial",
+    ":odin_dns_resolver",
     ":odin_event_loop",
     ":odin_relay",
     ":odin_transport",

@@ -47,6 +47,7 @@
 
 #include <sys/socket.h>
 
+#include "odin/dns_resolver.h"
 #include "odin/event_loop.h"
 #include "odin/transport.h"
 
@@ -77,11 +78,23 @@ int odin_server_session_create(odin_event_loop_t *loop, int conn_fd,
                                odin_server_session_close_cb on_close,
                                void *user_data, odin_server_session_t **out);
 
+int odin_server_session_create_with_resolver(
+    odin_event_loop_t *loop, int conn_fd, odin_dns_resolver_t *resolver,
+    odin_server_session_close_cb on_close, void *user_data,
+    odin_server_session_t **out);
+
 int odin_server_session_create_with_transport(
     odin_event_loop_t *loop,
     odin_server_session_transport_factory_cb create_downstream,
     void *factory_user_data, odin_server_session_close_cb on_close,
     void *user_data, odin_server_session_t **out);
+
+int odin_server_session_create_with_transport_and_resolver(
+    odin_event_loop_t *loop,
+    odin_server_session_transport_factory_cb create_downstream,
+    void *factory_user_data, odin_dns_resolver_t *resolver,
+    odin_server_session_close_cb on_close, void *user_data,
+    odin_server_session_t **out);
 
 void odin_server_session_set_dial_filter(odin_server_session_t *ss,
                                          odin_server_session_dial_filter_cb cb,

@@ -39,6 +39,7 @@ enum {
   ODIN_SERVER_SESSION_S_WRITING_ERR_RESP = 4,
   ODIN_SERVER_SESSION_S_RELAY = 5,
   ODIN_SERVER_SESSION_S_TERMINAL = 6,
+  ODIN_SERVER_SESSION_S_RESOLVING = 7,
 };
 
 struct odin_server_session_t {
@@ -60,6 +61,9 @@ struct odin_server_session_t {
   odin_transport_t *downstream_t;
   odin_transport_t *upstream_t;
   odin_connect_session_t *s;
+  odin_dns_resolver_t *resolver;
+  odin_dns_query_t *dns_query;
+  int owns_resolver;
   odin_dial_t *dial;
   odin_relay_t *relay;
 #if defined(ODIN_SERVER_SESSION_TESTING)
@@ -88,8 +92,13 @@ static void session_on_done(odin_connect_session_t *s,
                             void *user_data);
 static void dial_on_done(odin_dial_t *dial, odin_dial_status_t status, int fd,
                          int err, void *user_data);
+static void dns_on_done(odin_dns_query_t *query, odin_dns_status_t status,
+                        int err, const odin_dns_addr_t *addrs,
+                        size_t addr_count, void *user_data);
 static void relay_on_done(odin_relay_t *relay, odin_relay_status_t status,
                           int err, void *user_data);
+static void select_and_dial(odin_server_session_t *ss,
+                            const odin_dns_addr_t *addrs, size_t addr_count);
 static void handle_dial_result(odin_server_session_t *ss, int err);
 static void fire_terminal(odin_server_session_t *ss, int err);
 static void finish_destroy(odin_server_session_t *ss);
@@ -120,49 +129,154 @@ static void ss_leave(odin_server_session_t *ss) {
   }
 }
 
-int odin_server_session_create(odin_event_loop_t *loop, int conn_fd,
-                               odin_server_session_close_cb on_close,
-                               void *user_data, odin_server_session_t **out) {
+static odin_server_session_t *
+alloc_session(odin_event_loop_t *loop, int conn_fd,
+              odin_dns_resolver_t *resolver, int owns_resolver,
+              odin_server_session_close_cb on_close, void *user_data) {
   odin_server_session_t *ss = (odin_server_session_t *)calloc(1, sizeof(*ss));
   if (ss == NULL) {
     errno = ENOMEM;
-    return -1;
+    return NULL;
   }
   ss->loop = loop;
   ss->conn_fd = conn_fd;
   ss->dial_fd = -1;
   ss->state = ODIN_SERVER_SESSION_S_HANDSHAKE;
+  ss->resolver = resolver;
+  ss->owns_resolver = owns_resolver;
   ss->on_close = on_close;
   ss->user_data = user_data;
+  return ss;
+}
 
-  if (odin_fd_transport_create(loop, conn_fd, server_session_ready, ss,
-                               &ss->downstream_t) != 0) {
-    const int saved = errno;
-    free(ss);
-    errno = saved;
-    return -1;
+static void rollback_unpublished_session(odin_server_session_t *ss) {
+  if (ss == NULL) {
+    return;
   }
+  if (ss->s != NULL) {
+    odin_connect_session_destroy(ss->s);
+    ss->s = NULL;
+  }
+  if (ss->downstream_t != NULL) {
+    odin_transport_destroy(ss->downstream_t);
+    ss->downstream_t = NULL;
+  }
+  if (ss->owns_resolver && ss->resolver != NULL) {
+    odin_dns_resolver_destroy(ss->resolver);
+    ss->resolver = NULL;
+  }
+  free(ss);
+}
+
+static int finish_session_setup(odin_server_session_t *ss) {
   if (odin_connect_session_create_server(session_on_req_decoded,
                                          session_on_done, ss, &ss->s) != 0) {
-    const int saved = errno;
-    odin_transport_destroy(ss->downstream_t);
-    free(ss);
-    errno = saved;
     return -1;
   }
   if (odin_transport_set_interest(ss->downstream_t, ODIN_TRANSPORT_READ) != 0) {
-    const int saved = errno;
-    odin_connect_session_destroy(ss->s);
-    odin_transport_destroy(ss->downstream_t);
-    free(ss);
-    errno = saved;
     return -1;
   }
 #if defined(ODIN_SERVER_SESSION_TESTING)
   g_server_session_live_count += 1;
 #endif
+  return 0;
+}
+
+static int create_with_resolver_common(odin_event_loop_t *loop, int conn_fd,
+                                       odin_dns_resolver_t *resolver,
+                                       int owns_resolver,
+                                       odin_server_session_close_cb on_close,
+                                       void *user_data,
+                                       odin_server_session_t **out) {
+  odin_server_session_t *ss = alloc_session(loop, conn_fd, resolver,
+                                            owns_resolver, on_close, user_data);
+  if (ss == NULL) {
+    const int saved = errno;
+    if (owns_resolver) {
+      odin_dns_resolver_destroy(resolver);
+    }
+    errno = saved;
+    return -1;
+  }
+  if (odin_fd_transport_create(loop, conn_fd, server_session_ready, ss,
+                               &ss->downstream_t) != 0) {
+    const int saved = errno;
+    rollback_unpublished_session(ss);
+    errno = saved;
+    return -1;
+  }
+  if (finish_session_setup(ss) != 0) {
+    const int saved = errno;
+    rollback_unpublished_session(ss);
+    errno = saved;
+    return -1;
+  }
   *out = ss;
   return 0;
+}
+
+static int create_with_transport_and_resolver_common(
+    odin_event_loop_t *loop,
+    odin_server_session_transport_factory_cb create_downstream,
+    void *factory_user_data, odin_dns_resolver_t *resolver, int owns_resolver,
+    odin_server_session_close_cb on_close, void *user_data,
+    odin_server_session_t **out) {
+  odin_server_session_t *ss =
+      alloc_session(loop, -1, resolver, owns_resolver, on_close, user_data);
+  if (ss == NULL) {
+    const int saved = errno;
+    if (owns_resolver) {
+      odin_dns_resolver_destroy(resolver);
+    }
+    errno = saved;
+    return -1;
+  }
+  if (create_downstream(server_session_ready, ss, factory_user_data,
+                        &ss->downstream_t) != 0) {
+    const int saved = errno;
+    rollback_unpublished_session(ss);
+    errno = saved;
+    return -1;
+  }
+  if (finish_session_setup(ss) != 0) {
+    const int saved = errno;
+    rollback_unpublished_session(ss);
+    errno = saved;
+    return -1;
+  }
+  *out = ss;
+  return 0;
+}
+
+int odin_server_session_create(odin_event_loop_t *loop, int conn_fd,
+                               odin_server_session_close_cb on_close,
+                               void *user_data, odin_server_session_t **out) {
+  if (loop == NULL || on_close == NULL || out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  odin_dns_resolver_t *resolver = NULL;
+  if (odin_dns_resolver_create(loop, NULL, &resolver) != 0) {
+    return -1;
+  }
+  if (create_with_resolver_common(loop, conn_fd, resolver, 1, on_close,
+                                  user_data, out) != 0) {
+    return -1;
+  }
+  return 0;
+}
+
+int odin_server_session_create_with_resolver(
+    odin_event_loop_t *loop, int conn_fd, odin_dns_resolver_t *resolver,
+    odin_server_session_close_cb on_close, void *user_data,
+    odin_server_session_t **out) {
+  if (loop == NULL || resolver == NULL || on_close == NULL || out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  return create_with_resolver_common(loop, conn_fd, resolver, 0, on_close,
+                                     user_data, out);
 }
 
 int odin_server_session_create_with_transport(
@@ -175,46 +289,33 @@ int odin_server_session_create_with_transport(
     errno = EINVAL;
     return -1;
   }
-  odin_server_session_t *ss = (odin_server_session_t *)calloc(1, sizeof(*ss));
-  if (ss == NULL) {
-    errno = ENOMEM;
-    return -1;
-  }
-  ss->loop = loop;
-  ss->conn_fd = -1;
-  ss->dial_fd = -1;
-  ss->state = ODIN_SERVER_SESSION_S_HANDSHAKE;
-  ss->on_close = on_close;
-  ss->user_data = user_data;
 
-  if (create_downstream(server_session_ready, ss, factory_user_data,
-                        &ss->downstream_t) != 0) {
-    const int saved = errno;
-    free(ss);
-    errno = saved;
+  odin_dns_resolver_t *resolver = NULL;
+  if (odin_dns_resolver_create(loop, NULL, &resolver) != 0) {
     return -1;
   }
-  if (odin_connect_session_create_server(session_on_req_decoded,
-                                         session_on_done, ss, &ss->s) != 0) {
-    const int saved = errno;
-    odin_transport_destroy(ss->downstream_t);
-    free(ss);
-    errno = saved;
+  if (create_with_transport_and_resolver_common(
+          loop, create_downstream, factory_user_data, resolver, 1, on_close,
+          user_data, out) != 0) {
     return -1;
   }
-  if (odin_transport_set_interest(ss->downstream_t, ODIN_TRANSPORT_READ) != 0) {
-    const int saved = errno;
-    odin_connect_session_destroy(ss->s);
-    odin_transport_destroy(ss->downstream_t);
-    free(ss);
-    errno = saved;
-    return -1;
-  }
-#if defined(ODIN_SERVER_SESSION_TESTING)
-  g_server_session_live_count += 1;
-#endif
-  *out = ss;
   return 0;
+}
+
+int odin_server_session_create_with_transport_and_resolver(
+    odin_event_loop_t *loop,
+    odin_server_session_transport_factory_cb create_downstream,
+    void *factory_user_data, odin_dns_resolver_t *resolver,
+    odin_server_session_close_cb on_close, void *user_data,
+    odin_server_session_t **out) {
+  if (loop == NULL || create_downstream == NULL || resolver == NULL ||
+      on_close == NULL || out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  return create_with_transport_and_resolver_common(loop, create_downstream,
+                                                   factory_user_data, resolver,
+                                                   0, on_close, user_data, out);
 }
 
 void odin_server_session_set_dial_filter(odin_server_session_t *ss,
@@ -239,6 +340,10 @@ void odin_server_session_destroy(odin_server_session_t *ss) {
 }
 
 static void finish_destroy(odin_server_session_t *ss) {
+  if (ss->dns_query != NULL) {
+    odin_dns_query_destroy(ss->dns_query);
+    ss->dns_query = NULL;
+  }
   if (ss->relay != NULL) {
     odin_relay_destroy(ss->relay);
     ss->relay = NULL;
@@ -267,6 +372,10 @@ static void finish_destroy(odin_server_session_t *ss) {
     (void)close(ss->conn_fd);
     ss->conn_fd = -1;
   }
+  if (ss->owns_resolver && ss->resolver != NULL) {
+    odin_dns_resolver_destroy(ss->resolver);
+    ss->resolver = NULL;
+  }
 #if defined(ODIN_SERVER_SESSION_TESTING)
   g_server_session_live_count -= 1;
 #endif
@@ -288,7 +397,9 @@ static void server_session_ready(odin_transport_t *t, unsigned int events,
     ss->connect_drive_depth -= 1;
     if (ss->s != NULL && d == ODIN_CONNECT_SESSION_DRIVE_CONTINUE) {
       unsigned int mask = 0;
-      if (ss->pending_downstream_interest_armed) {
+      if (ss->state == ODIN_SERVER_SESSION_S_RESOLVING) {
+        mask = 0;
+      } else if (ss->pending_downstream_interest_armed) {
         mask = ss->pending_downstream_interest;
         ss->pending_downstream_interest = 0;
         ss->pending_downstream_interest_armed = 0;
@@ -333,58 +444,22 @@ static void deferred_inject_session_error_task(odin_event_loop_t *loop,
 static void session_on_req_decoded(odin_connect_session_t *s, void *user_data) {
   odin_server_session_t *ss = (odin_server_session_t *)user_data;
 
-#if defined(ODIN_SERVER_SESSION_TESTING)
-  if (ss->fail_next_dial_armed) {
-    const int errnum = ss->fail_next_dial_errno;
-    ss->fail_next_dial_armed = 0;
-    ss->fail_next_dial_errno = 0;
-    handle_dial_result(ss, errnum);
-    return;
-  }
-#endif
-
   const char *host_ptr = NULL;
   size_t host_len = 0;
   odin_connect_session_server_host(s, &host_ptr, &host_len);
   const uint16_t port = odin_connect_session_server_port(s);
 
-  uint8_t host_cstr[ODIN_PROTO_HOST_MAX + 1];
-  if (host_len > ODIN_PROTO_HOST_MAX) {
-    /* Decoder enforces host_len <= 255; defensive cap keeps the buffer write
-     * bounded should the contract ever loosen. */
-    host_len = ODIN_PROTO_HOST_MAX;
-  }
-  memcpy(host_cstr, host_ptr, host_len);
-  host_cstr[host_len] = '\0';
-
-  struct sockaddr_in sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sin_family = AF_INET;
-  sa.sin_port = htons(port);
-  const int rc = inet_pton(AF_INET, (const char *)host_cstr, &sa.sin_addr);
-  if (rc != 1) {
-    handle_dial_result(ss, EHOSTUNREACH);
-    return;
-  }
-
-  if (ss->dial_filter != NULL) {
-    const int filter_err = ss->dial_filter((const struct sockaddr *)&sa,
-                                           sizeof(sa), ss->dial_filter_ud);
-    if (filter_err != 0) {
-      handle_dial_result(ss, filter_err);
-      return;
-    }
-  }
-
-  if (odin_dial_start(ss->loop, (const struct sockaddr *)&sa, sizeof(sa),
-                      dial_on_done, ss, &ss->dial) != 0) {
+  if (odin_dns_resolve_start(ss->resolver, host_ptr, host_len, port, AF_UNSPEC,
+                             dns_on_done, ss, &ss->dns_query) != 0) {
     const int saved = errno;
     handle_dial_result(ss, saved);
     return;
   }
-  ss->state = ODIN_SERVER_SESSION_S_DIALING;
+  ss->state = ODIN_SERVER_SESSION_S_RESOLVING;
+}
 
 #if defined(ODIN_SERVER_SESSION_TESTING)
+static void maybe_post_injected_session_error(odin_server_session_t *ss) {
   if (ss->inject_session_error_armed) {
     const int errnum = ss->inject_session_error_errno;
     ss->inject_session_error_armed = 0;
@@ -393,7 +468,93 @@ static void session_on_req_decoded(odin_connect_session_t *s, void *user_data) {
     ss->pending_inject_err = errnum;
     (void)odin_event_post(ss->loop, deferred_inject_session_error_task, ss);
   }
+}
+#else
+static void maybe_post_injected_session_error(odin_server_session_t *ss) {
+  (void)ss;
+}
 #endif
+
+static void dns_on_done(odin_dns_query_t *query, odin_dns_status_t status,
+                        int err, const odin_dns_addr_t *addrs,
+                        size_t addr_count, void *user_data) {
+  odin_server_session_t *ss = (odin_server_session_t *)user_data;
+  ss_enter(ss);
+  if (ss->on_close_fired || ss->destroy_pending) {
+    ss_leave(ss);
+    return;
+  }
+  ss->dns_query = NULL;
+  odin_dns_query_destroy(query);
+  if (status != ODIN_DNS_OK) {
+    handle_dial_result(ss, err);
+    ss_leave(ss);
+    return;
+  }
+  select_and_dial(ss, addrs, addr_count);
+  ss_leave(ss);
+}
+
+static void select_and_dial(odin_server_session_t *ss,
+                            const odin_dns_addr_t *addrs, size_t addr_count) {
+  if (addr_count == 0) {
+    handle_dial_result(ss, EHOSTUNREACH);
+    return;
+  }
+
+  int first_filter_err = 0;
+  int first_start_err = 0;
+  for (size_t i = 0; i < addr_count; ++i) {
+    if (ss->destroy_pending || ss->on_close_fired) {
+      return;
+    }
+    const odin_dns_addr_t *addr = &addrs[i];
+    if (ss->dial_filter != NULL) {
+      const int filter_err =
+          ss->dial_filter((const struct sockaddr *)&addr->addr, addr->addrlen,
+                          ss->dial_filter_ud);
+      if (ss->destroy_pending || ss->on_close_fired) {
+        return;
+      }
+      if (filter_err != 0) {
+        if (first_filter_err == 0) {
+          first_filter_err = filter_err;
+        }
+        continue;
+      }
+    }
+#if defined(ODIN_SERVER_SESSION_TESTING)
+    if (ss->fail_next_dial_armed) {
+      const int errnum = ss->fail_next_dial_errno;
+      ss->fail_next_dial_armed = 0;
+      ss->fail_next_dial_errno = 0;
+      if (first_start_err == 0) {
+        first_start_err = errnum;
+      }
+      continue;
+    }
+#endif
+    if (odin_dial_start(ss->loop, (const struct sockaddr *)&addr->addr,
+                        addr->addrlen, dial_on_done, ss, &ss->dial) == 0) {
+      ss->state = ODIN_SERVER_SESSION_S_DIALING;
+      maybe_post_injected_session_error(ss);
+      return;
+    }
+    if (first_start_err == 0) {
+      first_start_err = errno;
+    }
+  }
+
+  if (ss->destroy_pending || ss->on_close_fired) {
+    return;
+  }
+  if (first_start_err != 0) {
+    handle_dial_result(ss, first_start_err);
+  } else if (first_filter_err != 0) {
+    handle_dial_result(ss, first_filter_err);
+  } else {
+    handle_dial_result(ss, EHOSTUNREACH);
+  }
 }
 
 static void dial_on_done(odin_dial_t *dial, odin_dial_status_t status, int fd,
@@ -556,6 +717,10 @@ static void fire_terminal(odin_server_session_t *ss, int err) {
   }
   ss->on_close_fired = 1;
   ss->state = ODIN_SERVER_SESSION_S_TERMINAL;
+  if (ss->dns_query != NULL) {
+    odin_dns_query_destroy(ss->dns_query);
+    ss->dns_query = NULL;
+  }
   if (ss->relay != NULL) {
     odin_relay_destroy(ss->relay);
     ss->relay = NULL;
@@ -583,6 +748,10 @@ static void fire_terminal(odin_server_session_t *ss, int err) {
   if (ss->conn_fd >= 0) {
     (void)close(ss->conn_fd);
     ss->conn_fd = -1;
+  }
+  if (ss->owns_resolver && ss->resolver != NULL) {
+    odin_dns_resolver_destroy(ss->resolver);
+    ss->resolver = NULL;
   }
   const odin_server_session_close_cb cb = ss->on_close;
   void *const ud = ss->user_data;

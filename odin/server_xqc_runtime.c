@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "odin/dns_resolver.h"
 #include "odin/transport.h"
 #include "odin/transport_xqc.h"
 
@@ -46,6 +47,7 @@ struct odin_xqc_server_conn_ctx_t {
 
 struct odin_xqc_server_runtime_t {
   odin_event_loop_t *loop;
+  odin_dns_resolver_t *resolver;
   odin_xqc_udp_t *xu;
   xqc_transport_callbacks_t transport_callbacks;
   xqc_app_proto_callbacks_t app_callbacks;
@@ -512,6 +514,10 @@ static void runtime_finish_destroy(odin_xqc_server_runtime_t *rt) {
     rt->xu = NULL;
   }
   runtime_free_force_pending(rt);
+  if (rt->resolver != NULL) {
+    odin_dns_resolver_destroy(rt->resolver);
+    rt->resolver = NULL;
+  }
   free(rt);
 }
 
@@ -737,6 +743,13 @@ int odin_xqc_server_runtime_create(
   rt->app_callbacks.stream_cbs.stream_closing_notify =
       runtime_stream_closing_notify;
 
+  if (odin_dns_resolver_create(config->loop, NULL, &rt->resolver) != 0) {
+    const int saved = errno;
+    free(rt);
+    errno = saved;
+    return -1;
+  }
+
   odin_xqc_udp_config_t udp_config;
   memset(&udp_config, 0, sizeof(udp_config));
   udp_config.loop = config->loop;
@@ -750,6 +763,7 @@ int odin_xqc_server_runtime_create(
   udp_config.app_user_data = rt;
   if (runtime_udp_create_call(&udp_config, &rt->xu) != 0) {
     const int saved = errno;
+    odin_dns_resolver_destroy(rt->resolver);
     free(rt);
     errno = saved;
     return -1;
@@ -759,6 +773,7 @@ int odin_xqc_server_runtime_create(
                                         sizeof(ODIN_XQC_SERVER_ALPN) - 1u,
                                         &rt->app_callbacks, rt) != XQC_OK) {
     runtime_udp_destroy_call(rt->xu);
+    odin_dns_resolver_destroy(rt->resolver);
     free(rt);
     errno = EIO;
     return -1;
@@ -1113,8 +1128,8 @@ static xqc_int_t runtime_stream_create_notify(xqc_stream_t *stream,
   }
   stream_ctx->conn_ctx = ctx;
   stream_ctx->stream = stream;
-  if (odin_server_session_create_with_transport(
-          rt->loop, xqc_stream_transport_factory, stream_ctx,
+  if (odin_server_session_create_with_transport_and_resolver(
+          rt->loop, xqc_stream_transport_factory, stream_ctx, rt->resolver,
           runtime_stream_session_on_close, stream_ctx, &stream_ctx->ss) != 0) {
     stream_ctx->transport = NULL;
     (void)runtime_stream_close_call(stream);
