@@ -34,6 +34,8 @@ typedef enum odin_cli_client_test_failpoint_t {
   ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_ERROR = 15,
   ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR = 16,
   ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR = 17,
+  ODIN_CLI_CLIENT_TEST_FAIL_DNS_EVENT_LOOP_RUN = 18,
+  ODIN_CLI_CLIENT_TEST_TRIGGER_DNS_EVENT_LOOP_STOP = 19,
   ODIN_CLI_CLIENT_TEST_FAILPOINT_INVALID = 99,
   ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE = 100,
   ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_START = 101,
@@ -70,6 +72,27 @@ typedef struct odin_cli_client_test_runtime_config_record_t {
   char quic_ca_file_value[4096];
 } odin_cli_client_test_runtime_config_record_t;
 
+typedef struct odin_cli_client_test_dns_timing_t {
+  size_t dns_on_done_calls;
+  size_t query_destroyed_in_callback_calls;
+  size_t live_queries_at_callback_exit;
+  int dns_query_pending_before_dns_event_loop_run;
+  size_t accept_loop_create_calls_before_dns_event_loop_run;
+  size_t live_accept_loops_before_dns_event_loop_run;
+  size_t quic_runtime_add_connection_calls_before_dns_event_loop_run;
+  int dns_event_loop_run_rc;
+  int dns_done_after_dns_event_loop_run;
+  int dns_success_after_dns_event_loop_run;
+  size_t live_resolvers_after_dns_event_loop_run;
+  size_t live_queries_after_dns_event_loop_run;
+  size_t live_resolvers_before_accept_loop_create;
+  size_t live_queries_before_accept_loop_create;
+  size_t live_resolvers_before_runtime_create;
+  size_t live_queries_before_runtime_create;
+  size_t live_resolvers_before_runtime_start;
+  size_t live_queries_before_runtime_start;
+} odin_cli_client_test_dns_timing_t;
+
 int odin_cli_client_test_fail_next(odin_cli_client_test_failpoint_t fp,
                                    int errnum);
 int odin_cli_client_test_trigger_next(odin_cli_client_test_failpoint_t fp);
@@ -85,6 +108,7 @@ int odin_cli_client_test_pending_failpoint(
     odin_cli_client_test_failpoint_t *out);
 int odin_cli_client_test_set_progress_fd(int fd, size_t min_inflight_sessions);
 int odin_cli_client_test_set_runtime_trigger_fd(int fd);
+int odin_cli_client_test_dns_timing(odin_cli_client_test_dns_timing_t *out);
 
 #ifdef __cplusplus
 }

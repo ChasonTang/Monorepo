@@ -22,6 +22,7 @@ static int valid_fail_next_fp(odin_cli_client_test_failpoint_t fp) {
   case ODIN_CLI_CLIENT_TEST_FAIL_SIGACTION_SIGTERM:
   case ODIN_CLI_CLIENT_TEST_FAIL_SIGNAL_TIMER_START:
   case ODIN_CLI_CLIENT_TEST_FAIL_EVENT_LOOP_RUN:
+  case ODIN_CLI_CLIENT_TEST_FAIL_DNS_EVENT_LOOP_RUN:
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_ERROR:
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR:
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR:
@@ -58,7 +59,8 @@ int odin_cli_client_test_fail_next(odin_cli_client_test_failpoint_t fp,
 }
 
 int odin_cli_client_test_trigger_next(odin_cli_client_test_failpoint_t fp) {
-  if (fp != ODIN_CLI_CLIENT_TEST_TRIGGER_UNEXPECTED_STOP) {
+  if (fp != ODIN_CLI_CLIENT_TEST_TRIGGER_UNEXPECTED_STOP &&
+      fp != ODIN_CLI_CLIENT_TEST_TRIGGER_DNS_EVENT_LOOP_STOP) {
     errno = EINVAL;
     return -1;
   }
@@ -75,6 +77,8 @@ void odin_cli_client_test_reset_liveness(void) {
   g_quic_runtime_start_calls = 0;
   g_quic_runtime_add_connection_calls = 0;
   g_quic_runtime_force_destroy_calls = 0;
+  g_accept_loop_create_calls = 0;
+  memset(&g_dns_timing, 0, sizeof(g_dns_timing));
   g_last_bind_addr_recorded = 0;
   memset(&g_last_bind_addr, 0, sizeof(g_last_bind_addr));
   g_last_bound_addr_recorded = 0;
@@ -189,5 +193,14 @@ int odin_cli_client_test_set_runtime_trigger_fd(int fd) {
   }
   g_runtime_trigger_fd = fd;
   g_runtime_trigger_released = 0;
+  return 0;
+}
+
+int odin_cli_client_test_dns_timing(odin_cli_client_test_dns_timing_t *out) {
+  if (out == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  *out = g_dns_timing;
   return 0;
 }

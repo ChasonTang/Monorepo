@@ -7,8 +7,11 @@
 #include "odin/testing/cli_client_internal_test.h"
 #include "odin/testing/client_session_internal_test.h"
 #include "odin/testing/client_xqc_runtime_internal_test.h"
+#include "odin/testing/dns_resolver_internal_test.h"
 #include "odin/testing/event_loop_internal_test.h"
 #include "odin/testing/xqc_udp_internal_test.h"
+
+#include <ares.h>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -40,6 +43,7 @@ namespace {
 
 constexpr int kShortDeadlineMs = 1500;
 constexpr int kLongDeadlineMs = 4000;
+constexpr int kRfc032FakeFailureExit = 122;
 
 volatile sig_atomic_t g_child_sigint_count = 0;
 volatile sig_atomic_t g_child_sigterm_count = 0;
@@ -57,6 +61,8 @@ std::string BuildCertDir() {
 }
 
 std::string ClientCaFile() { return BuildCertDir() + "/root-ca.pem"; }
+
+std::string ActiveFilter() { return GTEST_FLAG_GET(filter); }
 
 std::vector<std::string> QuicClientArgs(const std::string &server) {
   return {"odin-client", "--listen",  "0",           "--server",
@@ -504,11 +510,18 @@ struct Rfc028QuicChildSnapshot {
   int add_record_ok;
   odin_cli_client_test_runtime_config_record_t runtime_config;
   int runtime_config_ok;
+  odin_cli_client_test_dns_timing_t dns_timing;
   struct sockaddr_in bind_addr;
   int bind_addr_ok;
   struct sockaddr_in bound_addr;
   int bound_addr_ok;
+  odin_dns_resolver_test_liveness_t dns;
+  odin_dns_resolver_test_cares_observation_t dns_obs;
   odin_xqc_client_runtime_test_record_t runtime_record;
+  int fake_failures;
+  char fake_failure[256];
+  int process_exited;
+  int process_status;
 };
 
 struct Rfc028QuicDirectRun {
@@ -528,6 +541,8 @@ struct Rfc028QuicFakeState {
 };
 
 Rfc028QuicFakeState g_rfc028_quic_fake;
+int g_rfc032_fake_failures;
+char g_rfc032_fake_failure[256];
 
 xqc_engine_t *Rfc028QuicEngineCreate(
     xqc_engine_type_t engine_type, const xqc_config_t *engine_config,
@@ -686,11 +701,16 @@ void FillRfc028QuicSnapshot(int rc, Rfc028QuicChildSnapshot *snap) {
   snap->runtime_config_ok =
       odin_cli_client_test_last_runtime_config(&snap->runtime_config) == 0 ? 1
                                                                            : 0;
+  (void)odin_cli_client_test_dns_timing(&snap->dns_timing);
   snap->bind_addr_ok =
       odin_cli_client_test_last_bind_addr(&snap->bind_addr) == 0 ? 1 : 0;
   snap->bound_addr_ok =
       odin_cli_client_test_last_bound_addr(&snap->bound_addr) == 0 ? 1 : 0;
+  (void)odin_dns_resolver_test_liveness(&snap->dns);
+  (void)odin_dns_resolver_test_cares_observation(&snap->dns_obs);
   snap->runtime_record = *odin_xqc_client_runtime_test_record();
+  snap->fake_failures = g_rfc032_fake_failures;
+  memcpy(snap->fake_failure, g_rfc032_fake_failure, sizeof(snap->fake_failure));
 }
 
 Rfc028QuicDirectRun RunRfc028QuicDirect(
@@ -701,6 +721,9 @@ Rfc028QuicDirectRun RunRfc028QuicDirect(
     odin_cli_client_test_reset_liveness();
   }
   odin_event_loop_test_reset_liveness();
+  EXPECT_EQ(odin_dns_resolver_test_reset_liveness(), 0) << std::strerror(errno);
+  g_rfc032_fake_failures = 0;
+  std::memset(g_rfc032_fake_failure, 0, sizeof(g_rfc032_fake_failure));
   InstallRfc028QuicOps();
   if (failpoint != ODIN_CLI_CLIENT_TEST_FAIL_NONE) {
     if (trigger) {
@@ -779,6 +802,11 @@ Rfc028QuicChild SpawnRfc028QuicChild(
     g_child_sigterm_count = 0;
     odin_cli_client_test_reset_liveness();
     odin_event_loop_test_reset_liveness();
+    if (odin_dns_resolver_test_reset_liveness() != 0) {
+      _exit(122);
+    }
+    g_rfc032_fake_failures = 0;
+    std::memset(g_rfc032_fake_failure, 0, sizeof(g_rfc032_fake_failure));
     InstallRfc028QuicOps();
     if (progress_min_quic_adds > 0 &&
         odin_cli_client_test_set_progress_fd(progress_pipe[1],
@@ -945,20 +973,6 @@ TEST(OdinCliClientCaFileTest, T3RunnerForwardsRequiredCaFileAndRejectsOmit) {
             "usage: odin-client --listen ADDR --server ADDR --ca-file FILE\n");
   EXPECT_EQ(omitted.snapshot.runtime_record.default_create_calls, 0u);
   ExpectRfc028QuicClean(omitted.snapshot);
-}
-
-TEST(OdinRFC028ClientTransportTest, T4QuicRejectsParsedNonIpv4BeforeResources) {
-  const char *servers[] = {"example.com:443", "[::1]:443"};
-  for (const char *server : servers) {
-    SCOPED_TRACE(server);
-    Rfc028QuicDirectRun run = RunRfc028QuicDirect(QuicClientArgs(server));
-    EXPECT_EQ(run.rc, 1);
-    EXPECT_EQ(run.err, "odin: client startup failed at server_endpoint\n");
-    EXPECT_EQ(run.err.find("mode=client"), std::string::npos);
-    EXPECT_EQ(run.snapshot.runtime_record.default_create_calls, 0u);
-    EXPECT_EQ(run.snapshot.runtime_record.call_count, 0u);
-    ExpectRfc028QuicClean(run.snapshot);
-  }
 }
 
 TEST(OdinRFC028ClientTransportTest, T5QuicListenerStartupFailureMatrix) {
@@ -1306,6 +1320,985 @@ TEST(OdinRFC028ClientTransportTest, T15FailpointGapsAndPendingNullRejected) {
   EXPECT_EQ(run.err,
             "odin: client startup failed at xqc_client_runtime_create\n");
   ExpectRfc028QuicClean(run.snapshot);
+}
+
+namespace {
+
+struct Rfc032FakeExpect {
+  char server_host[ODIN_PROTO_HOST_MAX + 1];
+  int peer_family;
+  char peer_addr[INET6_ADDRSTRLEN];
+  uint16_t peer_port;
+  int local_family;
+  char local_addr[INET6_ADDRSTRLEN];
+  uint16_t local_port;
+  size_t connect_calls;
+};
+
+struct Rfc032Setup {
+  bool install_fake;
+  Rfc032FakeExpect fake;
+  std::vector<odin_dns_resolver_test_cares_step_t> steps;
+  std::vector<std::vector<odin_dns_addr_t>> addr_results;
+  bool invalid_addr_push_first;
+  odin_cli_client_test_failpoint_t failpoint;
+  int fail_errno;
+  bool trigger;
+  size_t progress_min_quic_adds;
+};
+
+size_t g_rfc032_connect_calls;
+Rfc032FakeExpect g_rfc032_expect;
+
+void Rfc032CopyString(char *dst, size_t dst_len, const char *src) {
+  std::memset(dst, 0, dst_len);
+  if (src == nullptr) {
+    return;
+  }
+  std::strncpy(dst, src, dst_len - 1u);
+}
+
+Rfc032FakeExpect Rfc032Expect(const char *server_host, int peer_family,
+                              const char *peer_addr, uint16_t peer_port,
+                              int local_family, const char *local_addr,
+                              uint16_t local_port, size_t connect_calls) {
+  Rfc032FakeExpect out{};
+  Rfc032CopyString(out.server_host, sizeof(out.server_host), server_host);
+  out.peer_family = peer_family;
+  Rfc032CopyString(out.peer_addr, sizeof(out.peer_addr), peer_addr);
+  out.peer_port = peer_port;
+  out.local_family = local_family;
+  Rfc032CopyString(out.local_addr, sizeof(out.local_addr), local_addr);
+  out.local_port = local_port;
+  out.connect_calls = connect_calls;
+  return out;
+}
+
+odin_dns_resolver_test_cares_step_t Rfc032Step(int op, int status) {
+  odin_dns_resolver_test_cares_step_t step{};
+  step.op = op;
+  step.status = status;
+  return step;
+}
+
+odin_dns_addr_t Rfc032Addr4(const char *ip, uint16_t port, socklen_t addrlen) {
+  odin_dns_addr_t out{};
+  auto *addr = reinterpret_cast<struct sockaddr_in *>(&out.addr);
+  addr->sin_family = AF_INET;
+  addr->sin_port = htons(port);
+  EXPECT_EQ(inet_pton(AF_INET, ip, &addr->sin_addr), 1);
+  out.addrlen = addrlen;
+  out.ttl = 60;
+  return out;
+}
+
+odin_dns_addr_t Rfc032Addr6(const char *ip, uint16_t port, socklen_t addrlen) {
+  odin_dns_addr_t out{};
+  auto *addr = reinterpret_cast<struct sockaddr_in6 *>(&out.addr);
+  addr->sin6_family = AF_INET6;
+  addr->sin6_port = htons(port);
+  EXPECT_EQ(inet_pton(AF_INET6, ip, &addr->sin6_addr), 1);
+  out.addrlen = addrlen;
+  out.ttl = 60;
+  return out;
+}
+
+odin_dns_addr_t Rfc032AddrUnix() {
+  odin_dns_addr_t out{};
+  out.addr.ss_family = AF_UNIX;
+  out.addrlen = static_cast<socklen_t>(sizeof(struct sockaddr_storage));
+  out.ttl = 60;
+  return out;
+}
+
+void Rfc032RecordFakeFailure(const char *msg) {
+  if (g_rfc032_fake_failures == 0) {
+    Rfc032CopyString(g_rfc032_fake_failure, sizeof(g_rfc032_fake_failure), msg);
+  }
+  g_rfc032_fake_failures += 1;
+}
+
+void Rfc032Check(bool ok, const char *msg) {
+  if (!ok) {
+    Rfc032RecordFakeFailure(msg);
+  }
+}
+
+bool Rfc032SockaddrMatches(const struct sockaddr *addr, socklen_t addrlen,
+                           int family, const char *ip, uint16_t port) {
+  if (addr == nullptr || addr->sa_family != family) {
+    return false;
+  }
+  char text[INET6_ADDRSTRLEN] = {0};
+  if (family == AF_INET) {
+    if (addrlen != static_cast<socklen_t>(sizeof(struct sockaddr_in))) {
+      return false;
+    }
+    const auto *in = reinterpret_cast<const struct sockaddr_in *>(addr);
+    if (ntohs(in->sin_port) != port) {
+      return false;
+    }
+    return inet_ntop(AF_INET, &in->sin_addr, text, sizeof(text)) != nullptr &&
+           std::strcmp(text, ip) == 0;
+  }
+  if (family == AF_INET6) {
+    if (addrlen != static_cast<socklen_t>(sizeof(struct sockaddr_in6))) {
+      return false;
+    }
+    const auto *in6 = reinterpret_cast<const struct sockaddr_in6 *>(addr);
+    if (ntohs(in6->sin6_port) != port) {
+      return false;
+    }
+    return inet_ntop(AF_INET6, &in6->sin6_addr, text, sizeof(text)) !=
+               nullptr &&
+           std::strcmp(text, ip) == 0;
+  }
+  return false;
+}
+
+xqc_engine_t *Rfc032QuicEngineCreate(
+    xqc_engine_type_t engine_type, const xqc_config_t *engine_config,
+    const xqc_engine_ssl_config_t *ssl_config,
+    const xqc_engine_callback_t *engine_callback,
+    const xqc_transport_callbacks_t *transport_cbs, void *user_data) {
+  (void)engine_config;
+  (void)ssl_config;
+  (void)engine_callback;
+  (void)transport_cbs;
+  Rfc032Check(engine_type == XQC_ENGINE_CLIENT, "engine type");
+  g_rfc028_quic_fake.xqc_user_data = user_data;
+  return g_rfc028_quic_fake.engine;
+}
+
+void Rfc032QuicEngineDestroy(xqc_engine_t *engine) {
+  Rfc032Check(engine == g_rfc028_quic_fake.engine, "engine destroy");
+}
+
+xqc_int_t Rfc032QuicEngineRegisterAlpn(xqc_engine_t *engine, const char *alpn,
+                                       size_t alpn_len,
+                                       xqc_app_proto_callbacks_t *app_callbacks,
+                                       void *user_data) {
+  (void)user_data;
+  Rfc032Check(engine == g_rfc028_quic_fake.engine, "register engine");
+  Rfc032Check(std::string(alpn, alpn_len) == ODIN_XQC_CLIENT_ALPN,
+              "register alpn");
+  g_rfc028_quic_fake.app_callbacks = app_callbacks;
+  return XQC_OK;
+}
+
+xqc_int_t Rfc032QuicEngineUnregisterAlpn(xqc_engine_t *engine, const char *alpn,
+                                         size_t alpn_len) {
+  Rfc032Check(engine == g_rfc028_quic_fake.engine, "unregister engine");
+  Rfc032Check(std::string(alpn, alpn_len) == ODIN_XQC_CLIENT_ALPN,
+              "unregister alpn");
+  return XQC_OK;
+}
+
+const xqc_cid_t *Rfc032QuicConnect(
+    xqc_engine_t *engine, const xqc_conn_settings_t *conn_settings,
+    const unsigned char *token, unsigned int token_len, const char *server_host,
+    int no_crypto_flag, const xqc_conn_ssl_config_t *conn_ssl_config,
+    const struct sockaddr *peer_addr, socklen_t peer_addrlen, const char *alpn,
+    void *user_data) {
+  (void)conn_settings;
+  (void)token;
+  (void)token_len;
+  (void)conn_ssl_config;
+  g_rfc032_connect_calls += 1;
+  Rfc032Check(engine == g_rfc028_quic_fake.engine, "connect engine");
+  Rfc032Check(server_host != nullptr &&
+                  std::strcmp(server_host, g_rfc032_expect.server_host) == 0,
+              "connect server_host");
+  Rfc032Check(no_crypto_flag == 0, "connect crypto flag");
+  Rfc032Check(Rfc032SockaddrMatches(
+                  peer_addr, peer_addrlen, g_rfc032_expect.peer_family,
+                  g_rfc032_expect.peer_addr, g_rfc032_expect.peer_port),
+              "connect peer address");
+  Rfc032Check(alpn != nullptr && std::strcmp(alpn, ODIN_XQC_CLIENT_ALPN) == 0,
+              "connect alpn");
+  Rfc032Check(g_rfc028_quic_fake.app_callbacks != nullptr, "connect callbacks");
+  if (g_rfc028_quic_fake.app_callbacks != nullptr) {
+    Rfc032Check(g_rfc028_quic_fake.app_callbacks->conn_cbs.conn_create_notify(
+                    g_rfc028_quic_fake.conn, &g_rfc028_quic_fake.cid, user_data,
+                    nullptr) == 0,
+                "connect create notify");
+  }
+  return &g_rfc028_quic_fake.cid;
+}
+
+void Rfc032QuicConnSetAlpUserData(xqc_connection_t *conn, void *user_data) {
+  (void)user_data;
+  Rfc032Check(conn == g_rfc028_quic_fake.conn, "set alp user data");
+}
+
+xqc_int_t Rfc032QuicConnClose(xqc_engine_t *engine, const xqc_cid_t *cid) {
+  (void)cid;
+  Rfc032Check(engine == g_rfc028_quic_fake.engine, "conn close engine");
+  return XQC_OK;
+}
+
+int Rfc032QuicUdpRegisterConn(odin_xqc_udp_t *xu, const xqc_cid_t *cid) {
+  (void)xu;
+  Rfc032Check(cid != nullptr, "udp register cid");
+  return 0;
+}
+
+void Rfc032QuicUdpUnregisterConn(odin_xqc_udp_t *xu, const xqc_cid_t *cid) {
+  (void)xu;
+  (void)cid;
+}
+
+void InstallRfc032QuicOps(const Rfc032FakeExpect &expect) {
+  std::memset(&g_rfc028_quic_fake, 0, sizeof(g_rfc028_quic_fake));
+  std::memset(g_rfc032_fake_failure, 0, sizeof(g_rfc032_fake_failure));
+  g_rfc032_fake_failures = 0;
+  g_rfc032_connect_calls = 0;
+  g_rfc032_expect = expect;
+  g_rfc028_quic_fake.engine =
+      reinterpret_cast<xqc_engine_t *>(&g_rfc028_quic_fake.engine_storage);
+  g_rfc028_quic_fake.conn =
+      reinterpret_cast<xqc_connection_t *>(&g_rfc028_quic_fake.conn_storage);
+  g_rfc028_quic_fake.cid.cid_len = 1;
+  g_rfc028_quic_fake.cid.cid_buf[0] = 0x32;
+  odin_xqc_client_runtime_test_reset();
+  static const odin_xqc_udp_test_ops_t kUdpOps = {
+      Rfc032QuicEngineCreate,
+      Rfc032QuicEngineDestroy,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+  };
+  odin_xqc_udp_test_set_ops(&kUdpOps);
+  static const odin_xqc_client_runtime_test_ops_t kClientOps = {
+      Rfc032QuicEngineRegisterAlpn,
+      Rfc032QuicEngineUnregisterAlpn,
+      Rfc032QuicConnect,
+      Rfc032QuicConnSetAlpUserData,
+      Rfc032QuicConnClose,
+      nullptr,
+      nullptr,
+      nullptr,
+      Rfc032QuicUdpRegisterConn,
+      Rfc032QuicUdpUnregisterConn,
+  };
+  odin_xqc_client_runtime_test_set_ops(&kClientOps);
+}
+
+void FinishRfc032FakeExpectations() {
+  if (g_rfc032_connect_calls != g_rfc032_expect.connect_calls) {
+    Rfc032RecordFakeFailure("connect call count");
+  }
+}
+
+int Rfc032ConfigureRun(const Rfc032Setup &setup) {
+  odin_cli_client_test_reset_liveness();
+  odin_event_loop_test_reset_liveness();
+  if (odin_dns_resolver_test_reset_liveness() != 0) {
+    return 120;
+  }
+  std::memset(g_rfc032_fake_failure, 0, sizeof(g_rfc032_fake_failure));
+  g_rfc032_fake_failures = 0;
+  g_rfc032_connect_calls = 0;
+  std::memset(&g_rfc032_expect, 0, sizeof(g_rfc032_expect));
+  if (setup.install_fake) {
+    InstallRfc032QuicOps(setup.fake);
+  } else {
+    ClearRfc028QuicOps();
+    odin_xqc_client_runtime_test_reset();
+  }
+  if (setup.invalid_addr_push_first) {
+    errno = 0;
+    if (odin_dns_resolver_test_push_addr_result(nullptr, 1) != -1 ||
+        errno != EINVAL) {
+      Rfc032RecordFakeFailure("invalid addr push");
+    }
+  }
+  for (const auto &step : setup.steps) {
+    if (odin_dns_resolver_test_push_cares_step(&step) != 0) {
+      Rfc032RecordFakeFailure("push c-ares step");
+    }
+  }
+  for (const auto &result : setup.addr_results) {
+    const odin_dns_addr_t *data = result.empty() ? nullptr : result.data();
+    if (odin_dns_resolver_test_push_addr_result(data, result.size()) != 0) {
+      Rfc032RecordFakeFailure("push addr result");
+    }
+  }
+  if (setup.failpoint != ODIN_CLI_CLIENT_TEST_FAIL_NONE) {
+    const int rc =
+        setup.trigger
+            ? odin_cli_client_test_trigger_next(setup.failpoint)
+            : odin_cli_client_test_fail_next(setup.failpoint, setup.fail_errno);
+    if (rc != 0) {
+      Rfc032RecordFakeFailure("arm failpoint");
+    }
+  }
+  return 0;
+}
+
+Rfc032Setup Rfc032BaseSetup(const Rfc032FakeExpect &expect) {
+  Rfc032Setup setup{};
+  setup.install_fake = true;
+  setup.fake = expect;
+  setup.failpoint = ODIN_CLI_CLIENT_TEST_FAIL_NONE;
+  return setup;
+}
+
+Rfc032Setup Rfc032HostnameSuccessSetup(const Rfc032FakeExpect &expect) {
+  Rfc032Setup setup = Rfc032BaseSetup(expect);
+  setup.steps.push_back(
+      Rfc032Step(ODIN_DNS_TEST_CARES_RESULT_STATUS, ARES_SUCCESS));
+  return setup;
+}
+
+Rfc028QuicDirectRun
+RunRfc032DirectConfig(const odin_cli_client_config_t &config,
+                      const Rfc032Setup &setup) {
+  EXPECT_EQ(Rfc032ConfigureRun(setup), 0);
+  char err_buf[512] = {0};
+  FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+  EXPECT_NE(err, nullptr);
+  const int rc = odin_cli_run_client(&config, err);
+  (void)fclose(err);
+  FinishRfc032FakeExpectations();
+  Rfc028QuicDirectRun out;
+  out.rc = rc;
+  out.err = err_buf;
+  FillRfc028QuicSnapshot(rc, &out.snapshot);
+  ClearRfc028QuicOps();
+  return out;
+}
+
+Rfc028QuicChild
+SpawnRfc032ChildImpl(const std::vector<std::string> *tokens,
+                     const odin_cli_client_config_t *direct_config,
+                     const Rfc032Setup &setup) {
+  int err_pipe[2];
+  int snap_pipe[2];
+  int progress_pipe[2] = {-1, -1};
+  EXPECT_EQ(pipe(err_pipe), 0);
+  EXPECT_EQ(pipe(snap_pipe), 0);
+  if (setup.progress_min_quic_adds > 0) {
+    EXPECT_EQ(pipe(progress_pipe), 0);
+  }
+  const pid_t pid = fork();
+  EXPECT_NE(pid, -1);
+  if (pid == 0) {
+    close(err_pipe[0]);
+    close(snap_pipe[0]);
+    if (setup.progress_min_quic_adds > 0) {
+      close(progress_pipe[0]);
+    }
+    dup2(err_pipe[1], STDERR_FILENO);
+    close(err_pipe[1]);
+    g_child_sigint_count = 0;
+    g_child_sigterm_count = 0;
+    struct sigaction sa_int;
+    std::memset(&sa_int, 0, sizeof(sa_int));
+    sa_int.sa_handler = CountingSigint;
+    sigemptyset(&sa_int.sa_mask);
+    struct sigaction sa_term;
+    std::memset(&sa_term, 0, sizeof(sa_term));
+    sa_term.sa_handler = CountingSigterm;
+    sigemptyset(&sa_term.sa_mask);
+    (void)sigaction(SIGINT, &sa_int, nullptr);
+    (void)sigaction(SIGTERM, &sa_term, nullptr);
+    const int setup_rc = Rfc032ConfigureRun(setup);
+    if (setup_rc != 0) {
+      _exit(setup_rc);
+    }
+    if (setup.progress_min_quic_adds > 0 &&
+        odin_cli_client_test_set_progress_fd(
+            progress_pipe[1], setup.progress_min_quic_adds) != 0) {
+      _exit(121);
+    }
+    int rc = 1;
+    if (tokens != nullptr) {
+      MutableArgv argv(*tokens);
+      rc = odin_cli_main(argv.argc(), argv.argv(), stdout, stderr);
+    } else {
+      rc = odin_cli_run_client(direct_config, stderr);
+    }
+    FinishRfc032FakeExpectations();
+    Rfc028QuicChildSnapshot snap;
+    FillRfc028QuicSnapshot(rc, &snap);
+    (void)raise(SIGINT);
+    (void)raise(SIGTERM);
+    snap.sigint_count = static_cast<int>(g_child_sigint_count);
+    snap.sigterm_count = static_cast<int>(g_child_sigterm_count);
+    (void)write(snap_pipe[1], &snap, sizeof(snap));
+    _exit(snap.fake_failures == 0 ? rc : kRfc032FakeFailureExit);
+  }
+  close(err_pipe[1]);
+  close(snap_pipe[1]);
+  if (setup.progress_min_quic_adds > 0) {
+    close(progress_pipe[1]);
+  }
+  return {pid, err_pipe[0], snap_pipe[0], progress_pipe[0], -1};
+}
+
+Rfc028QuicChild SpawnRfc032Child(const std::vector<std::string> &tokens,
+                                 const Rfc032Setup &setup) {
+  return SpawnRfc032ChildImpl(&tokens, nullptr, setup);
+}
+
+Rfc028QuicChild
+SpawnRfc032DirectConfigChild(const odin_cli_client_config_t &config,
+                             const Rfc032Setup &setup) {
+  return SpawnRfc032ChildImpl(nullptr, &config, setup);
+}
+
+bool TryFinishRfc032Child(Rfc028QuicChild *child, int signal_to_send,
+                          Rfc028QuicChildSnapshot *snap) {
+  if (signal_to_send != 0) {
+    EXPECT_EQ(kill(child->pid, signal_to_send), 0);
+  }
+  std::memset(snap, 0, sizeof(*snap));
+  const ssize_t n = ReadWithDeadline(child->snapshot_fd, snap, sizeof(*snap),
+                                     kLongDeadlineMs);
+  int st = 0;
+  EXPECT_EQ(WaitChildBounded(child->pid, kLongDeadlineMs, &st), 0);
+  snap->process_exited = WIFEXITED(st) ? 1 : 0;
+  snap->process_status =
+      WIFEXITED(st) ? WEXITSTATUS(st) : (WIFSIGNALED(st) ? -WTERMSIG(st) : -1);
+  close(child->snapshot_fd);
+  child->pid = -1;
+  return n == static_cast<ssize_t>(sizeof(*snap));
+}
+
+Rfc028QuicChildSnapshot FinishRfc032Child(Rfc028QuicChild *child,
+                                          int signal_to_send) {
+  Rfc028QuicChildSnapshot snap;
+  EXPECT_TRUE(TryFinishRfc032Child(child, signal_to_send, &snap));
+  EXPECT_EQ(snap.process_exited, 1);
+  EXPECT_TRUE(snap.process_status == snap.rc ||
+              snap.process_status == kRfc032FakeFailureExit);
+  return snap;
+}
+
+void ExpectNoRfc032FakeFailures(const Rfc028QuicChildSnapshot &snap) {
+  EXPECT_EQ(snap.fake_failures, 0) << snap.fake_failure;
+}
+
+void ExpectRfc032DnsClean(const Rfc028QuicChildSnapshot &snap) {
+  EXPECT_EQ(snap.dns.resolvers, 0u);
+  EXPECT_EQ(snap.dns.queries, 0u);
+  EXPECT_EQ(snap.dns.watches, 0u);
+  EXPECT_EQ(snap.dns.timers, 0u);
+  EXPECT_EQ(snap.dns.cares_channels, 0u);
+  EXPECT_EQ(snap.dns.cares_results, 0u);
+}
+
+void ExpectRfc032Clean(const Rfc028QuicChildSnapshot &snap) {
+  ExpectRfc028QuicClean(snap);
+  ExpectRfc032DnsClean(snap);
+}
+
+void ExpectRfc032PreDnsRejected(const Rfc028QuicChildSnapshot &snap) {
+  ExpectRfc032Clean(snap);
+  EXPECT_EQ(snap.dns_obs.getaddrinfo_calls, 0u);
+  EXPECT_EQ(snap.cli.quic_runtime_create_calls, 0u);
+  EXPECT_EQ(snap.cli.quic_runtime_start_calls, 0u);
+  EXPECT_EQ(snap.runtime_config_ok, 0);
+}
+
+void ExpectRfc032RuntimeEndpoint(const Rfc028QuicChildSnapshot &snap,
+                                 int peer_family, const char *peer_ip,
+                                 uint16_t peer_port, int local_family,
+                                 const char *local_ip, uint16_t local_port,
+                                 const char *server_host) {
+  ASSERT_TRUE(snap.runtime_config_ok);
+  EXPECT_TRUE(Rfc032SockaddrMatches(reinterpret_cast<const struct sockaddr *>(
+                                        &snap.runtime_config.peer_addr_value),
+                                    snap.runtime_config.peer_addrlen,
+                                    peer_family, peer_ip, peer_port));
+  EXPECT_TRUE(Rfc032SockaddrMatches(reinterpret_cast<const struct sockaddr *>(
+                                        &snap.runtime_config.local_addr_value),
+                                    snap.runtime_config.local_addrlen,
+                                    local_family, local_ip, local_port));
+  EXPECT_STREQ(snap.runtime_config.server_host_value, server_host);
+}
+
+void ExpectRfc032FailureRun(const Rfc028QuicChildSnapshot &snap,
+                            const std::string &stderr_text, const char *step) {
+  EXPECT_EQ(snap.rc, 1);
+  EXPECT_EQ(stderr_text,
+            std::string("odin: client startup failed at ") + step + "\n");
+  EXPECT_EQ(stderr_text.find("mode=client"), std::string::npos);
+  EXPECT_EQ(snap.cli.quic_runtime_create_calls, 0u);
+  EXPECT_EQ(snap.cli.quic_runtime_start_calls, 0u);
+  ExpectNoRfc032FakeFailures(snap);
+  ExpectRfc032Clean(snap);
+}
+
+void ExpectRfc032DnsTimingCallbackDestroyed(
+    const Rfc028QuicChildSnapshot &snap) {
+  EXPECT_EQ(snap.dns_timing.dns_on_done_calls, 1u);
+  EXPECT_EQ(snap.dns_timing.query_destroyed_in_callback_calls, 1u);
+  EXPECT_EQ(snap.dns_timing.live_queries_at_callback_exit, 0u);
+}
+
+int RunRfc032LibraryInitExecChild() {
+  const pid_t pid = fork();
+  EXPECT_NE(pid, -1);
+  if (pid == 0) {
+    setenv("ODIN_RFC032_EXEC_CHILD", "T7_LIBRARY_INIT", 1);
+    execl(g_test_argv0.c_str(), g_test_argv0.c_str(),
+          "--gtest_filter=OdinRFC032ClientDnsExecChild.T7LibraryInit", nullptr);
+    _exit(127);
+  }
+  int st = 0;
+  EXPECT_EQ(WaitChildBounded(pid, kLongDeadlineMs, &st), 0);
+  if (!WIFEXITED(st)) {
+    return -1;
+  }
+  return WEXITSTATUS(st);
+}
+
+bool Rfc032IsDirectChildOnlyFilter(const std::string &filter) {
+  return filter == "OdinRFC032ClientDnsExecChild.T7LibraryInit" ||
+         filter == "OdinRFC032ClientDnsExecChild.*";
+}
+
+} // namespace
+
+class OdinRFC032ClientDnsTest : public ::testing::Test {};
+
+TEST_F(OdinRFC032ClientDnsTest, T1HostnameResolvesToIpv4BeforeQuicStartup) {
+  Rfc032Setup setup = Rfc032HostnameSuccessSetup(Rfc032Expect(
+      "odin.test", AF_INET, "127.0.0.1", 8443, AF_INET, "0.0.0.0", 0, 1));
+  Rfc028QuicChild child =
+      SpawnRfc032Child(QuicClientArgs("odin.test:8443"), setup);
+  ChildGuard guard(child.pid);
+  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  uint16_t proxy_port = 0;
+  std::string server;
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "odin.test:8443");
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, SIGTERM);
+  guard.disarm();
+  EXPECT_EQ(ReadAllAvailable(child.stderr_fd, 100), "");
+  close(child.stderr_fd);
+  EXPECT_EQ(snap.rc, 0);
+  ExpectNoRfc032FakeFailures(snap);
+  EXPECT_EQ(snap.dns_obs.getaddrinfo_calls, 1u);
+  EXPECT_EQ(snap.dns_obs.last_ai_family, AF_UNSPEC);
+  ExpectRfc032RuntimeEndpoint(snap, AF_INET, "127.0.0.1", 8443, AF_INET,
+                              "0.0.0.0", 0, "odin.test");
+  EXPECT_EQ(snap.cli.quic_runtime_create_calls, 1u);
+  EXPECT_EQ(snap.cli.quic_runtime_start_calls, 1u);
+  ExpectRfc032DnsTimingCallbackDestroyed(snap);
+  ExpectRfc032Clean(snap);
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T2Ipv4LiteralStillUsesAsyncResolverPath) {
+  Rfc032Setup setup = Rfc032BaseSetup(Rfc032Expect(
+      "127.0.0.1", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 1));
+  Rfc028QuicChild child =
+      SpawnRfc032Child(QuicClientArgs("127.0.0.1:4433"), setup);
+  ChildGuard guard(child.pid);
+  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  uint16_t proxy_port = 0;
+  std::string server;
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "127.0.0.1:4433");
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, SIGTERM);
+  guard.disarm();
+  EXPECT_EQ(ReadAllAvailable(child.stderr_fd, 100), "");
+  close(child.stderr_fd);
+  EXPECT_EQ(snap.rc, 0);
+  ExpectNoRfc032FakeFailures(snap);
+  EXPECT_EQ(snap.dns_obs.getaddrinfo_calls, 1u);
+  ExpectRfc032RuntimeEndpoint(snap, AF_INET, "127.0.0.1", 4433, AF_INET,
+                              "0.0.0.0", 0, "127.0.0.1");
+  ExpectRfc032Clean(snap);
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T3Ipv6LiteralResolvesAndUsesIpv6UdpBind) {
+  Rfc032Setup setup = Rfc032BaseSetup(
+      Rfc032Expect("::1", AF_INET6, "::1", 9443, AF_INET6, "::", 0, 1));
+  Rfc028QuicChild child = SpawnRfc032Child(QuicClientArgs("[::1]:9443"), setup);
+  ChildGuard guard(child.pid);
+  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  uint16_t proxy_port = 0;
+  std::string server;
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "[::1]:9443");
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, SIGTERM);
+  guard.disarm();
+  EXPECT_EQ(ReadAllAvailable(child.stderr_fd, 100), "");
+  close(child.stderr_fd);
+  EXPECT_EQ(snap.rc, 0);
+  ExpectNoRfc032FakeFailures(snap);
+  EXPECT_EQ(snap.dns_obs.getaddrinfo_calls, 1u);
+  ExpectRfc032RuntimeEndpoint(snap, AF_INET6, "::1", 9443, AF_INET6, "::", 0,
+                              "::1");
+  ExpectRfc032Clean(snap);
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T4DnsResultErrorsFailBeforeBanner) {
+  struct Case {
+    const char *server;
+    int status;
+  };
+  const Case cases[] = {
+      {"missing.test:4433", ARES_ENOTFOUND},
+      {"slow.test:4433", ARES_ETIMEOUT},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.server);
+    Rfc032Setup setup = Rfc032BaseSetup(
+        Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+    setup.steps.push_back(
+        Rfc032Step(ODIN_DNS_TEST_CARES_RESULT_STATUS, c.status));
+    Rfc028QuicChild child = SpawnRfc032Child(QuicClientArgs(c.server), setup);
+    ChildGuard guard(child.pid);
+    Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+    guard.disarm();
+    const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+    close(child.stderr_fd);
+    ExpectRfc032FailureRun(snap, err, "server_dns");
+    ExpectRfc032DnsTimingCallbackDestroyed(snap);
+  }
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T5DnsOkWithNoUsableAddressesFails) {
+  {
+    Rfc032Setup setup = Rfc032BaseSetup(
+        Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+    setup.steps.push_back(
+        Rfc032Step(ODIN_DNS_TEST_CARES_RESULT_EMPTY_SUCCESS, ARES_SUCCESS));
+    Rfc028QuicChild child =
+        SpawnRfc032Child(QuicClientArgs("empty.test:4433"), setup);
+    ChildGuard guard(child.pid);
+    Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+    guard.disarm();
+    const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+    close(child.stderr_fd);
+    ExpectRfc032FailureRun(snap, err, "server_dns");
+    ExpectRfc032DnsTimingCallbackDestroyed(snap);
+  }
+  {
+    Rfc032Setup setup = Rfc032BaseSetup(
+        Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+    setup.invalid_addr_push_first = true;
+    setup.addr_results.push_back(
+        {Rfc032AddrUnix(),
+         Rfc032Addr4("127.0.0.1", 1111,
+                     static_cast<socklen_t>(sizeof(struct sockaddr_in) - 1)),
+         Rfc032Addr6("::1", 2222,
+                     static_cast<socklen_t>(sizeof(struct sockaddr_in6) - 1))});
+    Rfc028QuicChild child =
+        SpawnRfc032Child(QuicClientArgs("unsupported.test:4433"), setup);
+    ChildGuard guard(child.pid);
+    Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+    guard.disarm();
+    const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+    close(child.stderr_fd);
+    ExpectRfc032FailureRun(snap, err, "server_dns");
+    EXPECT_EQ(snap.dns_obs.consumed_addr_results, 1u);
+    EXPECT_EQ(snap.dns_obs.last_consumed_addr_count, 3u);
+    ExpectRfc032DnsTimingCallbackDestroyed(snap);
+  }
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T6InvalidHostSliceRejectedBeforeResources) {
+  const std::string ca = ClientCaFile();
+  Rfc032Setup setup = Rfc032BaseSetup(
+      Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+  odin_cli_client_config_t config{};
+  config.listen_port = 0;
+  config.server_host = "";
+  config.server_host_len = 0;
+  config.server_port = 4433;
+  config.transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
+  config.quic_ca_file = ca.c_str();
+  Rfc028QuicDirectRun zero = RunRfc032DirectConfig(config, setup);
+  EXPECT_EQ(zero.rc, 1);
+  EXPECT_EQ(zero.err, "odin: client startup failed at server_endpoint\n");
+  ExpectRfc032PreDnsRejected(zero.snapshot);
+
+  std::string too_long(ODIN_PROTO_HOST_MAX + 1u, 'a');
+  config.server_host = too_long.c_str();
+  config.server_host_len = too_long.size();
+  Rfc028QuicDirectRun long_run = RunRfc032DirectConfig(config, setup);
+  EXPECT_EQ(long_run.rc, 1);
+  EXPECT_EQ(long_run.err, "odin: client startup failed at server_endpoint\n");
+  ExpectRfc032PreDnsRejected(long_run.snapshot);
+
+  config.server_host = nullptr;
+  config.server_host_len = 4;
+  Rfc028QuicChild null_child = SpawnRfc032DirectConfigChild(config, setup);
+  ChildGuard null_guard(null_child.pid);
+  Rfc028QuicChildSnapshot null_snap;
+  ASSERT_TRUE(TryFinishRfc032Child(&null_child, 0, &null_snap));
+  null_guard.disarm();
+  const std::string null_err = ReadAllAvailable(null_child.stderr_fd, 100);
+  close(null_child.stderr_fd);
+  EXPECT_EQ(null_snap.rc, 1);
+  EXPECT_EQ(null_err, "odin: client startup failed at server_endpoint\n");
+  ExpectRfc032PreDnsRejected(null_snap);
+
+  const char embedded[] = {'g', 'o', 'o', 'd', '\0', 'b', 'a', 'd'};
+  config.server_host = embedded;
+  config.server_host_len = sizeof(embedded);
+  Rfc028QuicDirectRun embedded_run = RunRfc032DirectConfig(config, setup);
+  EXPECT_EQ(embedded_run.rc, 1);
+  EXPECT_EQ(embedded_run.err,
+            "odin: client startup failed at server_endpoint\n");
+  ExpectRfc032PreDnsRejected(embedded_run.snapshot);
+
+  const char valid_prefix[] = {'1', '2', '7',  '.', '0', '.', '0',
+                               '.', '1', '\0', 'b', 'a', 'd'};
+  config.server_host = valid_prefix;
+  config.server_host_len = sizeof(valid_prefix);
+  Rfc032Setup fail_setup = setup;
+  fail_setup.failpoint = ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE;
+  fail_setup.fail_errno = EIO;
+  Rfc028QuicDirectRun prefix_run = RunRfc032DirectConfig(config, fail_setup);
+  EXPECT_EQ(prefix_run.rc, 1);
+  EXPECT_EQ(prefix_run.err, "odin: client startup failed at server_endpoint\n");
+  odin_cli_client_test_failpoint_t pending = ODIN_CLI_CLIENT_TEST_FAIL_NONE;
+  ASSERT_EQ(odin_cli_client_test_pending_failpoint(&pending), 0);
+  EXPECT_EQ(pending, ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE);
+  ExpectRfc032PreDnsRejected(prefix_run.snapshot);
+  odin_cli_client_test_reset_liveness();
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T7ResolverCreateAndStartFailuresCleanUp) {
+  EXPECT_EQ(RunRfc032LibraryInitExecChild(), 0);
+
+  Rfc032Setup setup = Rfc032BaseSetup(
+      Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+  setup.steps.push_back(
+      Rfc032Step(ODIN_DNS_TEST_CARES_INIT_OPTIONS, ARES_EFORMERR));
+  Rfc028QuicChild child =
+      SpawnRfc032Child(QuicClientArgs("initopt.test:4433"), setup);
+  ChildGuard guard(child.pid);
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+  guard.disarm();
+  const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+  close(child.stderr_fd);
+  ExpectRfc032FailureRun(snap, err, "server_dns");
+}
+
+TEST_F(OdinRFC032ClientDnsTest,
+       T8DnsPhaseEventLoopFailureCleansUpWithoutAccepting) {
+  uint16_t known_port = 0;
+  const int holder = OpenIpv4Listener("127.0.0.1", 0, true, &known_port);
+  ASSERT_GE(holder, 0) << std::strerror(errno);
+  close(holder);
+  Rfc032Setup setup = Rfc032BaseSetup(
+      Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+  setup.steps.push_back(
+      Rfc032Step(ODIN_DNS_TEST_CARES_RESULT_PENDING, ARES_SUCCESS));
+  setup.failpoint = ODIN_CLI_CLIENT_TEST_FAIL_DNS_EVENT_LOOP_RUN;
+  setup.fail_errno = EIO;
+  std::vector<std::string> args = {
+      "odin-client", "--listen",          std::to_string(known_port),
+      "--server",    "pending.test:4433", "--ca-file",
+      ClientCaFile()};
+  Rfc028QuicChild child = SpawnRfc032Child(args, setup);
+  ChildGuard guard(child.pid);
+  const int probe = TcpConnectLoopback(known_port, 100);
+  if (probe >= 0) {
+    close(probe);
+  }
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+  guard.disarm();
+  const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+  close(child.stderr_fd);
+  ExpectRfc032FailureRun(snap, err, "server_dns");
+  EXPECT_EQ(snap.dns_timing.dns_query_pending_before_dns_event_loop_run, 1);
+  EXPECT_EQ(snap.dns_timing.accept_loop_create_calls_before_dns_event_loop_run,
+            0u);
+  EXPECT_EQ(snap.dns_timing.live_accept_loops_before_dns_event_loop_run, 0u);
+  EXPECT_EQ(snap.dns_timing
+                .quic_runtime_add_connection_calls_before_dns_event_loop_run,
+            0u);
+  EXPECT_EQ(snap.dns_timing.dns_event_loop_run_rc, -1);
+  EXPECT_EQ(snap.dns_timing.dns_done_after_dns_event_loop_run, 0);
+  EXPECT_GT(snap.dns_timing.live_resolvers_after_dns_event_loop_run, 0u);
+  EXPECT_GT(snap.dns_timing.live_queries_after_dns_event_loop_run, 0u);
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T9PostDnsRuntimeStartupFailuresKeepDnsCleaned) {
+  struct Case {
+    const char *step;
+    odin_cli_client_test_failpoint_t fp;
+  };
+  const Case cases[] = {
+      {"xqc_client_runtime_create",
+       ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_CREATE},
+      {"xqc_client_runtime_start",
+       ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_START},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.step);
+    Rfc032Setup setup = Rfc032HostnameSuccessSetup(Rfc032Expect(
+        "odin.test", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+    setup.failpoint = c.fp;
+    setup.fail_errno = EIO;
+    Rfc028QuicChild child =
+        SpawnRfc032Child(QuicClientArgs("odin.test:4433"), setup);
+    ChildGuard guard(child.pid);
+    Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+    guard.disarm();
+    const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+    close(child.stderr_fd);
+    EXPECT_EQ(snap.rc, 1);
+    EXPECT_EQ(err,
+              std::string("odin: client startup failed at ") + c.step + "\n");
+    EXPECT_EQ(err.find("mode=client"), std::string::npos);
+    ExpectNoRfc032FakeFailures(snap);
+    EXPECT_EQ(snap.dns_timing.live_resolvers_before_accept_loop_create, 0u);
+    EXPECT_EQ(snap.dns_timing.live_queries_before_accept_loop_create, 0u);
+    EXPECT_EQ(snap.dns_timing.live_resolvers_before_runtime_create, 0u);
+    EXPECT_EQ(snap.dns_timing.live_queries_before_runtime_create, 0u);
+    if (c.fp == ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_START) {
+      EXPECT_EQ(snap.dns_timing.live_resolvers_before_runtime_start, 0u);
+      EXPECT_EQ(snap.dns_timing.live_queries_before_runtime_start, 0u);
+    }
+    ExpectRfc032Clean(snap);
+  }
+}
+
+TEST_F(OdinRFC032ClientDnsTest,
+       T10AcceptedLocalConnectionAfterDnsSuccessReachesRuntime) {
+  (void)signal(SIGPIPE, SIG_IGN);
+  uint16_t sentry_port = 0;
+  const int sentry = OpenIpv4Listener("127.0.0.1", 0, true, &sentry_port);
+  ASSERT_GE(sentry, 0) << std::strerror(errno);
+  Rfc032Setup setup = Rfc032HostnameSuccessSetup(Rfc032Expect(
+      "odin.test", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 1));
+  setup.progress_min_quic_adds = 1;
+  Rfc028QuicChild child =
+      SpawnRfc032Child(QuicClientArgs("odin.test:4433"), setup);
+  ChildGuard guard(child.pid);
+  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  uint16_t proxy_port = 0;
+  std::string server;
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "odin.test:4433");
+  const int client = TcpConnectLoopback(proxy_port, kShortDeadlineMs);
+  ASSERT_GE(client, 0) << std::strerror(errno);
+  const std::string request =
+      "CONNECT 127.0.0.1:" + std::to_string(sentry_port) + " HTTP/1.1\r\n\r\n";
+  ASSERT_TRUE(WriteAllDeadline(client, request.data(), request.size(),
+                               kShortDeadlineMs));
+  char progress = 0;
+  ASSERT_EQ(ReadWithDeadline(child.progress_fd, &progress, 1, kLongDeadlineMs),
+            1);
+  ExpectNoAccept(sentry, 200);
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, SIGTERM);
+  guard.disarm();
+  EXPECT_EQ(ReadAllAvailable(child.stderr_fd, 100), "");
+  close(child.stderr_fd);
+  close(child.progress_fd);
+  close(client);
+  close(sentry);
+  EXPECT_EQ(snap.rc, 0);
+  ExpectNoRfc032FakeFailures(snap);
+  EXPECT_EQ(snap.cli.quic_runtime_add_connection_calls, 1u);
+  ASSERT_TRUE(snap.add_record_ok);
+  EXPECT_EQ(snap.add_record.fd_is_nonblocking, 1);
+  ExpectRfc032Clean(snap);
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T11MultipleDnsResultsSelectFirstUsableAddress) {
+  Rfc032Setup setup = Rfc032BaseSetup(Rfc032Expect(
+      "ordered.test", AF_INET6, "2001:db8::32", 9443, AF_INET6, "::", 0, 1));
+  setup.addr_results.push_back(
+      {Rfc032AddrUnix(),
+       Rfc032Addr6("2001:db8::32", 1111,
+                   static_cast<socklen_t>(sizeof(struct sockaddr_in6))),
+       Rfc032Addr4("127.0.0.77", 2222,
+                   static_cast<socklen_t>(sizeof(struct sockaddr_in)))});
+  Rfc028QuicChild child =
+      SpawnRfc032Child(QuicClientArgs("ordered.test:9443"), setup);
+  ChildGuard guard(child.pid);
+  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  uint16_t proxy_port = 0;
+  std::string server;
+  ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
+  EXPECT_EQ(server, "ordered.test:9443");
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, SIGTERM);
+  guard.disarm();
+  EXPECT_EQ(ReadAllAvailable(child.stderr_fd, 100), "");
+  close(child.stderr_fd);
+  EXPECT_EQ(snap.rc, 0);
+  ExpectNoRfc032FakeFailures(snap);
+  EXPECT_EQ(snap.dns_obs.getaddrinfo_calls, 1u);
+  EXPECT_EQ(snap.dns_obs.last_ai_family, AF_UNSPEC);
+  ExpectRfc032RuntimeEndpoint(snap, AF_INET6, "2001:db8::32", 9443, AF_INET6,
+                              "::", 0, "ordered.test");
+  ExpectRfc032DnsTimingCallbackDestroyed(snap);
+  ExpectRfc032Clean(snap);
+}
+
+TEST_F(OdinRFC032ClientDnsTest, T12DnsLoopStopsWithoutDnsCompletion) {
+  Rfc032Setup setup = Rfc032BaseSetup(
+      Rfc032Expect("", AF_INET, "127.0.0.1", 4433, AF_INET, "0.0.0.0", 0, 0));
+  setup.steps.push_back(
+      Rfc032Step(ODIN_DNS_TEST_CARES_RESULT_PENDING, ARES_SUCCESS));
+  setup.failpoint = ODIN_CLI_CLIENT_TEST_TRIGGER_DNS_EVENT_LOOP_STOP;
+  setup.trigger = true;
+  Rfc028QuicChild child =
+      SpawnRfc032Child(QuicClientArgs("pending-stop.test:4433"), setup);
+  ChildGuard guard(child.pid);
+  Rfc028QuicChildSnapshot snap = FinishRfc032Child(&child, 0);
+  guard.disarm();
+  const std::string err = ReadAllAvailable(child.stderr_fd, 100);
+  close(child.stderr_fd);
+  ExpectRfc032FailureRun(snap, err, "server_dns");
+  EXPECT_EQ(snap.dns_timing.dns_query_pending_before_dns_event_loop_run, 1);
+  EXPECT_EQ(snap.dns_timing.accept_loop_create_calls_before_dns_event_loop_run,
+            0u);
+  EXPECT_EQ(snap.dns_timing
+                .quic_runtime_add_connection_calls_before_dns_event_loop_run,
+            0u);
+  EXPECT_EQ(snap.dns_timing.dns_event_loop_run_rc, 0);
+  EXPECT_EQ(snap.dns_timing.dns_done_after_dns_event_loop_run, 0);
+  EXPECT_EQ(snap.dns_timing.dns_success_after_dns_event_loop_run, 0);
+  EXPECT_GT(snap.dns_timing.live_resolvers_after_dns_event_loop_run, 0u);
+  EXPECT_GT(snap.dns_timing.live_queries_after_dns_event_loop_run, 0u);
+}
+
+TEST(OdinRFC032ClientDnsExecChild, T7LibraryInit) {
+  odin_cli_client_test_reset_liveness();
+  odin_event_loop_test_reset_liveness();
+  odin_xqc_client_runtime_test_reset();
+  ASSERT_EQ(odin_dns_resolver_test_reset_liveness(), 0) << std::strerror(errno);
+  const std::string filter = ActiveFilter();
+  const char *mode = std::getenv("ODIN_RFC032_EXEC_CHILD");
+  if (mode == nullptr || mode[0] == '\0') {
+    if (Rfc032IsDirectChildOnlyFilter(filter)) {
+      FAIL() << "missing ODIN_RFC032_EXEC_CHILD";
+    }
+    GTEST_SKIP() << "ordinary full-suite child-only skip";
+  }
+  ASSERT_EQ(filter, "OdinRFC032ClientDnsExecChild.T7LibraryInit");
+  ASSERT_STREQ(mode, "T7_LIBRARY_INIT");
+  odin_dns_resolver_test_cares_step_t step =
+      Rfc032Step(ODIN_DNS_TEST_CARES_LIBRARY_INIT, ARES_ENOMEM);
+  ASSERT_EQ(odin_dns_resolver_test_push_cares_step(&step), 0)
+      << std::strerror(errno);
+  const std::string ca = ClientCaFile();
+  MutableArgv argv({"odin-client", "--listen", "0", "--server",
+                    "libinit.test:4433", "--ca-file", ca.c_str()});
+  char err_buf[512] = {0};
+  FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+  ASSERT_NE(err, nullptr);
+  const int rc = odin_cli_main(argv.argc(), argv.argv(), stdout, err);
+  (void)fclose(err);
+  Rfc028QuicChildSnapshot snap;
+  FillRfc028QuicSnapshot(rc, &snap);
+  ExpectRfc032FailureRun(snap, err_buf, "server_dns");
+  odin_dns_resolver_test_cares_observation_t obs{};
+  ASSERT_EQ(odin_dns_resolver_test_cares_observation(&obs), 0);
+  EXPECT_EQ(obs.ares_library_init_calls, 1u);
 }
 
 // NOLINTEND(misc-const-correctness, misc-use-internal-linkage)

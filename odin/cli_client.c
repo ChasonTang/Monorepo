@@ -16,12 +16,14 @@
 
 #include "odin/accept_loop.h"
 #include "odin/client_xqc_runtime.h"
+#include "odin/dns_resolver.h"
 #include "odin/event_loop.h"
 #include "odin/protocol.h"
 
 #if defined(ODIN_CLI_CLIENT_TESTING)
 #include "odin/testing/accept_loop_internal_test.h"
 #include "odin/testing/cli_client_internal_test.h"
+#include "odin/testing/dns_resolver_internal_test.h"
 #include "odin/testing/event_loop_internal_test.h"
 #endif
 
@@ -35,8 +37,18 @@ struct cli_client_state_t {
   uint16_t actual_port;
   const char *server_host;
   size_t server_host_len;
+  char server_host_cstr[ODIN_PROTO_HOST_MAX + 1];
+  int server_display_needs_brackets;
   uint16_t server_port;
   odin_event_loop_t *loop;
+  odin_dns_resolver_t *dns_resolver;
+  odin_dns_query_t *dns_query;
+  int dns_done;
+  int dns_success;
+  struct sockaddr_storage resolved_peer;
+  socklen_t resolved_peer_len;
+  struct sockaddr_storage local_udp;
+  socklen_t local_udp_len;
   odin_accept_loop_t *accept_loop;
   odin_xqc_client_runtime_t *quic_rt;
   odin_event_timer_t *signal_timer;
@@ -61,6 +73,8 @@ static size_t g_quic_runtime_create_calls;
 static size_t g_quic_runtime_start_calls;
 static size_t g_quic_runtime_add_connection_calls;
 static size_t g_quic_runtime_force_destroy_calls;
+static size_t g_accept_loop_create_calls;
+static odin_cli_client_test_dns_timing_t g_dns_timing;
 static int g_last_bind_addr_recorded;
 static struct sockaddr_in g_last_bind_addr;
 static int g_last_bound_addr_recorded;
@@ -103,20 +117,21 @@ static void cli_client_signal_handler(int signum) {
   g_odin_cli_client_signal_seen = signum;
 }
 
-static int copy_ipv4_server_endpoint(const char *server_host,
-                                     size_t server_host_len,
-                                     char *server_host_cstr,
-                                     struct in_addr *server_addr) {
-  if (server_host_len == 0 || server_host_len > ODIN_PROTO_HOST_MAX) {
+static int copy_server_host_slice(const odin_cli_client_config_t *config,
+                                  cli_client_state_t *state) {
+  if (config->server_host == NULL || config->server_host_len == 0 ||
+      config->server_host_len > ODIN_PROTO_HOST_MAX) {
     errno = EINVAL;
     return -1;
   }
-  memcpy(server_host_cstr, server_host, server_host_len);
-  server_host_cstr[server_host_len] = '\0';
-  if (inet_pton(AF_INET, server_host_cstr, server_addr) != 1) {
+  if (memchr(config->server_host, '\0', config->server_host_len) != NULL) {
     errno = EINVAL;
     return -1;
   }
+  memcpy(state->server_host_cstr, config->server_host, config->server_host_len);
+  state->server_host_cstr[config->server_host_len] = '\0';
+  state->server_display_needs_brackets =
+      memchr(state->server_host_cstr, ':', config->server_host_len) != NULL;
   return 0;
 }
 
@@ -165,6 +180,160 @@ record_bound_addr_after_getsockname(const struct sockaddr_in *bound) {
 #else
   (void)bound;
 #endif
+}
+
+#if defined(ODIN_CLI_CLIENT_TESTING) && defined(ODIN_DNS_RESOLVER_TESTING)
+static void cli_client_test_record_dns_liveness(size_t *resolvers,
+                                                size_t *queries) {
+  odin_dns_resolver_test_liveness_t live;
+  if (odin_dns_resolver_test_liveness(&live) != 0) {
+    return;
+  }
+  if (resolvers != NULL) {
+    *resolvers = live.resolvers;
+  }
+  if (queries != NULL) {
+    *queries = live.queries;
+  }
+}
+#endif
+
+static int dns_select_addr(cli_client_state_t *state,
+                           const odin_dns_addr_t *addr) {
+  if (addr->addr.ss_family == AF_INET &&
+      addr->addrlen == (socklen_t)sizeof(struct sockaddr_in)) {
+    memcpy(&state->resolved_peer, &addr->addr, sizeof(struct sockaddr_in));
+    state->resolved_peer_len = (socklen_t)sizeof(struct sockaddr_in);
+    struct sockaddr_in *peer = (struct sockaddr_in *)&state->resolved_peer;
+    peer->sin_port = htons(state->server_port);
+
+    memset(&state->local_udp, 0, sizeof(state->local_udp));
+    struct sockaddr_in *local = (struct sockaddr_in *)&state->local_udp;
+    local->sin_family = AF_INET;
+    local->sin_addr.s_addr = htonl(INADDR_ANY);
+    local->sin_port = htons(0);
+    state->local_udp_len = (socklen_t)sizeof(struct sockaddr_in);
+    return 1;
+  }
+  if (addr->addr.ss_family == AF_INET6 &&
+      addr->addrlen == (socklen_t)sizeof(struct sockaddr_in6)) {
+    memcpy(&state->resolved_peer, &addr->addr, sizeof(struct sockaddr_in6));
+    state->resolved_peer_len = (socklen_t)sizeof(struct sockaddr_in6);
+    struct sockaddr_in6 *peer = (struct sockaddr_in6 *)&state->resolved_peer;
+    peer->sin6_port = htons(state->server_port);
+
+    memset(&state->local_udp, 0, sizeof(state->local_udp));
+    struct sockaddr_in6 *local = (struct sockaddr_in6 *)&state->local_udp;
+    local->sin6_family = AF_INET6;
+    local->sin6_port = htons(0);
+    state->local_udp_len = (socklen_t)sizeof(struct sockaddr_in6);
+    return 1;
+  }
+  return 0;
+}
+
+#if defined(ODIN_CLI_CLIENT_TESTING)
+static void dns_event_loop_stop_task(odin_event_loop_t *loop, void *user_data) {
+  (void)user_data;
+  odin_event_loop_stop(loop);
+}
+#endif
+
+static void dns_on_done(odin_dns_query_t *query, odin_dns_status_t status,
+                        int err, const odin_dns_addr_t *addrs,
+                        size_t addr_count, void *user_data) {
+  (void)err;
+  cli_client_state_t *state = (cli_client_state_t *)user_data;
+  state->dns_done = 1;
+#if defined(ODIN_CLI_CLIENT_TESTING)
+  g_dns_timing.dns_on_done_calls += 1;
+#endif
+  if (status == ODIN_DNS_OK && addrs != NULL) {
+    for (size_t i = 0; i < addr_count; ++i) {
+      if (dns_select_addr(state, &addrs[i])) {
+        state->dns_success = 1;
+        break;
+      }
+    }
+  }
+  odin_dns_query_destroy(query);
+  state->dns_query = NULL;
+#if defined(ODIN_CLI_CLIENT_TESTING)
+  g_dns_timing.query_destroyed_in_callback_calls += 1;
+#if defined(ODIN_DNS_RESOLVER_TESTING)
+  cli_client_test_record_dns_liveness(
+      NULL, &g_dns_timing.live_queries_at_callback_exit);
+#endif
+#endif
+  odin_event_loop_stop(state->loop);
+}
+
+static void cleanup_dns(cli_client_state_t *state) {
+  if (state->dns_query != NULL) {
+    odin_dns_query_destroy(state->dns_query);
+    state->dns_query = NULL;
+  }
+  if (state->dns_resolver != NULL) {
+    odin_dns_resolver_destroy(state->dns_resolver);
+    state->dns_resolver = NULL;
+  }
+}
+
+static int resolve_server_endpoint(cli_client_state_t *state) {
+  if (odin_dns_resolver_create(state->loop, NULL, &state->dns_resolver) != 0) {
+    return -1;
+  }
+  if (odin_dns_resolve_start(state->dns_resolver, state->server_host_cstr,
+                             strlen(state->server_host_cstr),
+                             state->server_port, AF_UNSPEC, dns_on_done, state,
+                             &state->dns_query) != 0) {
+    cleanup_dns(state);
+    return -1;
+  }
+#if defined(ODIN_CLI_CLIENT_TESTING)
+  g_dns_timing.dns_query_pending_before_dns_event_loop_run =
+      state->dns_query != NULL;
+  g_dns_timing.accept_loop_create_calls_before_dns_event_loop_run =
+      g_accept_loop_create_calls;
+  g_dns_timing.live_accept_loops_before_dns_event_loop_run =
+      g_live_accept_loops;
+  g_dns_timing.quic_runtime_add_connection_calls_before_dns_event_loop_run =
+      g_quic_runtime_add_connection_calls;
+  if (g_failpoint == ODIN_CLI_CLIENT_TEST_TRIGGER_DNS_EVENT_LOOP_STOP) {
+    g_failpoint = ODIN_CLI_CLIENT_TEST_FAIL_NONE;
+    g_failpoint_errno = 0;
+    if (odin_event_post(state->loop, dns_event_loop_stop_task, state) != 0) {
+      cleanup_dns(state);
+      return -1;
+    }
+  }
+  if (g_failpoint == ODIN_CLI_CLIENT_TEST_FAIL_DNS_EVENT_LOOP_RUN) {
+    const int errnum = g_failpoint_errno;
+    g_failpoint = ODIN_CLI_CLIENT_TEST_FAIL_NONE;
+    g_failpoint_errno = 0;
+    if (odin_event_loop_test_fail_next_backend_wait(state->loop, errnum) != 0) {
+      cleanup_dns(state);
+      return -1;
+    }
+  }
+#endif
+
+  const int run_rc = odin_event_loop_run(state->loop);
+#if defined(ODIN_CLI_CLIENT_TESTING)
+  g_dns_timing.dns_event_loop_run_rc = run_rc;
+  g_dns_timing.dns_done_after_dns_event_loop_run = state->dns_done;
+  g_dns_timing.dns_success_after_dns_event_loop_run = state->dns_success;
+#if defined(ODIN_DNS_RESOLVER_TESTING)
+  cli_client_test_record_dns_liveness(
+      &g_dns_timing.live_resolvers_after_dns_event_loop_run,
+      &g_dns_timing.live_queries_after_dns_event_loop_run);
+#endif
+#endif
+  cleanup_dns(state);
+  if (run_rc != 0 || !state->dns_done || !state->dns_success) {
+    return -1;
+  }
+  return 0;
 }
 
 static int quic_runtime_create_default_call(
@@ -319,6 +488,7 @@ static const char *install_signal_handlers(cli_client_state_t *state) {
 }
 
 static void cleanup_all(cli_client_state_t *state) {
+  cleanup_dns(state);
   if (state->accept_loop != NULL) {
     odin_accept_loop_destroy(state->accept_loop);
     state->accept_loop = NULL;
@@ -545,10 +715,7 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
   g_runtime_trigger_released = 0;
 #endif
 
-  char server_host_cstr[ODIN_PROTO_HOST_MAX + 1];
-  struct in_addr server_addr;
-  if (copy_ipv4_server_endpoint(config->server_host, config->server_host_len,
-                                server_host_cstr, &server_addr) != 0) {
+  if (copy_server_host_slice(config, &state) != 0) {
     return startup_fail(&state, err, "server_endpoint");
   }
 
@@ -643,6 +810,16 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
     return startup_fail(&state, err, "event_loop_create");
   }
 
+  if (resolve_server_endpoint(&state) != 0) {
+    return startup_fail(&state, err, "server_dns");
+  }
+
+#if defined(ODIN_CLI_CLIENT_TESTING) && defined(ODIN_DNS_RESOLVER_TESTING)
+  cli_client_test_record_dns_liveness(
+      &g_dns_timing.live_resolvers_before_accept_loop_create,
+      &g_dns_timing.live_queries_before_accept_loop_create);
+#endif
+
 #if defined(ODIN_CLI_CLIENT_TESTING)
   if (test_consume_failpoint(ODIN_CLI_CLIENT_TEST_FAIL_ACCEPT_LOOP_CREATE) !=
       0) {
@@ -659,32 +836,31 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
 #endif
 #if defined(ODIN_CLI_CLIENT_TESTING)
   g_live_accept_loops += 1;
+  g_accept_loop_create_calls += 1;
 #endif
-
-  struct sockaddr_in peer_addr;
-  memset(&peer_addr, 0, sizeof(peer_addr));
-  peer_addr.sin_family = AF_INET;
-  peer_addr.sin_addr = server_addr;
-  peer_addr.sin_port = htons(config->server_port);
-
-  struct sockaddr_in local_udp;
-  memset(&local_udp, 0, sizeof(local_udp));
-  local_udp.sin_family = AF_INET;
-  local_udp.sin_addr.s_addr = htonl(INADDR_ANY);
-  local_udp.sin_port = htons(0);
 
   odin_xqc_client_runtime_default_config_t runtime_config;
   memset(&runtime_config, 0, sizeof(runtime_config));
   runtime_config.loop = state.loop;
-  runtime_config.local_addr = (const struct sockaddr *)&local_udp;
-  runtime_config.local_addrlen = (socklen_t)sizeof(local_udp);
-  runtime_config.peer_addr = (const struct sockaddr *)&peer_addr;
-  runtime_config.peer_addrlen = (socklen_t)sizeof(peer_addr);
-  runtime_config.server_host = server_host_cstr;
+  runtime_config.local_addr = (const struct sockaddr *)&state.local_udp;
+  runtime_config.local_addrlen = state.local_udp_len;
+  runtime_config.peer_addr = (const struct sockaddr *)&state.resolved_peer;
+  runtime_config.peer_addrlen = state.resolved_peer_len;
+  runtime_config.server_host = state.server_host_cstr;
   runtime_config.ca_file = config->quic_ca_file;
+#if defined(ODIN_CLI_CLIENT_TESTING) && defined(ODIN_DNS_RESOLVER_TESTING)
+  cli_client_test_record_dns_liveness(
+      &g_dns_timing.live_resolvers_before_runtime_create,
+      &g_dns_timing.live_queries_before_runtime_create);
+#endif
   if (quic_runtime_create_default_call(&runtime_config, &state.quic_rt) != 0) {
     return startup_fail(&state, err, "xqc_client_runtime_create");
   }
+#if defined(ODIN_CLI_CLIENT_TESTING) && defined(ODIN_DNS_RESOLVER_TESTING)
+  cli_client_test_record_dns_liveness(
+      &g_dns_timing.live_resolvers_before_runtime_start,
+      &g_dns_timing.live_queries_before_runtime_start);
+#endif
   if (quic_runtime_start_call(state.quic_rt) != 0) {
     return startup_fail(&state, err, "xqc_client_runtime_start");
   }
@@ -707,11 +883,19 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
     return startup_fail(&state, err, "signal_timer_start");
   }
 
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-  (void)fprintf(err,
-                "odin: mode=client transport=quic listen=%u server=%.*s:%u\n",
-                (unsigned)state.actual_port, (int)config->server_host_len,
-                config->server_host, (unsigned)config->server_port);
+  if (state.server_display_needs_brackets) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+    (void)fprintf(err,
+                  "odin: mode=client transport=quic listen=%u server=[%s]:%u\n",
+                  (unsigned)state.actual_port, state.server_host_cstr,
+                  (unsigned)state.server_port);
+  } else {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+    (void)fprintf(err,
+                  "odin: mode=client transport=quic listen=%u server=%s:%u\n",
+                  (unsigned)state.actual_port, state.server_host_cstr,
+                  (unsigned)state.server_port);
+  }
   (void)fflush(err);
 
   const int run_rc = odin_event_loop_run(state.loop);

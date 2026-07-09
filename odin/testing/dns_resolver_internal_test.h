@@ -37,6 +37,8 @@ typedef struct odin_dns_resolver_test_cares_observation_t {
   int last_init_options_tries;
   int last_ai_flags;
   int last_ai_family;
+  size_t consumed_addr_results;
+  size_t last_consumed_addr_count;
 } odin_dns_resolver_test_cares_observation_t;
 
 #define ODIN_DNS_TEST_CARES_LIBRARY_INIT 1
@@ -48,6 +50,7 @@ typedef struct odin_dns_resolver_test_cares_observation_t {
 #define ODIN_DNS_TEST_CARES_SOCK_STATE 7
 #define ODIN_DNS_TEST_CARES_TIMEOUT_NULL 8
 #define ODIN_DNS_TEST_CARES_RESULT_EMPTY_SUCCESS 9
+#define ODIN_DNS_TEST_CARES_RESULT_PENDING 10
 
 typedef struct odin_dns_resolver_test_cares_step_t {
   int op;
@@ -66,6 +69,8 @@ int odin_dns_resolver_test_cares_observation(
     odin_dns_resolver_test_cares_observation_t *out);
 int odin_dns_resolver_test_push_cares_step(
     const odin_dns_resolver_test_cares_step_t *step);
+int odin_dns_resolver_test_push_addr_result(const odin_dns_addr_t *addrs,
+                                            size_t addr_count);
 int odin_dns_resolver_test_fail_next_result_alloc(void);
 int odin_dns_resolver_test_first_watch(odin_dns_query_t *query,
                                        odin_event_io_t **out_io, int *out_fd);

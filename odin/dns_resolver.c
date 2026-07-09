@@ -63,6 +63,9 @@ struct odin_dns_query_t {
   int in_callback;
 #if defined(ODIN_DNS_RESOLVER_TESTING)
   int test_result_allocated;
+  int test_addr_result_ready;
+  odin_dns_addr_t *test_addr_result;
+  size_t test_addr_result_count;
 #endif
 };
 
@@ -77,6 +80,13 @@ static odin_dns_resolver_test_cares_observation_t g_obs;
 static odin_dns_resolver_test_cares_step_t *g_steps;
 static size_t g_steps_len;
 static size_t g_steps_cap;
+typedef struct odin_dns_resolver_test_addr_result_t {
+  odin_dns_addr_t *addrs;
+  size_t addr_count;
+} odin_dns_resolver_test_addr_result_t;
+static odin_dns_resolver_test_addr_result_t *g_addr_results;
+static size_t g_addr_results_len;
+static size_t g_addr_results_cap;
 static int g_fail_next_result_alloc;
 
 static void test_live_resolvers_add(void) {
@@ -160,6 +170,36 @@ static int test_pop_step(int op, odin_dns_resolver_test_cares_step_t *out) {
     *out = g_steps[0];
     memmove(&g_steps[0], &g_steps[1], (g_steps_len - 1) * sizeof(g_steps[0]));
     g_steps_len -= 1;
+    found = 1;
+  }
+  pthread_mutex_unlock(&g_test_mu);
+  return found;
+}
+
+static void
+test_free_addr_result(odin_dns_resolver_test_addr_result_t *result) {
+  free(result->addrs);
+  result->addrs = NULL;
+  result->addr_count = 0;
+}
+
+static void test_clear_addr_results_locked(void) {
+  for (size_t i = 0; i < g_addr_results_len; ++i) {
+    test_free_addr_result(&g_addr_results[i]);
+  }
+  g_addr_results_len = 0;
+}
+
+static int test_pop_addr_result(odin_dns_resolver_test_addr_result_t *out) {
+  int found = 0;
+  pthread_mutex_lock(&g_test_mu);
+  if (g_addr_results_len > 0) {
+    *out = g_addr_results[0];
+    memmove(&g_addr_results[0], &g_addr_results[1],
+            (g_addr_results_len - 1) * sizeof(g_addr_results[0]));
+    g_addr_results_len -= 1;
+    g_obs.consumed_addr_results += 1;
+    g_obs.last_consumed_addr_count = out->addr_count;
     found = 1;
   }
   pthread_mutex_unlock(&g_test_mu);
@@ -381,15 +421,57 @@ static void complete_test_empty_success(odin_dns_query_t *query) {
   test_live_results_add();
 }
 
+static void free_test_addr_result_storage(odin_dns_query_t *query) {
+  query->test_addr_result_ready = 0;
+  query->test_addr_result_count = 0;
+  if (query->test_addr_result == NULL) {
+    return;
+  }
+  free(query->test_addr_result);
+  query->test_addr_result = NULL;
+  test_live_results_sub();
+}
+
+static void
+complete_test_addr_result(odin_dns_query_t *query,
+                          odin_dns_resolver_test_addr_result_t *result) {
+  if (query->suppress_callbacks) {
+    test_free_addr_result(result);
+    return;
+  }
+  query->result_status = ARES_SUCCESS;
+  query->completion_pending = 1;
+  query->test_addr_result_ready = 1;
+  query->test_addr_result = result->addrs;
+  query->test_addr_result_count =
+      result->addrs == NULL ? 0 : result->addr_count;
+  result->addrs = NULL;
+  result->addr_count = 0;
+  if (query->test_addr_result != NULL) {
+    test_live_results_add();
+  }
+}
+
 static void dns_ares_getaddrinfo(odin_dns_query_t *query, const char *node,
                                  const char *service,
                                  const struct ares_addrinfo_hints *hints) {
   odin_dns_resolver_test_cares_step_t step;
+  odin_dns_resolver_test_addr_result_t addr_result;
   pthread_mutex_lock(&g_test_mu);
   g_obs.getaddrinfo_calls += 1;
   g_obs.last_ai_flags = hints != NULL ? hints->ai_flags : 0;
   g_obs.last_ai_family = hints != NULL ? hints->ai_family : 0;
   pthread_mutex_unlock(&g_test_mu);
+
+  memset(&addr_result, 0, sizeof(addr_result));
+  if (test_pop_addr_result(&addr_result)) {
+    complete_test_addr_result(query, &addr_result);
+    return;
+  }
+
+  if (test_pop_step(ODIN_DNS_TEST_CARES_RESULT_PENDING, &step)) {
+    return;
+  }
 
   if (test_pop_step(ODIN_DNS_TEST_CARES_RESULT_EMPTY_SUCCESS, &step)) {
     complete_test_empty_success(query);
@@ -673,6 +755,9 @@ static void cleanup_query(odin_dns_query_t *query) {
   stop_all_watches(query);
   clear_timeout_timer(query);
   clear_finalizer_timer(query);
+#if defined(ODIN_DNS_RESOLVER_TESTING)
+  free_test_addr_result_storage(query);
+#endif
   free_recorded_result(query);
   destroy_channel(query);
   unlink_query(query);
@@ -925,6 +1010,32 @@ static int copy_results(odin_dns_query_t *query, odin_dns_addr_t **out_addrs,
   return 0;
 }
 
+#if defined(ODIN_DNS_RESOLVER_TESTING)
+static int copy_test_addr_results(odin_dns_query_t *query,
+                                  odin_dns_addr_t **out_addrs,
+                                  size_t *out_count) {
+  if (query->test_addr_result == NULL || query->test_addr_result_count == 0) {
+    *out_addrs = NULL;
+    *out_count = 0;
+    free_test_addr_result_storage(query);
+    return 0;
+  }
+  odin_dns_addr_t *addrs = (odin_dns_addr_t *)calloc(
+      query->test_addr_result_count, sizeof(addrs[0]));
+  if (addrs == NULL) {
+    free_test_addr_result_storage(query);
+    errno = ENOMEM;
+    return -1;
+  }
+  memcpy(addrs, query->test_addr_result,
+         query->test_addr_result_count * sizeof(addrs[0]));
+  *out_addrs = addrs;
+  *out_count = query->test_addr_result_count;
+  free_test_addr_result_storage(query);
+  return 0;
+}
+#endif
+
 static void run_finalizer(odin_dns_query_t *query) {
   if (query->destroying || query->completed) {
     return;
@@ -941,8 +1052,19 @@ static void run_finalizer(odin_dns_query_t *query) {
   size_t addr_count = 0;
 
   if (!query->fatal_pending && query->result_status == ARES_SUCCESS) {
-    if (query->result != NULL &&
-        copy_results(query, &addrs, &addr_count) == 0) {
+#if defined(ODIN_DNS_RESOLVER_TESTING)
+    if (query->test_addr_result_ready) {
+      if (copy_test_addr_results(query, &addrs, &addr_count) == 0) {
+        status = ODIN_DNS_OK;
+        err = 0;
+      } else {
+        status = ODIN_DNS_ERROR;
+        err = errno == 0 ? ENOMEM : errno;
+      }
+    } else
+#endif
+        if (query->result != NULL &&
+            copy_results(query, &addrs, &addr_count) == 0) {
       status = ODIN_DNS_OK;
       err = 0;
     } else {
@@ -1246,6 +1368,7 @@ int odin_dns_resolver_test_reset_liveness(void) {
   memset(&g_live, 0, sizeof(g_live));
   memset(&g_obs, 0, sizeof(g_obs));
   g_steps_len = 0;
+  test_clear_addr_results_locked();
   g_fail_next_result_alloc = 0;
   pthread_mutex_unlock(&g_test_mu);
   pthread_mutex_lock(&g_library_mu);
@@ -1304,6 +1427,49 @@ int odin_dns_resolver_test_push_cares_step(
     g_steps_cap = new_cap;
   }
   g_steps[g_steps_len++] = *step;
+  pthread_mutex_unlock(&g_test_mu);
+  return 0;
+}
+
+int odin_dns_resolver_test_push_addr_result(const odin_dns_addr_t *addrs,
+                                            size_t addr_count) {
+  if (addrs == NULL && addr_count > 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  odin_dns_addr_t *copy = NULL;
+  if (addr_count > 0) {
+    copy = (odin_dns_addr_t *)calloc(addr_count, sizeof(copy[0]));
+    if (copy == NULL) {
+      errno = ENOMEM;
+      return -1;
+    }
+    memcpy(copy, addrs, addr_count * sizeof(copy[0]));
+  }
+  pthread_mutex_lock(&g_test_mu);
+  if (g_addr_results_len == g_addr_results_cap) {
+    const size_t new_cap = g_addr_results_cap == 0 ? 4 : g_addr_results_cap * 2;
+    if (new_cap < g_addr_results_cap) {
+      pthread_mutex_unlock(&g_test_mu);
+      free(copy);
+      errno = ENOMEM;
+      return -1;
+    }
+    odin_dns_resolver_test_addr_result_t *new_results =
+        (odin_dns_resolver_test_addr_result_t *)realloc(
+            g_addr_results, new_cap * sizeof(new_results[0]));
+    if (new_results == NULL) {
+      pthread_mutex_unlock(&g_test_mu);
+      free(copy);
+      errno = ENOMEM;
+      return -1;
+    }
+    g_addr_results = new_results;
+    g_addr_results_cap = new_cap;
+  }
+  g_addr_results[g_addr_results_len].addrs = copy;
+  g_addr_results[g_addr_results_len].addr_count = addr_count;
+  g_addr_results_len += 1;
   pthread_mutex_unlock(&g_test_mu);
   return 0;
 }
