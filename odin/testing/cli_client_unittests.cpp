@@ -970,7 +970,9 @@ TEST(OdinCliClientCaFileTest, T3RunnerForwardsRequiredCaFileAndRejectsOmit) {
   EXPECT_EQ(omitted.rc, 2);
   EXPECT_EQ(omitted.err,
             "odin: missing required flag\n"
-            "usage: odin-client --listen ADDR --server ADDR --ca-file FILE\n");
+            "usage: 'odin-client --listen ADDR --server ADDR --ca-file FILE' "
+            "or 'odin-server --listen ADDR --quic-cert FILE --quic-key "
+            "FILE'\n");
   EXPECT_EQ(omitted.snapshot.runtime_record.default_create_calls, 0u);
   ExpectRfc028QuicClean(omitted.snapshot);
 }

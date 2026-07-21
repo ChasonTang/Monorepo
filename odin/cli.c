@@ -4,26 +4,24 @@
  * row below is what odin_cli_main writes and returns when odin_cli_parse
  * yields the corresponding status.
  *
- *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR --ca-file
- * FILE" <U_S>    = "usage: odin-server --listen ADDR "
- *              "--quic-cert FILE --quic-key FILE"
+ *   <U_C>    = "usage: odin-client --listen ADDR --server ADDR "
+ *              "--ca-file FILE"
+ *   <U_S>    = "usage: odin-server --listen ADDR --quic-cert FILE "
+ *              "--quic-key FILE"
  *   <U_BOTH> = "usage: 'odin-client --listen ADDR --server ADDR "
  *              "--ca-file FILE' or "
  *              "'odin-server --listen ADDR --quic-cert FILE "
  *              "--quic-key FILE'"
  *
- * | status               | mode    | out         | err | return |
- * |----------------------|---------|-------------|----------------------------------------------------|--------|
- * | OK                   | CLIENT  | -           | "odin: mode=client
- * listen=<P> server=<S>\n"        |   0    | | OK                   | SERVER  |
- * -           | "odin: mode=server listen=<P>\n"                   |   0    |
- * | HELP                 | M       | "<U_M>\n"   | - |   0    | |
- * ERR_UNKNOWN_MODE     | UNKNOWN | -           | "odin: unrecognized invocation
- * name\n<U_BOTH>\n"   |   2    | | ERR_MISSING_REQUIRED | M       | - | "odin:
- * missing required flag\n<U_M>\n"             |   2    | | ERR_UNKNOWN_FLAG | M
- * | -           | "odin: unknown or invalid flag\n<U_M>\n"           |   2    |
- * | ERR_BAD_LISTEN_PORT  | M       | -           | "odin: invalid --listen
- * port\n<U_M>\n"           |   2    |
+ * | status           | out       | err                                      |
+ * return |
+ * |------------------|-----------|------------------------------------------|--------|
+ * | OK_CLIENT        | -         | client runner output                     |
+ * 0/1  | | OK_SERVER        | -         | server runner output |   0/1  | |
+ * HELP_CLIENT      | <U_C>     | -                                        |   0
+ * | | HELP_SERVER      | <U_S>     | -                                        |
+ * 0    | | ERR_*            | -         | deterministic error + <U_BOTH> |   2
+ * |
  *
  * Both streams are flushed before odin_cli_main returns; success writes to
  * `err` so future proxy data never shares `out`. Running `out/odin`
@@ -96,7 +94,6 @@ static const struct option kServerLong[] = {
 
 odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
                                  odin_cli_args_t *out) {
-  out->mode = ODIN_CLI_MODE_UNKNOWN;
   out->listen_port = 0;
   out->server_host = NULL;
   out->server_host_len = 0;
@@ -114,22 +111,20 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
     return ODIN_CLI_ERR_UNKNOWN_MODE;
   }
 
-  odin_cli_mode_t mode;
+  int is_client;
   const struct option *longopts;
   const char *optstring;
   if (strcmp(bn, "odin-client") == 0) {
-    mode = ODIN_CLI_MODE_CLIENT;
+    is_client = 1;
     longopts = kClientLong;
     optstring = "+l:s:h";
   } else if (strcmp(bn, "odin-server") == 0) {
-    mode = ODIN_CLI_MODE_SERVER;
+    is_client = 0;
     longopts = kServerLong;
     optstring = "+l:h";
   } else {
     return ODIN_CLI_ERR_UNKNOWN_MODE;
   }
-
-  out->mode = mode;
 
   /* Save getopt globals so callers see no side effect on any return path. */
   const int saved_optind = optind;
@@ -245,36 +240,32 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
 
   odin_host_addr_t sr = {NULL, 0, 0};
   const odin_host_addr_status_t sr_status =
-      (mode == ODIN_CLI_MODE_CLIENT && server_arg != NULL)
-          ? odin_host_addr_parse(server_arg, &sr)
-          : ODIN_HOST_ADDR_OK;
+      (is_client && server_arg != NULL) ? odin_host_addr_parse(server_arg, &sr)
+                                        : ODIN_HOST_ADDR_OK;
   const int bad_quic_tls =
-      mode == ODIN_CLI_MODE_SERVER &&
-      (quic_cert_arg == NULL || quic_key_arg == NULL ||
-       quic_cert_arg[0] == '\0' || quic_key_arg[0] == '\0');
+      !is_client && (quic_cert_arg == NULL || quic_key_arg == NULL ||
+                     quic_cert_arg[0] == '\0' || quic_key_arg[0] == '\0');
 
   odin_cli_status_t status;
   if (help_seen) {
-    status = ODIN_CLI_HELP;
+    status = is_client ? ODIN_CLI_HELP_CLIENT : ODIN_CLI_HELP_SERVER;
   } else if (unknown_flag_seen) {
     status = ODIN_CLI_ERR_UNKNOWN_FLAG;
   } else if (pr.status == BAD_PORT) {
     status = ODIN_CLI_ERR_BAD_LISTEN_PORT;
   } else if (sr_status != ODIN_HOST_ADDR_OK) {
     status = ODIN_CLI_ERR_BAD_SERVER;
-  } else if (mode == ODIN_CLI_MODE_CLIENT &&
-             (server_arg == NULL || !client_ca_seen)) {
+  } else if (is_client && (server_arg == NULL || !client_ca_seen)) {
     status = ODIN_CLI_ERR_MISSING_REQUIRED;
-  } else if (bad_quic_tls || (mode == ODIN_CLI_MODE_CLIENT && bad_client_ca)) {
+  } else if (bad_quic_tls || (is_client && bad_client_ca)) {
     status = ODIN_CLI_ERR_BAD_QUIC_TLS;
   } else {
     out->listen_port =
         (pr.status == OK_PARSED)
             ? pr.port
-            : (uint16_t)(mode == ODIN_CLI_MODE_CLIENT
-                             ? ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT
-                             : ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
-    if (mode == ODIN_CLI_MODE_CLIENT) {
+            : (uint16_t)(is_client ? ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT
+                                   : ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
+    if (is_client) {
       out->server_host = sr.host;
       out->server_host_len = sr.host_len;
       out->server_port = sr.port;
@@ -283,7 +274,7 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       out->quic_cert_file = quic_cert_arg;
       out->quic_key_file = quic_key_arg;
     }
-    status = ODIN_CLI_OK;
+    status = is_client ? ODIN_CLI_OK_CLIENT : ODIN_CLI_OK_SERVER;
   }
 
   optind = saved_optind;
@@ -308,30 +299,33 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
       "usage: 'odin-client --listen ADDR --server ADDR --ca-file FILE' or "
       "'odin-server --listen ADDR --quic-cert FILE --quic-key FILE'";
 
-  const char *um = (args.mode == ODIN_CLI_MODE_CLIENT) ? kUC : kUS;
-
   int rc = 2;
   switch (status) {
-  case ODIN_CLI_OK:
-    if (args.mode == ODIN_CLI_MODE_CLIENT) {
-      const odin_cli_client_config_t config = {
-          args.listen_port, args.server_host,  args.server_host_len,
-          args.server_port, args.quic_ca_file,
-      };
-      (void)fflush(out);
-      return odin_cli_run_client(&config, err);
-    } else {
-      const odin_cli_server_config_t config = {
-          args.listen_port,
-          args.quic_cert_file,
-          args.quic_key_file,
-      };
-      (void)fflush(out);
-      rc = odin_cli_run_server(&config, err);
-    }
+  case ODIN_CLI_OK_CLIENT: {
+    const odin_cli_client_config_t config = {
+        args.listen_port, args.server_host,  args.server_host_len,
+        args.server_port, args.quic_ca_file,
+    };
+    (void)fflush(out);
+    return odin_cli_run_client(&config, err);
+  }
+  case ODIN_CLI_OK_SERVER: {
+    const odin_cli_server_config_t config = {
+        args.listen_port,
+        args.quic_cert_file,
+        args.quic_key_file,
+    };
+    (void)fflush(out);
+    rc = odin_cli_run_server(&config, err);
     break;
-  case ODIN_CLI_HELP:
-    (void)fputs(um, out);
+  }
+  case ODIN_CLI_HELP_CLIENT:
+    (void)fputs(kUC, out);
+    (void)fputc('\n', out);
+    rc = 0;
+    break;
+  case ODIN_CLI_HELP_SERVER:
+    (void)fputs(kUS, out);
     (void)fputc('\n', out);
     rc = 0;
     break;
@@ -343,31 +337,31 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
     break;
   case ODIN_CLI_ERR_MISSING_REQUIRED:
     (void)fputs("odin: missing required flag\n", err);
-    (void)fputs(um, err);
+    (void)fputs(kUBoth, err);
     (void)fputc('\n', err);
     rc = 2;
     break;
   case ODIN_CLI_ERR_UNKNOWN_FLAG:
     (void)fputs("odin: unknown or invalid flag\n", err);
-    (void)fputs(um, err);
+    (void)fputs(kUBoth, err);
     (void)fputc('\n', err);
     rc = 2;
     break;
   case ODIN_CLI_ERR_BAD_LISTEN_PORT:
     (void)fputs("odin: invalid --listen port\n", err);
-    (void)fputs(um, err);
+    (void)fputs(kUBoth, err);
     (void)fputc('\n', err);
     rc = 2;
     break;
   case ODIN_CLI_ERR_BAD_SERVER:
     (void)fputs("odin: invalid --server\n", err);
-    (void)fputs(um, err);
+    (void)fputs(kUBoth, err);
     (void)fputc('\n', err);
     rc = 2;
     break;
   case ODIN_CLI_ERR_BAD_QUIC_TLS:
     (void)fputs("odin: invalid QUIC TLS configuration\n", err);
-    (void)fputs(um, err);
+    (void)fputs(kUBoth, err);
     (void)fputc('\n', err);
     rc = 2;
     break;

@@ -9,13 +9,12 @@
  * Status semantics for odin_cli_parse:
  *   - argc < 1, argv[0] == NULL, or empty basename → ERR_UNKNOWN_MODE;
  *     `*out` is fully zeroed on this path.
- *   - After a valid `odin-client` / `odin-server` basename, `out.mode`
- *     persists on OK, HELP, ERR_UNKNOWN_FLAG, ERR_BAD_LISTEN_PORT,
- *     ERR_BAD_SERVER, and ERR_MISSING_REQUIRED.
- *   - Only OK fills `listen_port` / `server_host` / `server_host_len` /
- *     `server_port`. `listen_port` is the parsed decimal port supplied via
- *     `--listen`, or — when `--listen` is omitted or supplied as
- *     the empty string — the per-mode default
+ *   - A successful parse or help request returns the corresponding
+ *     CLIENT / SERVER status. Error statuses do not carry a mode.
+ *   - Only OK_CLIENT / OK_SERVER fills `listen_port`; OK_CLIENT also fills
+ *     `server_host` / `server_host_len` / `server_port`. `listen_port` is
+ *     the parsed decimal port supplied via `--listen`, or — when `--listen`
+ *     is omitted or supplied as the empty string — the per-mode default
  *     (ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT for Client mode,
  *     ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER for Server mode). On every
  *     other status `listen_port` keeps its entry-block zero.
@@ -25,7 +24,8 @@
  *     slice; `server_port` is the parsed port digits, or
  *     ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER when `--server` had no
  *     `:port` suffix. Server mode never sets the three server fields.
- *   - `--help` / `-h` wins after a valid basename, returning HELP.
+ *   - `--help` / `-h` wins after a valid basename, returning HELP_CLIENT or
+ *     HELP_SERVER.
  *   - Long option names are accepted only when spelled exactly
  *     (`--listen`, `--server`, `--quic-cert`, `--quic-key`, `--help`);
  *     abbreviated unique prefixes
@@ -40,9 +40,9 @@
  *     `[v6]:port` (RFC-007 §4.2.3). Empty value, structural malformation,
  *     bad port digits, or host length exceeding the protocol cap returns
  *     ERR_BAD_SERVER without writing the three server fields.
- *   - Status precedence within a valid basename (highest wins): HELP,
+ *   - Status precedence within a valid basename (highest wins): HELP_*,
  *     ERR_UNKNOWN_FLAG, ERR_BAD_LISTEN_PORT, ERR_BAD_SERVER,
- *     ERR_MISSING_REQUIRED, OK. ERR_UNKNOWN_MODE precedes any of these
+ *     ERR_MISSING_REQUIRED, OK_*. ERR_UNKNOWN_MODE precedes any of these
  *     because it fires before any flag parsing.
  *   - Unknown options, missing option arguments, and stray positional
  *     operands return ERR_UNKNOWN_FLAG before the missing-required,
@@ -67,15 +67,11 @@ extern "C" {
 #define ODIN_CLI_DEFAULT_LISTEN_PORT_CLIENT 8080
 #define ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER 4433
 
-typedef enum odin_cli_mode_t {
-  ODIN_CLI_MODE_UNKNOWN = 0,
-  ODIN_CLI_MODE_CLIENT,
-  ODIN_CLI_MODE_SERVER,
-} odin_cli_mode_t;
-
 typedef enum odin_cli_status_t {
-  ODIN_CLI_OK = 0,
-  ODIN_CLI_HELP,
+  ODIN_CLI_OK_CLIENT = 0,
+  ODIN_CLI_OK_SERVER,
+  ODIN_CLI_HELP_CLIENT,
+  ODIN_CLI_HELP_SERVER,
   ODIN_CLI_ERR_UNKNOWN_MODE,
   ODIN_CLI_ERR_MISSING_REQUIRED,
   ODIN_CLI_ERR_UNKNOWN_FLAG,
@@ -85,7 +81,6 @@ typedef enum odin_cli_status_t {
 } odin_cli_status_t;
 
 typedef struct odin_cli_args_t {
-  odin_cli_mode_t mode;
   uint16_t listen_port;
   const char *server_host;
   size_t server_host_len;
