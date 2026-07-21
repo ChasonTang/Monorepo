@@ -1238,25 +1238,11 @@ TEST(OdinRFC028ClientTransportTest, T12ClientRunnerConfigPreconditions) {
   (void)fclose(null_err);
   EXPECT_STREQ(null_buf, "odin: client startup failed at config\n");
 
-  odin_cli_client_config_t unknown{};
-  unknown.listen_port = 0;
-  unknown.server_host = "127.0.0.1";
-  unknown.server_host_len = std::strlen(unknown.server_host);
-  unknown.server_port = 4433;
-  unknown.transport = ODIN_CLI_CLIENT_TRANSPORT_TEST_INVALID;
-  char unknown_buf[128] = {0};
-  FILE *unknown_err = fmemopen(unknown_buf, sizeof(unknown_buf), "w");
-  ASSERT_NE(unknown_err, nullptr);
-  EXPECT_EQ(odin_cli_run_client(&unknown, unknown_err), 1);
-  (void)fclose(unknown_err);
-  EXPECT_STREQ(unknown_buf, "odin: client startup failed at config\n");
-
   odin_cli_client_config_t quic{};
   quic.listen_port = 0;
   quic.server_host = "127.0.0.1";
   quic.server_host_len = std::strlen(quic.server_host);
   quic.server_port = 4433;
-  quic.transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
   char missing_ca_buf[128] = {0};
   FILE *missing_ca_err = fmemopen(missing_ca_buf, sizeof(missing_ca_buf), "w");
   ASSERT_NE(missing_ca_err, nullptr);
@@ -2013,7 +1999,6 @@ TEST_F(OdinRFC032ClientDnsTest, T6InvalidHostSliceRejectedBeforeResources) {
   config.server_host = "";
   config.server_host_len = 0;
   config.server_port = 4433;
-  config.transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
   config.quic_ca_file = ca.c_str();
   Rfc028QuicDirectRun zero = RunRfc032DirectConfig(config, setup);
   EXPECT_EQ(zero.rc, 1);

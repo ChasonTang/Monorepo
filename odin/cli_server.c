@@ -365,8 +365,5 @@ int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *err) {
   if (config == NULL) {
     return startup_fail_config(err);
   }
-  if (config->transport == ODIN_CLI_SERVER_TRANSPORT_QUIC) {
-    return run_quic_server(config, err);
-  }
-  return startup_fail_config(err);
+  return run_quic_server(config, err);
 }

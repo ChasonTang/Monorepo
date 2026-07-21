@@ -18,9 +18,8 @@
 #ifndef ODIN_CLI_SERVER_H_
 #define ODIN_CLI_SERVER_H_
 
+#include <stdint.h>
 #include <stdio.h>
-
-#include "odin/cli.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,7 +27,6 @@ extern "C" {
 
 typedef struct odin_cli_server_config_t {
   uint16_t listen_port;
-  odin_cli_server_transport_t transport;
   const char *quic_cert_file;
   const char *quic_key_file;
 } odin_cli_server_config_t;

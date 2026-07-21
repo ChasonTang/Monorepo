@@ -1435,18 +1435,14 @@ TEST(OdinCliServerQuicParserTest, T1QuicDefault) {
   struct Case {
     std::vector<std::string> tokens;
     uint16_t expected_port;
-    odin_cli_server_transport_t expected_transport;
   };
   const std::vector<Case> cases = {
       {{"odin-server", "--quic-cert", "C", "--quic-key", "K"},
-       ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER,
-       ODIN_CLI_SERVER_TRANSPORT_QUIC},
+       ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER},
       {{"odin-server", "--listen", "", "--quic-cert", "C", "--quic-key", "K"},
-       ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER,
-       ODIN_CLI_SERVER_TRANSPORT_QUIC},
+       ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER},
       {{"odin-server", "--listen", "0", "--quic-cert", "C", "--quic-key", "K"},
-       0,
-       ODIN_CLI_SERVER_TRANSPORT_QUIC},
+       0},
   };
   for (const Case &c : cases) {
     MutableArgv argv(c.tokens);
@@ -1454,7 +1450,6 @@ TEST(OdinCliServerQuicParserTest, T1QuicDefault) {
     EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
     EXPECT_EQ(out.listen_port, c.expected_port);
-    EXPECT_EQ(out.server_transport, c.expected_transport);
     EXPECT_STREQ(out.quic_cert_file, "C");
     EXPECT_STREQ(out.quic_key_file, "K");
   }
@@ -1467,7 +1462,6 @@ TEST(OdinCliServerQuicParserTest, T2QuicParserAndUsageContract) {
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.listen_port, 9443);
-    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
     EXPECT_EQ(out.quic_cert_file, argv.argv()[4]);
     EXPECT_EQ(out.quic_key_file, argv.argv()[6]);
   }
@@ -1733,27 +1727,12 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
   ExpectZeroLiveness(SnapshotLiveness());
   EXPECT_EQ(odin_xqc_server_runtime_test_record()->udp_create_calls, 0u);
 
-  odin_cli_server_config_t bad_transport = {
-      0,
-      static_cast<odin_cli_server_transport_t>(99),
-      nullptr,
-      nullptr,
-  };
-  std::memset(err_buf, 0, sizeof(err_buf));
-  err = fmemopen(err_buf, sizeof(err_buf), "w");
-  ASSERT_NE(err, nullptr);
-  EXPECT_EQ(odin_cli_run_server(&bad_transport, err), 1);
-  (void)fclose(err);
-  EXPECT_STREQ(err_buf, "odin: server startup failed at config\n");
-  ExpectZeroLiveness(SnapshotLiveness());
-  EXPECT_EQ(odin_xqc_server_runtime_test_record()->udp_create_calls, 0u);
-
   for (const odin_cli_server_config_t &cfg :
        std::vector<odin_cli_server_config_t>{
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, nullptr, KeyPath()},
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, CertPath(), nullptr},
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, "", KeyPath()},
-           {0, ODIN_CLI_SERVER_TRANSPORT_QUIC, CertPath(), ""},
+           {0, nullptr, KeyPath()},
+           {0, CertPath(), nullptr},
+           {0, "", KeyPath()},
+           {0, CertPath(), ""},
        }) {
     std::memset(err_buf, 0, sizeof(err_buf));
     err = fmemopen(err_buf, sizeof(err_buf), "w");

@@ -923,9 +923,8 @@ int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *err) {
   state.listen_fd = -1;
   state.test_wakeup_fd = -1;
 
-  if (config == NULL || err == NULL ||
-      config->transport != ODIN_CLI_CLIENT_TRANSPORT_QUIC ||
-      config->quic_ca_file == NULL || config->quic_ca_file[0] == '\0') {
+  if (config == NULL || err == NULL || config->quic_ca_file == NULL ||
+      config->quic_ca_file[0] == '\0') {
     return startup_fail(&state, err, "config");
   }
   return run_quic_client(config, err);

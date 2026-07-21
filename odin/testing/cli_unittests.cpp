@@ -142,7 +142,6 @@ TEST(OdinCliTest, T2ServerBasenameListenFlagShortLong) {
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
     EXPECT_EQ(out.listen_port, 4433);
-    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
     EXPECT_EQ(out.server_host, nullptr);
     EXPECT_EQ(out.server_host_len, static_cast<size_t>(0));
     EXPECT_EQ(out.server_port, 0);
@@ -154,7 +153,6 @@ TEST(OdinCliTest, T2ServerBasenameListenFlagShortLong) {
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
     EXPECT_EQ(out.listen_port, 4433);
-    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
     EXPECT_EQ(out.server_host, nullptr);
     EXPECT_EQ(out.server_host_len, static_cast<size_t>(0));
     EXPECT_EQ(out.server_port, 0);
@@ -425,7 +423,6 @@ TEST(OdinRFC028ClientTransportTest, T1ParserAndMainTransportContract) {
                       "127.0.0.1:4433", "--ca-file", "CA"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
-    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
   }
   {
     MutableArgv argv({"odin-client", "--listen", "0", "--server",
@@ -446,8 +443,6 @@ TEST(OdinRFC028ClientTransportTest, T1ParserAndMainTransportContract) {
                       "--quic-key", "K"});
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
-    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
-    EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
     EXPECT_STREQ(out.quic_cert_file, "C");
     EXPECT_STREQ(out.quic_key_file, "K");
   }
@@ -488,9 +483,6 @@ TEST(OdinRFC028ClientTransportTest, T14ParserPrecedenceAndTlsRejection) {
     MutableArgv argv(c.tokens);
     odin_cli_args_t out{};
     EXPECT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), c.expected);
-    if (c.expected != ODIN_CLI_OK) {
-      EXPECT_EQ(out.client_transport, ODIN_CLI_CLIENT_TRANSPORT_QUIC);
-    }
   }
 }
 
@@ -536,7 +528,6 @@ TEST(OdinCliListenPortTest, T1PerModeDefaultWhenListenOmitted) {
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.mode, ODIN_CLI_MODE_SERVER);
     EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
-    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
     EXPECT_EQ(out.server_host, nullptr);
     EXPECT_EQ(out.server_host_len, static_cast<size_t>(0));
     EXPECT_EQ(out.server_port, 0);
@@ -557,7 +548,6 @@ TEST(OdinCliListenPortTest, T2EmptyListenValueResolvesToDefault) {
     odin_cli_args_t out{};
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out), ODIN_CLI_OK);
     EXPECT_EQ(out.listen_port, ODIN_CLI_DEFAULT_LISTEN_PORT_SERVER);
-    EXPECT_EQ(out.server_transport, ODIN_CLI_SERVER_TRANSPORT_QUIC);
   }
 }
 

@@ -101,8 +101,6 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
   out->server_host = NULL;
   out->server_host_len = 0;
   out->server_port = 0;
-  out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
-  out->server_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
   out->quic_cert_file = NULL;
   out->quic_key_file = NULL;
   out->quic_ca_file = NULL;
@@ -280,10 +278,8 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
       out->server_host = sr.host;
       out->server_host_len = sr.host_len;
       out->server_port = sr.port;
-      out->client_transport = ODIN_CLI_CLIENT_TRANSPORT_QUIC;
       out->quic_ca_file = quic_ca_arg;
     } else {
-      out->server_transport = ODIN_CLI_SERVER_TRANSPORT_QUIC;
       out->quic_cert_file = quic_cert_arg;
       out->quic_key_file = quic_key_arg;
     }
@@ -319,15 +315,14 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   case ODIN_CLI_OK:
     if (args.mode == ODIN_CLI_MODE_CLIENT) {
       const odin_cli_client_config_t config = {
-          args.listen_port, args.server_host,      args.server_host_len,
-          args.server_port, args.client_transport, args.quic_ca_file,
+          args.listen_port, args.server_host,  args.server_host_len,
+          args.server_port, args.quic_ca_file,
       };
       (void)fflush(out);
       return odin_cli_run_client(&config, err);
     } else {
       const odin_cli_server_config_t config = {
           args.listen_port,
-          args.server_transport,
           args.quic_cert_file,
           args.quic_key_file,
       };

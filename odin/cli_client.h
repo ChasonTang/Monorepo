@@ -6,8 +6,6 @@
 #ifndef ODIN_CLI_CLIENT_H_
 #define ODIN_CLI_CLIENT_H_
 
-#include "odin/cli.h"
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,7 +19,6 @@ typedef struct odin_cli_client_config_t {
   const char *server_host;
   size_t server_host_len;
   uint16_t server_port;
-  odin_cli_client_transport_t transport;
   const char *quic_ca_file;
 } odin_cli_client_config_t;
 
