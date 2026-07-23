@@ -39,14 +39,6 @@ config("no_exceptions") {
   cflags_cc = [ "-fno-exceptions" ]
 }
 
-config("cxx17") {
-  cflags_cc = [ "-std=c++17" ]
-}
-
-config("cxx20") {
-  cflags_cc = [ "-std=c++20" ]
-}
-
 config("no_unused_parameter") {
   cflags = [ "-Wno-unused-parameter" ]
 }

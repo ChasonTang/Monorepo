@@ -23,7 +23,6 @@ component("crypto") {
 
   configs += [
     ":boringssl_config",
-    "//build:cxx17",
     "//build:no_unused_parameter",
   ]
 
@@ -679,7 +678,6 @@ component("ssl") {
 
   configs += [
     ":boringssl_config",
-    "//build:cxx17",
     "//build:no_unused_parameter",
   ]
 

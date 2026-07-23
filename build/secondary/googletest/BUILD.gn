@@ -75,7 +75,6 @@ source_set("gtest") {
   ]
   configs += [
     ":gtest_internal_config",
-    "//build:cxx17",
   ]
 
   sources = [
@@ -122,7 +121,6 @@ source_set("gtest_main") {
   public_configs = [ ":gtest_public_config" ]
   configs += [
     ":gtest_internal_config",
-    "//build:cxx17",
   ]
 
   sources = [ "//googletest/googletest/src/gtest_main.cc" ]
@@ -141,7 +139,6 @@ source_set("gmock") {
   ]
   configs += [
     ":gmock_internal_config",
-    "//build:cxx17",
   ]
 
   sources = [
@@ -171,7 +168,6 @@ source_set("gmock_main") {
   public_configs = [ ":gmock_public_config" ]
   configs += [
     ":gmock_internal_config",
-    "//build:cxx17",
   ]
 
   sources = [ "//googletest/googlemock/src/gmock_main.cc" ]
