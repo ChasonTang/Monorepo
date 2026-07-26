@@ -92,7 +92,6 @@ component("libcxx") {
   ]
 
   cflags_cc = [
-    "-std=c++23",
     "-Wno-covered-switch-default",
     "-Wno-nullability-completeness",
     "-Wno-unused-parameter",
@@ -101,6 +100,7 @@ component("libcxx") {
   ]
 
   configs += [
+    "//build:cxx23",
     ":src_include",
     ":libcxx_config",
     ":llvm_libc_shared_headers",

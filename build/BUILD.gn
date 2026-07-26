@@ -16,6 +16,10 @@ config("compiler_defaults") {
   ]
 }
 
+config("cxx23") {
+  cflags_cc = [ "-std=c++23" ]
+}
+
 # Hidden by default so C++ template / inline symbols don't leak and collide
 # across modules, and dyld/ld.so see a smaller dynamic symbol table. APIs that
 # must cross module boundaries need

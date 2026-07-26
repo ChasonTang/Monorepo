@@ -12,8 +12,6 @@ config("libcxxabi_config") {
     "//llvm-project/libcxx/src",
   ]
 
-  cflags_cc = [ "-std=c++23" ]
-
   defines = [
     "_LIBCXXABI_BUILDING_LIBRARY",
     "_LIBCPP_BUILDING_LIBRARY",
@@ -54,5 +52,8 @@ component("libcxxabi") {
     sources += [ "//llvm-project/libcxxabi/src/cxa_thread_atexit.cpp" ]
   }
 
-  configs += [ ":libcxxabi_config" ]
+  configs += [
+    "//build:cxx23",
+    ":libcxxabi_config",
+  ]
 }
