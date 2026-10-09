@@ -1,0 +1,8 @@
+executable("argcv_unittests") {
+  testonly = true
+  sources = [ "argcv_unittests.cpp" ]
+  deps = [
+    "//argcv",
+    "//googletest:gtest_main",
+  ]
+}

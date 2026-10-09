@@ -66,6 +66,32 @@ Set via `--args=` on `gn gen`. See `build/BUILDCONFIG.gn`.
 | `target_cpu`         | host    | `x64` or `arm64` depending on target OS/environment.             |
 | `target_environment` | `""`    | For `ios`: `device` or `simulator`.                             |
 
+## Formatting and Static Analysis
+
+The repository-root `.clang-format` and `.clang-tidy` provide shared C/C++
+rules. The scripts cover `odin/` and `argcv/`, including their tests, using
+the tools installed by `./sync_tools.sh`.
+
+```bash
+./format.sh                                # format all odin and argcv C/C++ files
+./format.sh --diff                         # format changes vs origin/main
+./format.sh --diff HEAD                    # format staged and unstaged changes vs HEAD
+./tidy.sh                                  # analyze all odin and argcv translation units
+./tidy.sh odin/protocol.c argcv/argcv.c      # analyze selected source files
+./tidy.sh --staged                         # analyze staged source/header changes
+JOBS=4 BUILD_DIR=out ./tidy.sh              # set parallelism and build directory
+```
+
+`tidy.sh` regenerates the GN compilation database for both projects on every
+run. In staged mode, it analyzes the working-tree versions of staged sources;
+staged headers select sibling `.c`, `.cc`, or `.cpp` files with the same
+basename. Run without `--staged` to cover all translation units after changing
+shared headers. `odin/testing/.clang-tidy` inherits the shared rules and keeps
+its test-only override.
+
+`format_odin.sh` and `tidy_odin.sh` remain compatibility entry points for
+`format.sh` and `tidy.sh`; they also cover both projects.
+
 ## Layout
 
 - `BUILD.gn`, `.gn`, `build/` — root build, toolchains, configs, `component.gni`.

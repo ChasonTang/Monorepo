@@ -1,0 +1,6 @@
+import("//build/component.gni")
+
+component("argcv") {
+  sources = [ "argcv.c" ]
+  public = [ "argcv.h" ]
+}
