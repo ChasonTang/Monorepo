@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ARGCV_EXPORT __attribute__((visibility("default")))
+#include "argcv/export.h"
 
 #ifdef __cplusplus
 extern "C" {

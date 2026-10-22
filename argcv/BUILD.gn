@@ -3,4 +3,13 @@ import("//build/component.gni")
 component("argcv") {
   sources = [ "argcv.c" ]
   public = [ "argcv.h" ]
+  public_deps = [ ":argcv_value" ]
+}
+
+component("argcv_value") {
+  sources = [ "value.c" ]
+  public = [
+    "export.h",
+    "value.h",
+  ]
 }
