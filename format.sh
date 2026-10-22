@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Format odin and argcv C/C++ sources in place using
+# Format odin, argcv, and ipsw C/C++ sources in place using
 # ./tool/clang/bin/clang-format and the repository-root .clang-format.
 #
 # Usage:
-#   ./format.sh                # format every odin and argcv C/C++ source
+#   ./format.sh                # format every odin, argcv, and ipsw C/C++ source
 #   ./format.sh --diff         # format only files changed vs origin/main
 #   ./format.sh --diff HEAD~1  # format only files changed vs HEAD~1
 
@@ -11,7 +11,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 CLANG_FORMAT="$REPO_ROOT/tool/clang/bin/clang-format"
-SOURCE_DIRS=("$REPO_ROOT/odin" "$REPO_ROOT/argcv")
+SOURCE_DIRS=("$REPO_ROOT/odin" "$REPO_ROOT/argcv" "$REPO_ROOT/ipsw")
 
 DIFF_MODE=0
 DIFF_BASE=""
@@ -55,9 +55,9 @@ if [ "$DIFF_MODE" -eq 1 ]; then
         echo "error: diff base '$DIFF_BASE' not found in git" >&2
         exit 1
     fi
-    echo "collecting odin and argcv changes vs $DIFF_BASE"
+    echo "collecting odin, argcv, and ipsw changes vs $DIFF_BASE"
     while IFS= read -r -d '' rel; do
-        case "$rel" in odin/*|argcv/*) ;; *) continue ;; esac
+        case "$rel" in odin/*|argcv/*|ipsw/*) ;; *) continue ;; esac
         case "$rel" in
             *.c|*.h|*.cc|*.cpp|*.hpp) ;;
             *) continue ;;
@@ -65,7 +65,7 @@ if [ "$DIFF_MODE" -eq 1 ]; then
         abs="$REPO_ROOT/$rel"
         [ -f "$abs" ] || continue
         FILES+=("$abs")
-    done < <(git -C "$REPO_ROOT" diff --name-only -z --diff-filter=ACMRTUB "$DIFF_BASE" -- odin argcv)
+    done < <(git -C "$REPO_ROOT" diff --name-only -z --diff-filter=ACMRTUB "$DIFF_BASE" -- odin argcv ipsw)
 else
     while IFS= read -r -d '' f; do
         FILES+=("$f")
@@ -79,9 +79,9 @@ COUNT="${#FILES[@]}"
 
 if [ "$COUNT" -eq 0 ]; then
     if [ "$DIFF_MODE" -eq 1 ]; then
-        echo "no odin or argcv C/C++ sources changed vs $DIFF_BASE"
+        echo "no odin, argcv, or ipsw C/C++ sources changed vs $DIFF_BASE"
     else
-        echo "no C/C++ sources found under odin/ or argcv/"
+        echo "no C/C++ sources found under odin/, argcv/, or ipsw/"
     fi
     exit 0
 fi
