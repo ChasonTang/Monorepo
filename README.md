@@ -70,6 +70,16 @@ Set via `--args=` on `gn gen`. See `build/BUILDCONFIG.gn`.
 | `target_cpu`         | host    | `x64` or `arm64` depending on target OS/environment.             |
 | `target_environment` | `""`    | For `ios`: `device` or `simulator`.                             |
 
+## Language Standards
+
+Without an explicit `-std=`, the bundled Clang defaults to GNU C17 (`gnu17`)
+for C and GNU C++17 (`gnu++17`) for C++. The top-level GN configuration does
+not set a global language standard, so ordinary targets inherit these defaults.
+
+The `//build:cxx23` config in [build/BUILD.gn](build/BUILD.gn) sets
+`-std=c++23` for targets that require C++23. The libc++ and libc++abi targets
+currently use this config.
+
 ## Tests
 
 For a native build, build and run both Odin and argcv test suites from the
