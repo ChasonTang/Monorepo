@@ -10,7 +10,8 @@
 #include <time.h>
 
 #if defined(ODIN_XQC_UDP_TESTING)
-#include "odin/testing/xqc_udp_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/xqc_udp_internal_test.h" // nogncheck
 #endif
 
 struct odin_xqc_udp_t {

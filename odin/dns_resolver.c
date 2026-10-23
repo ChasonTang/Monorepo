@@ -1,7 +1,8 @@
 #include "odin/dns_resolver.h"
 
 #if defined(ODIN_DNS_RESOLVER_TESTING)
-#include "odin/testing/dns_resolver_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/dns_resolver_internal_test.h" // nogncheck
 #endif
 
 #include <ares.h>

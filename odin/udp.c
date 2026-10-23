@@ -8,7 +8,8 @@
 #include <unistd.h>
 
 #if defined(ODIN_UDP_TESTING)
-#include "odin/testing/udp_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/udp_internal_test.h" // nogncheck
 #endif
 
 struct odin_udp_t {

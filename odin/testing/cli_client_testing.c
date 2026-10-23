@@ -1,6 +1,8 @@
 /* odin/testing/cli_client_testing.c */
 
-#include "odin/cli_client.c" // NOLINT(bugprone-suspicious-include)
+// Compiled here with test hooks; do not link the production implementation.
+// NOLINTNEXTLINE(bugprone-suspicious-include)
+#include "odin/cli_client.c" // nogncheck
 
 #include "odin/testing/cli_client_internal_test.h"
 

@@ -81,7 +81,7 @@ case "$BUILD_DIR" in
     *) BUILD_DIR="$REPO_ROOT/$BUILD_DIR" ;;
 esac
 echo "regenerating $BUILD_DIR/compile_commands.json"
-"$GN" gen "$BUILD_DIR" \
+"$GN" gen "$BUILD_DIR" --check \
     --add-export-compile-commands='//argcv/*' \
     --add-export-compile-commands='//odin/*' \
     --add-export-compile-commands='//ipsw/*'

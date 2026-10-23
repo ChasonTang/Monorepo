@@ -1,1 +1,3 @@
-#include "odin/connect_session.c" // NOLINT(bugprone-suspicious-include)
+// Compiled here with test hooks; do not link the production implementation.
+// NOLINTNEXTLINE(bugprone-suspicious-include)
+#include "odin/connect_session.c" // nogncheck

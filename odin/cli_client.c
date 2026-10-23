@@ -21,10 +21,11 @@
 #include "odin/protocol.h"
 
 #if defined(ODIN_CLI_CLIENT_TESTING)
-#include "odin/testing/accept_loop_internal_test.h"
-#include "odin/testing/cli_client_internal_test.h"
-#include "odin/testing/dns_resolver_internal_test.h"
-#include "odin/testing/event_loop_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/accept_loop_internal_test.h"  // nogncheck
+#include "odin/testing/cli_client_internal_test.h"   // nogncheck
+#include "odin/testing/dns_resolver_internal_test.h" // nogncheck
+#include "odin/testing/event_loop_internal_test.h"   // nogncheck
 #endif
 
 #define ODIN_CLI_CLIENT_SIGNAL_POLL_INTERVAL_US 50000u

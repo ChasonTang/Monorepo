@@ -1,7 +1,22 @@
 import("//build/component.gni")
+import("//build/secondary/llvm-project/libcxxabi/headers.gni")
 
 config("libcxxabi_public_config") {
-  include_dirs = [ "//llvm-project/libcxxabi/include" ]
+  # Keep GN's view of standard header search paths aligned with the toolchain.
+  configs = [ "//llvm-project/libcxx:libcxx_config" ]
+}
+
+source_set("headers") {
+  public = libcxxabi_public_headers
+  sources = libcxxabi_private_headers
+  friend = [
+    ":libcxxabi",
+    ":runtime_headers",
+  ]
+  public_configs = [ ":libcxxabi_public_config" ]
+
+  # cxxabi.h uses the C compatibility headers selected by our C++ toolchain.
+  deps = [ "//llvm-project/libcxx:headers" ]
 }
 
 config("libcxxabi_config") {
@@ -18,10 +33,32 @@ config("libcxxabi_config") {
   ]
 }
 
+source_set("runtime_headers") {
+  # Includes macro definition files as well as ordinary implementation headers.
+  public = libcxxabi_runtime_headers
+  visibility = [ ":libcxxabi" ]
+  deps = [
+    ":headers",
+    "//llvm-project/libcxx:headers",
+    "//llvm-project/libcxx:private_headers",
+    "//llvm-project/libcxx:runtime_headers",
+  ]
+  configs += [ ":libcxxabi_config" ]
+}
+
 component("libcxxabi") {
   output_name = "c++abi"
 
-  public_configs = [ ":libcxxabi_public_config" ]
+  public = []
+  public_deps = [ ":headers" ]
+
+  # Use the matching libc++ headers without creating a runtime dependency cycle.
+  deps = [
+    ":runtime_headers",
+    "//llvm-project/libcxx:headers",
+    "//llvm-project/libcxx:private_headers",
+    "//llvm-project/libcxx:runtime_headers",
+  ]
 
   defines = [
     "_LIBCXXABI_BUILDING_LIBRARY",
@@ -45,8 +82,6 @@ component("libcxxabi") {
     "//llvm-project/libcxxabi/src/stdlib_stdexcept.cpp",
     "//llvm-project/libcxxabi/src/stdlib_typeinfo.cpp",
   ]
-
-  public = [ "//llvm-project/libcxxabi/include/cxxabi.h" ]
 
   if (current_os == "linux") {
     sources += [ "//llvm-project/libcxxabi/src/cxa_thread_atexit.cpp" ]

@@ -29,7 +29,8 @@
 #include "odin/transport_fd.h"
 
 #if defined(ODIN_SERVER_SESSION_TESTING)
-#include "odin/testing/server_session_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/server_session_internal_test.h" // nogncheck
 #endif
 
 enum {

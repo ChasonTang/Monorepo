@@ -28,7 +28,8 @@
 #include <unistd.h>
 
 #if defined(ODIN_ACCEPT_LOOP_TESTING)
-#include "odin/testing/accept_loop_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/accept_loop_internal_test.h" // nogncheck
 #endif
 
 struct odin_accept_loop_t {

@@ -9,7 +9,8 @@
 #include <sys/types.h>
 
 #if defined(ODIN_TRANSPORT_XQC_TESTING)
-#include "odin/testing/transport_xqc_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/transport_xqc_internal_test.h" // nogncheck
 #endif
 
 typedef struct odin_xqc_stream_transport_t {

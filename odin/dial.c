@@ -20,11 +20,12 @@
 #include <unistd.h>
 
 #if defined(ODIN_DIAL_TESTING)
-#include "odin/testing/dial_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/dial_internal_test.h" // nogncheck
 #endif
 
 #if defined(ODIN_DIAL_TESTING) && defined(ODIN_CLI_SERVER_TESTING)
-#include "odin/testing/cli_server_internal_test.h"
+#include "odin/testing/cli_server_internal_test.h" // nogncheck
 #endif
 
 /* Internal state (§3.2.2). Exactly one of {io, timer} is registered at a time;

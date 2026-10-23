@@ -16,8 +16,9 @@
 #include "odin/transport_fd.h"
 
 #if defined(ODIN_CLIENT_SESSION_TESTING)
-#include "odin/testing/client_session_internal_test.h"
-#include "odin/testing/event_loop_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/client_session_internal_test.h" // nogncheck
+#include "odin/testing/event_loop_internal_test.h"     // nogncheck
 
 static int g_client_session_fail_next_create_errno;
 static int g_client_session_fail_next_downstream_transport_create_errno;

@@ -16,7 +16,8 @@
 #include <unistd.h>
 
 #if defined(ODIN_TRANSPORT_FD_TESTING)
-#include "odin/testing/transport_fd_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/transport_fd_internal_test.h" // nogncheck
 #endif
 
 /* Internal state (§3.2.2). base is first so the cast in every slot is valid; fd

@@ -1,7 +1,8 @@
 #include "odin/event_loop.h"
 
 #if defined(ODIN_EVENT_LOOP_TESTING)
-#include "odin/testing/event_loop_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/event_loop_internal_test.h" // nogncheck
 #endif
 
 #include <assert.h>

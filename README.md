@@ -8,7 +8,7 @@ A C/C++ monorepo built with GN + Ninja.
 git submodule update --init --recursive
 ./sync_tools.sh                           # gn, ninja, clang, cfssl → ./tool/
 ./extract_sdk.sh                          # macOS + iOS SDKs from installed Xcode (see below)
-./tool/gn gen out
+./tool/gn gen out --check
 ./tool/ninja -C out
 ```
 
@@ -51,11 +51,11 @@ every supported target — mac↔mac and mac→linux/iOS. Switching arch/OS is j
   builtins. The toolchain disables unwind libraries with `-unwindlib=none`.
 
 ```bash
-./tool/gn gen out/mac_arm64  --args='target_cpu="arm64"'                  # Apple Silicon
-./tool/gn gen out/mac_x64    --args='target_cpu="x64"'                    # Intel mac
-./tool/gn gen out/linux_x64  --args='target_os="linux" target_cpu="x64"'  # Linux (sysroot first)
-./tool/gn gen out/ios_device --args='target_os="ios" target_environment="device" target_cpu="arm64"'
-./tool/gn gen out/ios_sim    --args='target_os="ios" target_environment="simulator" target_cpu="arm64"'
+./tool/gn gen out/mac_arm64  --check --args='target_cpu="arm64"'                  # Apple Silicon
+./tool/gn gen out/mac_x64    --check --args='target_cpu="x64"'                    # Intel mac
+./tool/gn gen out/linux_x64  --check --args='target_os="linux" target_cpu="x64"'  # Linux (sysroot first)
+./tool/gn gen out/ios_device --check --args='target_os="ios" target_environment="device" target_cpu="arm64"'
+./tool/gn gen out/ios_sim    --check --args='target_os="ios" target_environment="simulator" target_cpu="arm64"'
 ```
 
 ## Build Arguments
@@ -80,13 +80,45 @@ The `//build:cxx23` config in [build/BUILD.gn](build/BUILD.gn) sets
 `-std=c++23` for targets that require C++23. The libc++ and libc++abi targets
 currently use this config.
 
+## Standard Library Headers
+
+The `//llvm-project/libcxx` and `//llvm-project/libcxxabi` runtime targets export
+their public headers through separate `:headers` targets. Depend on the runtime
+targets when linking C++ code; the header targets alone do not link a runtime.
+The ABI implementation can use libc++ headers without depending on the libc++
+binary, so the runtime dependency graph remains acyclic.
+
+The checked-in `build/secondary/llvm-project/{libcxx,libcxxabi}/headers.gni`
+inventories register public API headers, internal headers, and runtime support
+headers. libc++ uses the checked-out upstream `header_information.py` to classify
+its API; local `__config_site` and `__assertion_handler` headers are included too.
+Private header targets have restricted visibility and are not re-exported to
+consumers. GN cannot list extensionless internal headers in a source set's
+`sources`, so libc++ registers them in `public` on a restricted private
+dependency. This does not make them accessible to consumers. libc++abi's private
+configuration header uses explicit `friend` permissions for its implementation
+targets.
+
+After updating the LLVM submodule, regenerate and commit both inventories:
+
+```bash
+python3 build/secondary/llvm-project/update_headers.py
+python3 build/secondary/llvm-project/update_headers.py --check
+./tool/gn gen out --check
+./tool/gn check out '//llvm-project/*'
+```
+
+`--check` reports stale inventories without writing files. Inventory generation
+uses the repository's `./tool/gn` formatter; run `./sync_tools.sh` first if needed.
+Normal GN generation reads the inventories without scanning the LLVM tree.
+
 ## Tests
 
 For a native build, build and run both Odin and argcv test suites from the
 repository root:
 
 ```bash
-./tool/gn gen out
+./tool/gn gen out --check
 ./tool/ninja -C out tests
 ./out/odin_unittests
 ./out/argcv_unittests
@@ -97,6 +129,29 @@ test certificates through `//thor:odin_test_certs` under
 `out/gen/thor/odin_test_certs/`.
 
 ## Formatting and Static Analysis
+
+Check header dependencies when generating build files, or check an existing
+build directory without regenerating it:
+
+```bash
+./tool/gn gen out --check
+./tool/gn check out
+```
+
+The `.gn` file selects all targets under `argcv/`, `odin/`, and `ipsw/`,
+including their tests, that exist in the selected build configuration. It
+checks both quoted and angle-bracket includes against the GN dependency graph.
+Third-party targets are not checked themselves, but includes from project code
+into their declared headers are checked.
+
+The repository root is already on every native target's default include path;
+use paths such as `"argcv/argcv.h"` without a per-component include config.
+Declare target dependencies with `deps`, use `public_deps` when consumers need
+the dependency's headers, and list exported headers in `public`. List private
+headers in `sources`: GN ignores included files that are not known to the build.
+GN does not evaluate preprocessor guards; test-only conditional includes and
+test wrappers that compile a production `.c` file use documented, per-include
+`nogncheck` annotations rather than disabling checks for a target.
 
 The scripts cover `argcv/`, `odin/`, and `ipsw/`, using the bundled tools and
 repository-root `.clang-format` and `.clang-tidy` rules.
@@ -112,7 +167,9 @@ JOBS=4 BUILD_DIR=out ./tidy.sh # set parallelism and build directory
 relative to the repository root.
 
 `--staged` checks working-tree contents; run a full check after shared header
-changes. Tidy skips files outside the selected build configuration.
+changes. Before analyzing selected files, Tidy runs GN's header check for all
+configured project targets. Tidy skips files outside the selected build
+configuration.
 
 ## Layout
 
@@ -137,3 +194,6 @@ Create `your_component/BUILD.gn` with a target, then add it to the root
 `BUILD.gn`'s `default` group. Use `component()` (from
 `//build/component.gni`) for libraries that should be `shared_library` in
 debug and `source_set` in release.
+
+Add the component's `//your_component/*` pattern to `check_targets` in `.gn`
+so its sources and tests participate in the default header dependency check.

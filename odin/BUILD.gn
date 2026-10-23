@@ -1,7 +1,8 @@
 # odin GN build (RFC-001 codec + RFC-002 single-binary CLI skeleton).
 #
 # Targets:
-#   :odin                — source_set: codec (RFC-001) + CLI parser (RFC-002).
+#   :odin                — CLI parser/entry point plus production runtimes.
+#   :odin_core           — protocol/helpers and shared CLI declarations.
 #   :odin_main           — executable wrapping odin_cli_main; output_name is
 #                          "odin" so the produced binary is out/odin. (Named
 #                          :odin_main because :odin already labels the
@@ -18,30 +19,36 @@
 # and :odin_event_loop_testing).
 
 source_set("odin_core") {
-  sources = [
-    "cli.c",
+  public = [
     "cli.h",
-    "client_listen.c",
     "client_listen.h",
-    "host_addr.c",
     "host_addr.h",
-    "http_connect.c",
     "http_connect.h",
-    "parse_util.c",
     "parse_util.h",
-    "protocol.c",
     "protocol.h",
+  ]
+  sources = [
+    "client_listen.c",
+    "host_addr.c",
+    "http_connect.c",
+    "parse_util.c",
+    "protocol.c",
   ]
 }
 
 source_set("odin") {
+  # cli.c dispatches to the client/server runtimes, which themselves depend on
+  # odin_core. Keep the entry point above those runtimes to avoid a cycle.
+  sources = [ "cli.c" ]
+  public = []
+  public_deps = [ ":odin_core" ]
+
   deps = [
     ":odin_accept_loop",
     ":odin_cli_client",
     ":odin_cli_server",
     ":odin_client_xqc_runtime",
     ":odin_connect_session",
-    ":odin_core",
     ":odin_dial",
     ":odin_dns_resolver",
     ":odin_event_loop",
@@ -57,10 +64,8 @@ source_set("odin") {
 }
 
 source_set("odin_cli_client") {
-  sources = [
-    "cli_client.c",
-    "cli_client.h",
-  ]
+  public = [ "cli_client.h" ]
+  sources = [ "cli_client.c" ]
 
   public_deps = [
     ":odin_accept_loop",
@@ -72,10 +77,8 @@ source_set("odin_cli_client") {
 }
 
 source_set("odin_client_session") {
-  sources = [
-    "client_session.c",
-    "client_session.h",
-  ]
+  public = [ "client_session.h" ]
+  sources = [ "client_session.c" ]
 
   public_deps = [
     ":odin_connect_session",
@@ -88,10 +91,8 @@ source_set("odin_client_session") {
 }
 
 source_set("odin_client_xqc_runtime") {
-  sources = [
-    "client_xqc_runtime.c",
-    "client_xqc_runtime.h",
-  ]
+  public = [ "client_xqc_runtime.h" ]
+  sources = [ "client_xqc_runtime.c" ]
 
   public_deps = [
     ":odin_client_session",
@@ -104,10 +105,8 @@ source_set("odin_client_xqc_runtime") {
 }
 
 source_set("odin_cli_server") {
-  sources = [
-    "cli_server.c",
-    "cli_server.h",
-  ]
+  public = [ "cli_server.h" ]
+  sources = [ "cli_server.c" ]
 
   public_deps = [
     ":odin_core",
@@ -117,10 +116,8 @@ source_set("odin_cli_server") {
 }
 
 source_set("odin_event_loop") {
-  sources = [
-    "event_loop.c",
-    "event_loop.h",
-  ]
+  public = [ "event_loop.h" ]
+  sources = [ "event_loop.c" ]
 
   if (target_os == "linux") {
     libs = [ "pthread" ]
@@ -128,10 +125,8 @@ source_set("odin_event_loop") {
 }
 
 source_set("odin_dns_resolver") {
-  sources = [
-    "dns_resolver.c",
-    "dns_resolver.h",
-  ]
+  public = [ "dns_resolver.h" ]
+  sources = [ "dns_resolver.c" ]
 
   public_deps = [
     ":odin_event_loop",
@@ -140,28 +135,22 @@ source_set("odin_dns_resolver") {
 }
 
 source_set("odin_udp") {
-  sources = [
-    "udp.c",
-    "udp.h",
-  ]
+  public = [ "udp.h" ]
+  sources = [ "udp.c" ]
 
   public_deps = [ ":odin_event_loop" ]
 }
 
 source_set("odin_relay") {
-  sources = [
-    "relay.c",
-    "relay.h",
-  ]
+  public = [ "relay.h" ]
+  sources = [ "relay.c" ]
 
   public_deps = [ ":odin_transport" ]
 }
 
 source_set("odin_server_session") {
-  sources = [
-    "server_session.c",
-    "server_session.h",
-  ]
+  public = [ "server_session.h" ]
+  sources = [ "server_session.c" ]
 
   public_deps = [
     ":odin_connect_session",
@@ -175,10 +164,8 @@ source_set("odin_server_session") {
 }
 
 source_set("odin_server_xqc_runtime") {
-  sources = [
-    "server_xqc_runtime.c",
-    "server_xqc_runtime.h",
-  ]
+  public = [ "server_xqc_runtime.h" ]
+  sources = [ "server_xqc_runtime.c" ]
 
   public_deps = [
     ":odin_event_loop",
@@ -190,10 +177,8 @@ source_set("odin_server_xqc_runtime") {
 }
 
 source_set("odin_connect_session") {
-  sources = [
-    "connect_session.c",
-    "connect_session.h",
-  ]
+  public = [ "connect_session.h" ]
+  sources = [ "connect_session.c" ]
 
   public_deps = [
     ":odin_core",
@@ -202,35 +187,27 @@ source_set("odin_connect_session") {
 }
 
 source_set("odin_dial") {
-  sources = [
-    "dial.c",
-    "dial.h",
-  ]
+  public = [ "dial.h" ]
+  sources = [ "dial.c" ]
 
   public_deps = [ ":odin_event_loop" ]
 }
 
 source_set("odin_accept_loop") {
-  sources = [
-    "accept_loop.c",
-    "accept_loop.h",
-  ]
+  public = [ "accept_loop.h" ]
+  sources = [ "accept_loop.c" ]
 
   public_deps = [ ":odin_event_loop" ]
 }
 
 source_set("odin_transport") {
-  sources = [
-    "transport.c",
-    "transport.h",
-  ]
+  public = [ "transport.h" ]
+  sources = [ "transport.c" ]
 }
 
 source_set("odin_transport_fd") {
-  sources = [
-    "transport_fd.c",
-    "transport_fd.h",
-  ]
+  public = [ "transport_fd.h" ]
+  sources = [ "transport_fd.c" ]
 
   public_deps = [
     ":odin_event_loop",
@@ -239,10 +216,8 @@ source_set("odin_transport_fd") {
 }
 
 source_set("odin_transport_xqc") {
-  sources = [
-    "transport_xqc.c",
-    "transport_xqc.h",
-  ]
+  public = [ "transport_xqc.h" ]
+  sources = [ "transport_xqc.c" ]
 
   public_deps = [
     ":odin_transport",
@@ -251,10 +226,8 @@ source_set("odin_transport_xqc") {
 }
 
 source_set("odin_xqc_udp") {
-  sources = [
-    "xqc_udp.c",
-    "xqc_udp.h",
-  ]
+  public = [ "xqc_udp.h" ]
+  sources = [ "xqc_udp.c" ]
 
   public_deps = [
     ":odin_event_loop",

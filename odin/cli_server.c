@@ -25,7 +25,8 @@
 #include "odin/server_xqc_runtime.h"
 
 #if defined(ODIN_CLI_SERVER_TESTING)
-#include "odin/testing/cli_server_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/cli_server_internal_test.h" // nogncheck
 #endif
 
 #define ODIN_CLI_SERVER_SIGNAL_POLL_INTERVAL_US 50000u

@@ -1,6 +1,9 @@
 import("//build/component.gni")
+import("//build/secondary/llvm-project/libcxx/headers.gni")
 
 config("libcxx_config") {
+  # Mirror the C++ toolchain's search roots for GN's checker. Finding a header
+  # still requires a dependency on its owning target before it may be included.
   include_dirs = [
     "//build/secondary/llvm-project/libcxx/config",
     "//llvm-project/libcxx/include",
@@ -17,8 +20,54 @@ config("llvm_libc_shared_headers") {
   defines = [ "LIBC_NAMESPACE=__llvm_libc_monorepo" ]
 }
 
+# Public and implementation headers reference each other. Keep that header-only
+# relationship separate from the runtime dependency on libc++abi.
+source_set("headers") {
+  public = libcxx_public_headers
+  public_configs = [ ":libcxx_config" ]
+  deps = [ ":private_headers" ]
+  allow_circular_includes_from = [ ":private_headers" ]
+}
+
+# GN cannot compile extensionless headers listed in sources. Register them in
+# public on a restricted target instead; :headers does not re-export this target.
+source_set("private_headers") {
+  public = libcxx_private_headers
+  visibility = [
+    ":headers",
+    ":libcxx",
+    ":runtime_headers",
+    "//llvm-project/libcxxabi",
+    "//llvm-project/libcxxabi:runtime_headers",
+  ]
+  configs += [ ":libcxx_config" ]
+}
+
+source_set("runtime_headers") {
+  public = libcxx_runtime_headers
+  visibility = [
+    ":libcxx",
+    "//llvm-project/libcxxabi",
+    "//llvm-project/libcxxabi:runtime_headers",
+  ]
+  configs += [
+    ":src_include",
+    ":llvm_libc_shared_headers",
+  ]
+
+  # Only runtime support headers use the ABI API. Keep this dependency out of
+  # :headers, since the ABI API itself uses libc++'s C compatibility headers.
+  deps = [
+    ":headers",
+    ":private_headers",
+    "//llvm-project/libcxxabi:headers",
+  ]
+}
+
 component("libcxx") {
   output_name = "c++"
+  public = []
+  public_deps = [ ":headers" ]
 
   sources = [
     "//llvm-project/libcxx/src/algorithm.cpp",
@@ -77,11 +126,10 @@ component("libcxx") {
     "//llvm-project/libcxx/src/verbose_abort.cpp",
   ]
 
-  deps = [ "//llvm-project/libcxxabi" ]
-
-  public_configs = [
-    ":libcxx_config",
-    "//llvm-project/libcxxabi:libcxxabi_public_config",
+  deps = [
+    ":private_headers",
+    ":runtime_headers",
+    "//llvm-project/libcxxabi",
   ]
 
   defines = [
@@ -102,7 +150,6 @@ component("libcxx") {
   configs += [
     "//build:cxx23",
     ":src_include",
-    ":libcxx_config",
     ":llvm_libc_shared_headers",
   ]
 }

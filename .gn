@@ -6,8 +6,16 @@ buildconfig = "//build/BUILDCONFIG.gn"
 # in the source tree, e.g. for third party source trees.
 secondary_source = "//build/secondary/"
 
-# These are the targets to check when running "gn check".
-check_targets = []
+# Check first-party code, including tests, with "gn check" or "gn gen --check".
+# Third-party sources keep their upstream layout and are not checked themselves.
+check_targets = [
+  "//argcv/*",
+  "//odin/*",
+  "//ipsw/*",
+]
+
+# Also validate dependencies included with <angle brackets> (e.g. gtest).
+check_system_includes = true
 
 # Run all GN action() scripts through python3. Without this, GN would search
 # $PATH for "python", which is absent on systems that ship only python3.

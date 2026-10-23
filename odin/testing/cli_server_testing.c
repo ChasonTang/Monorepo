@@ -6,7 +6,9 @@
  * progress, and dial-start probe state directly.
  */
 
-#include "odin/cli_server.c" // NOLINT(bugprone-suspicious-include)
+// Compiled here with test hooks; do not link the production implementation.
+// NOLINTNEXTLINE(bugprone-suspicious-include)
+#include "odin/cli_server.c" // nogncheck
 
 #include "odin/testing/cli_server_internal_test.h"
 

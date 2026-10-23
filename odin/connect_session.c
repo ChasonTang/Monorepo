@@ -22,7 +22,8 @@
 #include "odin/transport.h"
 
 #if defined(ODIN_CONNECT_SESSION_TESTING)
-#include "odin/testing/connect_session_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/connect_session_internal_test.h" // nogncheck
 #endif
 
 enum odin_connect_session_mode_t {

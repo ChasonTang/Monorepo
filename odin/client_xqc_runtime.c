@@ -20,7 +20,8 @@
 #include "odin/transport_xqc.h"
 
 #if defined(ODIN_XQC_CLIENT_RUNTIME_TESTING)
-#include "odin/testing/client_xqc_runtime_internal_test.h"
+// GN does not evaluate this test-only preprocessor guard.
+#include "odin/testing/client_xqc_runtime_internal_test.h" // nogncheck
 #endif
 
 typedef struct odin_xqc_client_pending_fd_t odin_xqc_client_pending_fd_t;
