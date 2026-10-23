@@ -16,13 +16,10 @@ config("boringssl_config") {
 
 component("crypto") {
   public_configs = [ ":boringssl_public_config" ]
-  public_deps = [
-    "//llvm-project/libcxx",
-    "//llvm-project/libcxxabi",
-  ]
 
   configs += [
     ":boringssl_config",
+    "//build:cxx_stdlib",
     "//build:no_unused_parameter",
   ]
 
@@ -671,13 +668,10 @@ component("crypto") {
 
 component("ssl") {
   public_configs = [ ":boringssl_public_config" ]
-  public_deps = [
-    "//llvm-project/libcxx",
-    "//llvm-project/libcxxabi",
-  ]
 
   configs += [
     ":boringssl_config",
+    "//build:cxx_stdlib",
     "//build:no_unused_parameter",
   ]
 

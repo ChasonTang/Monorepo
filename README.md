@@ -39,16 +39,32 @@ One bundled LLVM toolchain (`./tool/clang`, mac-amd64 or mac-arm64) drives
 every supported target — mac↔mac and mac→linux/iOS. Switching arch/OS is just
 `--target=` plus the right platform layer.
 
-- **macOS (x64 / arm64):** the SDK's TBD stubs plus compiler-rt cover the
-  platform layer; libc++ / libc++abi are built from the matching
-  `llvm-project` checkout via `component()`.
+- **macOS (x64 / arm64):** use the target SDK's libc++ headers and TBD stubs
+  to link system libc++. Minimum deployment versions are 10.15 for x64 and
+  11.0 for arm64.
 - **iOS device / simulator:** `iPhoneOS.sdk` / `iPhoneSimulator.sdk` supply the
-  platform stubs; libc++ / libc++abi come from the same source-built runtime
-  components instead of the SDK `libc++.tbd`.
-- **Linux x86_64:** `sync_linux_sysroot.sh` supplies the system layer (libc
-  headers + stub `.so`s); libc++ / libc++abi are built from
-  `llvm-project`, while clang still supplies CRT objects and compiler-rt
-  builtins. The toolchain disables unwind libraries with `-unwindlib=none`.
+  libc++ headers and platform stubs, including `libc++.tbd`, for system libc++.
+  The minimum deployment version remains iOS 15.0.
+- **Linux x86_64:** `sync_linux_sysroot.sh` supplies the Debian bullseye
+  system layer, including GCC 10 libstdc++ headers and libraries. Clang
+  discovers the generic, multiarch and backward headers in that sysroot
+  with `-stdlib=libstdc++`; linking uses its libgcc unwinder via
+  `-unwindlib=libgcc`.
+
+All executable and shared-library links use `clang++ -nostdlib++` with LLD.
+Targets explicitly select their C++ standard library through
+`//build:cxx_stdlib`, while the C++ driver retains platform math library and
+sanitizer runtime selection. C and assembly compilation still use `clang`;
+C++ and Objective-C++ use `clang++`.
+
+The pinned Fuchsia Clang defaults to compiler-rt builtins, so the build leaves
+`-rtlib` unset. This is a default of this toolchain distribution, not a promise
+about every Clang installation. Compiler builtins, the C++ standard library,
+and the exception unwinder are separate runtime choices.
+
+The bundled macOS ASan dylib declares macOS 11.0 as its minimum version, so
+LLD warns when linking it for the x64 10.15 deployment target. This existing
+toolchain runtime constraint does not change the deployment targets above.
 
 ```bash
 ./tool/gn gen out/mac_arm64  --check --args='target_cpu="arm64"'                  # Apple Silicon
@@ -76,41 +92,38 @@ Without an explicit `-std=`, the bundled Clang defaults to GNU C17 (`gnu17`)
 for C and GNU C++17 (`gnu++17`) for C++. The top-level GN configuration does
 not set a global language standard, so ordinary targets inherit these defaults.
 
-The `//build:cxx23` config in [build/BUILD.gn](build/BUILD.gn) sets
-`-std=c++23` for targets that require C++23. The libc++ and libc++abi targets
-currently use this config.
+Available standard-library features depend on the target SDK / sysroot version,
+independently of which language-standard flags Clang accepts. In particular,
+Linux's GCC 10 libstdc++ does not provide a complete C++23 standard library.
 
-## Standard Library Headers
+## C++ Standard Library
 
-The `//llvm-project/libcxx` and `//llvm-project/libcxxabi` runtime targets export
-their public headers through separate `:headers` targets. Depend on the runtime
-targets when linking C++ code; the header targets alone do not link a runtime.
-The ABI implementation can use libc++ headers without depending on the libc++
-binary, so the runtime dependency graph remains acyclic.
+Every target containing C++ or Objective-C++ sources, including mixed C/C++
+targets and test entry points, must explicitly add `//build:cxx_stdlib`:
 
-The checked-in `build/secondary/llvm-project/{libcxx,libcxxabi}/headers.gni`
-inventories register public API headers, internal headers, and runtime support
-headers. libc++ uses the checked-out upstream `header_information.py` to classify
-its API; local `__config_site` and `__assertion_handler` headers are included too.
-Private header targets have restricted visibility and are not re-exported to
-consumers. GN cannot list extensionless internal headers in a source set's
-`sources`, so libc++ registers them in `public` on a restricted private
-dependency. This does not make them accessible to consumers. libc++abi's private
-configuration header uses explicit `friend` permissions for its implementation
-targets.
-
-After updating the LLVM submodule, regenerate and commit both inventories:
-
-```bash
-python3 build/secondary/llvm-project/update_headers.py
-python3 build/secondary/llvm-project/update_headers.py --check
-./tool/gn gen out --check
-./tool/gn check out '//llvm-project/*'
+```gn
+source_set("example") {
+  sources = [ "example.cpp" ]
+  configs += [ "//build:cxx_stdlib" ]
+}
 ```
 
-`--check` reports stale inventories without writing files. Inventory generation
-uses the repository's `./tool/gn` formatter; run `./sync_tools.sh` first if needed.
-Normal GN generation reads the inventories without scanning the LLVM tree.
+The config selects `libs = [ "c++" ]` on Apple platforms and
+`libs = [ "stdc++" ]` on Linux using the current toolchain's `current_os`.
+GN propagates these libraries from source sets and static libraries to their
+final link, including pure C consumers of C++ objects. Pure C targets do not
+add this config, and it is not a global default.
+
+Apple C++ / Objective-C++ compilation uses `-nostdinc++` and the selected SDK's
+`usr/include/c++/v1`, with normal API availability checks. Linux uses the
+sysroot's GCC headers without `-nostdinc++`. Neither platform builds its own
+standard library. The existing no-RTTI / no-exceptions defaults still apply.
+
+**Rebuild all C++ artifacts in a fresh output directory after this migration.**
+The previous runtime used `std::__mn`, Apple SDK libc++ uses `std::__1`, and
+Linux now uses libstdc++. Old and new C++ objects or libraries must not be
+mixed. Use a new directory such as `out/system_stdlib/mac_x64_debug` with
+`gn gen --check` and Ninja; do not reuse old C++ build artifacts.
 
 ## Tests
 
@@ -194,6 +207,10 @@ Create `your_component/BUILD.gn` with a target, then add it to the root
 `BUILD.gn`'s `default` group. Use `component()` (from
 `//build/component.gni`) for libraries that should be `shared_library` in
 debug and `source_set` in release.
+
+If the target contains any C++ or Objective-C++ sources, add
+`configs += [ "//build:cxx_stdlib" ]` as shown above, including for static
+libraries and source sets. A pure C target needs only its normal dependencies.
 
 Add the component's `//your_component/*` pattern to `check_targets` in `.gn`
 so its sources and tests participate in the default header dependency check.

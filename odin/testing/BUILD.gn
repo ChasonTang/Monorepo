@@ -108,6 +108,7 @@ source_set("odin_dns_resolver_testing") {
   configs += [
     ":odin_dns_resolver_testing_config",
     ":odin_event_loop_testing_config",
+    "//build:cxx_stdlib",
   ]
 }
 
@@ -216,6 +217,7 @@ executable("odin_unittests") {
     ":odin_transport_xqc_testing_config",
     ":odin_udp_testing_config",
     ":odin_xqc_udp_testing_config",
+    "//build:cxx_stdlib",
   ]
 
   if (target_os == "linux") {

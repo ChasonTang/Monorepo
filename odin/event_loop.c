@@ -134,6 +134,7 @@ static int g_fail_next_backend_create_err;
 #endif
 
 static void assert_owner(odin_event_loop_t *loop) {
+  (void)loop; /* Assertions are compiled out when NDEBUG is defined. */
   assert(loop != NULL);
   assert(pthread_equal(pthread_self(), loop->owner));
 }

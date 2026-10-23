@@ -1,5 +1,6 @@
 executable("argcv_unittests") {
   testonly = true
+  configs += [ "//build:cxx_stdlib" ]
   sources = [
     "argcv_unittests.cpp",
     "value_unittests.cpp",

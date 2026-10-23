@@ -69,12 +69,9 @@ source_set("gtest") {
   testonly = true
 
   public_configs = [ ":gtest_public_config" ]
-  public_deps = [
-    "//llvm-project/libcxx",
-    "//llvm-project/libcxxabi",
-  ]
   configs += [
     ":gtest_internal_config",
+    "//build:cxx_stdlib",
   ]
 
   sources = [
@@ -121,6 +118,7 @@ source_set("gtest_main") {
   public_configs = [ ":gtest_public_config" ]
   configs += [
     ":gtest_internal_config",
+    "//build:cxx_stdlib",
   ]
 
   sources = [ "//googletest/googletest/src/gtest_main.cc" ]
@@ -132,13 +130,10 @@ source_set("gmock") {
   testonly = true
 
   public_configs = [ ":gmock_public_config" ]
-  public_deps = [
-    ":gtest",
-    "//llvm-project/libcxx",
-    "//llvm-project/libcxxabi",
-  ]
+  public_deps = [ ":gtest" ]
   configs += [
     ":gmock_internal_config",
+    "//build:cxx_stdlib",
   ]
 
   sources = [
@@ -168,6 +163,7 @@ source_set("gmock_main") {
   public_configs = [ ":gmock_public_config" ]
   configs += [
     ":gmock_internal_config",
+    "//build:cxx_stdlib",
   ]
 
   sources = [ "//googletest/googlemock/src/gmock_main.cc" ]

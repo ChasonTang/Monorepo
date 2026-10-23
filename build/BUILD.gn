@@ -16,8 +16,14 @@ config("compiler_defaults") {
   ]
 }
 
-config("cxx23") {
-  cflags_cc = [ "-std=c++23" ]
+# Explicitly selected by each target containing C++ or Objective-C++ sources.
+# GN propagates libs from source sets and static libraries to the final link.
+config("cxx_stdlib") {
+  if (current_os == "mac" || current_os == "ios") {
+    libs = [ "c++" ]
+  } else if (current_os == "linux") {
+    libs = [ "stdc++" ]
+  }
 }
 
 # Hidden by default so C++ template / inline symbols don't leak and collide

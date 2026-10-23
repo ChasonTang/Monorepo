@@ -5,13 +5,11 @@
 #   - Apple Mach-O (mac, ios device, ios simulator) — is_apple=true:
 #     ObjC/ObjC++ tools are defined, ld64.lld is driven with @rpath /
 #     @loader_path / @executable_path install names, libc++ comes from the
-#     source-built //llvm-project/libcxx component, no -fPIC needed (Mach-O is
-#     PIC by construction).
+#     target SDK / system, no -fPIC needed (Mach-O is PIC by construction).
 #
 #   - ELF (linux) — is_apple=false:
-#     no ObjC tools, ld.lld is driven with DT_SONAME / $ORIGIN, libc++ /
-#     libc++abi come from source-built llvm-project components, -fPIC is
-#     required for shared objects.
+#     no ObjC tools, ld.lld is driven with DT_SONAME / $ORIGIN, libstdc++ /
+#     libgcc unwinder come from the sysroot, -fPIC is required for shared objects.
 #
 # Invoker variables:
 #   is_apple             — selects family (Mach-O vs ELF) per above.
@@ -44,14 +42,6 @@ template("clang_toolchain") {
 
     prefix = rebase_path("//tool/clang/bin", root_build_dir)
     sysroot = rebase_path(sysroot_path, root_build_dir)
-    libcxx_config_include =
-        rebase_path("//build/secondary/llvm-project/libcxx/config",
-                    root_build_dir)
-    libcxx_include =
-        rebase_path("//llvm-project/libcxx/include", root_build_dir)
-    libcxxabi_include =
-        rebase_path("//llvm-project/libcxxabi/include", root_build_dir)
-    cxx_header_flags = "-nostdinc++ -D_LIBCPP_DISABLE_AVAILABILITY=1 -isystem $libcxx_config_include -isystem $libcxx_include -isystem $libcxxabi_include"
 
     # --target= tells clang which backend / Mach-O slice / ELF machine to
     # emit, and tells the lld driver which slice to pull from any universal
@@ -82,13 +72,13 @@ template("clang_toolchain") {
       # --target= must be in both compile and link flags so the driver picks
       # the right backend and passes -arch + -platform_version to ld64.lld.
       compile_flags = "--target=$target_triple -isysroot $sysroot"
+      cxx_header_flags = "-nostdinc++ -isystem $sysroot/usr/include/c++/v1"
 
       # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld
       # (Xcode's ld64), so the link is fully hermetic and faster.
       # -nostdlib++ suppresses the driver's automatic C++ runtime selection.
-      # Linkable targets that contain C++ depend on //llvm-project/libcxx, so
-      # libc++ / libc++abi enter the graph as normal GN components rather than
-      # as toolchain archives or SDK TBD stubs.
+      # C++ / ObjC++ targets explicitly select the SDK's system libc++ with
+      # //build:cxx_stdlib. Pure C targets do not select a C++ standard library.
       link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
     } else {
       # -fPIC is required for code that ends up in a .so. Mach-O is PIC by
@@ -100,23 +90,28 @@ template("clang_toolchain") {
       # PIC.
       compile_flags = "--target=$target_triple --sysroot=$sysroot -fPIC"
 
+      # Let Clang discover GCC's generic, multiarch and backward headers in
+      # the sysroot, rather than using the toolchain's bundled libc++ headers.
+      cxx_header_flags = "-stdlib=libstdc++"
+
       # -fuse-ld=lld is required, not optional: the bundled Fuchsia clang
       # has CLANG_DEFAULT_LINKER unset, so without it the driver would
       # invoke /usr/bin/ld (ld64 on a macOS host) and refuse the ELF
       # objects.
       #
-      # -nostdlib++ suppresses the driver's bundled libc++.a. -unwindlib=none
-      # prevents it from adding libgcc_s / bundled libunwind; the source-built
-      # libc++abi is configured for no-exceptions and does not need one.
-      # The driver still adds CRT objects, libc, and compiler-rt builtins.
-      link_flags = "$compile_flags -fuse-ld=lld -nostdlib++ -unwindlib=none"
+      # -nostdlib++ suppresses the driver's bundled libc++.a; C++ targets
+      # select sysroot libstdc++ via //build:cxx_stdlib. Use the matching
+      # libgcc unwinder instead of the driver's bundled static libunwind.
+      # This pinned Fuchsia Clang defaults to compiler-rt builtins; leave
+      # -rtlib unset. clang++ still selects platform math and sanitizer libs.
+      link_flags = "$compile_flags -fuse-ld=lld -nostdlib++ -unwindlib=libgcc"
     }
 
     cc = "$prefix/clang"
     cxx = "$prefix/clang++"
     asm = "$prefix/clang"
     ar = "$prefix/llvm-ar"
-    ld = "$prefix/clang"
+    ld = "$prefix/clang++"
 
     tool("cc") {
       depfile = "{{output}}.d"
@@ -254,8 +249,10 @@ template("clang_toolchain") {
 # host-arch (which would silently link into a target-arch dylib).
 clang_toolchain("clang") {
   is_apple = true
-  target_triple_x64 = "x86_64-apple-macos"
-  target_triple_arm64 = "arm64-apple-macos"
+
+  # Pin the deployment floors previously selected implicitly by the driver.
+  target_triple_x64 = "x86_64-apple-macos10.15"
+  target_triple_arm64 = "arm64-apple-macos11.0"
   sysroot_path = "//build/sdk/MacOSX.sdk"
   toolchain_args = {
     current_os = "mac"
