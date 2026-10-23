@@ -529,7 +529,6 @@ static void cleanup_all(cli_client_state_t *state) {
 static int startup_fail(cli_client_state_t *state, FILE *err,
                         const char *step) {
   if (err != NULL) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
     (void)fprintf(err, "odin: client startup failed at %s\n", step);
     (void)fflush(err);
   }
@@ -599,7 +598,6 @@ cli_client_test_prearm_external_fcntl_trigger(cli_client_state_t *state) {
   switch (g_failpoint) {
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR: {
     const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_fcntl(state->accept_loop, F_GETFL,
@@ -608,7 +606,6 @@ cli_client_test_prearm_external_fcntl_trigger(cli_client_state_t *state) {
   }
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR: {
     const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_fcntl(state->accept_loop, F_SETFL,
@@ -636,21 +633,18 @@ static void cli_client_signal_timer_test_branch(odin_event_loop_t *loop,
   switch (g_failpoint) {
   case ODIN_CLI_CLIENT_TEST_FAIL_EVENT_LOOP_RUN: {
     const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_event_loop_test_fail_next_backend_wait(state->loop, err);
     return;
   }
   case ODIN_CLI_CLIENT_TEST_TRIGGER_UNEXPECTED_STOP:
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     odin_event_loop_stop(loop);
     return;
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_ERROR: {
     const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_accept(state->accept_loop, err);
@@ -660,7 +654,6 @@ static void cli_client_signal_timer_test_branch(odin_event_loop_t *loop,
 #if !defined(__linux__)
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_GETFL_ERROR: {
     const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_fcntl(state->accept_loop, F_GETFL,
@@ -670,7 +663,6 @@ static void cli_client_signal_timer_test_branch(odin_event_loop_t *loop,
   }
   case ODIN_CLI_CLIENT_TEST_TRIGGER_ACCEPT_LOOP_FCNTL_SETFL_ERROR: {
     const int err = g_failpoint_errno;
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     g_failpoint = (odin_cli_client_test_failpoint_t)0;
     g_failpoint_errno = 0;
     (void)odin_accept_loop_test_fail_next_fcntl(state->accept_loop, F_SETFL,
@@ -884,13 +876,11 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
   }
 
   if (state.server_display_needs_brackets) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
     (void)fprintf(err,
                   "odin: mode=client transport=quic listen=%u server=[%s]:%u\n",
                   (unsigned)state.actual_port, state.server_host_cstr,
                   (unsigned)state.server_port);
   } else {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
     (void)fprintf(err,
                   "odin: mode=client transport=quic listen=%u server=%s:%u\n",
                   (unsigned)state.actual_port, state.server_host_cstr,
@@ -900,14 +890,12 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
 
   const int run_rc = odin_event_loop_run(state.loop);
   if (state.accept_loop_error_seen) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
     (void)fprintf(err, "odin: client runtime failed at accept_loop\n");
     (void)fflush(err);
     cleanup_all(&state);
     return 1;
   }
   if (run_rc != 0 || !state.shutdown_requested) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
     (void)fprintf(err, "odin: client runtime failed at event_loop_run\n");
     (void)fflush(err);
     cleanup_all(&state);

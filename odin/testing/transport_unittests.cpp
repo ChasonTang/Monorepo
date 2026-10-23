@@ -11,8 +11,6 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
-
 namespace {
 
 // A fake implementation whose six slots record their call and arguments and
@@ -140,5 +138,3 @@ TEST(OdinTransportTest, T1) {
   odin_transport_destroy(nullptr);
   EXPECT_EQ(fake.destroy_calls, 1);
 }
-
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)

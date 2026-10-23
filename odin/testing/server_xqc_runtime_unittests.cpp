@@ -46,8 +46,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage,
-// performance-no-int-to-ptr)
+// NOLINTBEGIN(misc-const-correctness, performance-no-int-to-ptr)
 
 namespace {
 
@@ -551,6 +550,8 @@ void RunUntil(odin_event_loop_t *loop, std::function<bool()> predicate) {
 }
 
 struct UpstreamPeer {
+  // Tests configure the listener and inspect shared state directly.
+  // NOLINTBEGIN(misc-non-private-member-variables-in-classes)
   int lfd = -1;
   std::thread thread;
   std::atomic<bool> accepted{false};
@@ -561,6 +562,7 @@ struct UpstreamPeer {
   std::string tail;
   std::string extra_before_eof;
   int accept_errno = 0;
+  // NOLINTEND(misc-non-private-member-variables-in-classes)
 
   void Start() {
     thread = std::thread([this] {
@@ -2213,5 +2215,4 @@ TEST(OdinXqcServerRuntimeTest, T18) {
   DestroyHarness(&h);
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage,
-// performance-no-int-to-ptr)
+// NOLINTEND(misc-const-correctness, performance-no-int-to-ptr)

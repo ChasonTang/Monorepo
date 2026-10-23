@@ -29,7 +29,7 @@
 
 extern std::string g_test_argv0;
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 namespace {
 
@@ -2005,4 +2005,4 @@ TEST(OdinDnsResolverExecChild, T18CachedSuccessConcurrency) {
   ExpectZeroLiveness();
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)

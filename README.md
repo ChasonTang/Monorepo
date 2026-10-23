@@ -98,30 +98,21 @@ test certificates through `//thor:odin_test_certs` under
 
 ## Formatting and Static Analysis
 
-The repository-root `.clang-format` and `.clang-tidy` provide shared C/C++
-rules. The scripts cover `odin/`, `argcv/`, and `ipsw/`, including their tests,
-using the tools installed by `./sync_tools.sh`.
+The scripts cover `argcv/`, `odin/`, and `ipsw/`, using the bundled tools and
+repository-root `.clang-format` and `.clang-tidy` rules.
 
 ```bash
-./format.sh                                # format all odin, argcv, and ipsw C/C++ files
-./format.sh --diff                         # format changes vs origin/main
-./format.sh --diff HEAD                    # format staged and unstaged changes vs HEAD
-./tidy.sh                                  # analyze all odin, argcv, and ipsw translation units
-./tidy.sh odin/protocol.c argcv/argcv.c      # analyze selected source files
-./tidy.sh ipsw/main.c                      # analyze ipsw (macOS builds only)
-./tidy.sh --staged                         # analyze staged source/header changes
-JOBS=4 BUILD_DIR=out ./tidy.sh              # set parallelism and build directory
+./format.sh                  # format all project C/C++ files in place
+./tidy.sh --staged            # check staged changes
+./tidy.sh                     # check all project sources in the selected build
+JOBS=4 BUILD_DIR=out ./tidy.sh # set parallelism and build directory
 ```
 
-`tidy.sh` regenerates the GN compilation database for all three projects on every
-run. In staged mode, it analyzes the working-tree versions of staged sources;
-staged headers select sibling `.c`, `.cc`, or `.cpp` files with the same
-basename. Run without `--staged` to cover all translation units after changing
-shared headers. `odin/testing/.clang-tidy` inherits the shared rules and keeps
-its test-only override. `ipsw/` uses the shared formatting rules and is analyzed
-only when its macOS target is enabled in the selected build. Other builds skip
-it during full and staged runs; explicitly selecting an `ipsw/` source requires
-a macOS build directory.
+`JOBS` defaults to the logical CPU count; `BUILD_DIR` defaults to `out/`
+relative to the repository root.
+
+`--staged` checks working-tree contents; run a full check after shared header
+changes. Tidy skips files outside the selected build configuration.
 
 ## Layout
 

@@ -1,1 +1,4 @@
 BasedOnStyle: LLVM
+
+# Keep clang-tidy suppression directives intact, including long check lists.
+CommentPragmas: '^[[:space:]]*(IWYU pragma:|NOLINT)'

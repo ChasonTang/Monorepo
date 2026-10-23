@@ -26,7 +26,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 namespace {
 
@@ -870,4 +870,4 @@ TEST(OdinUdpTest, T15) {
   });
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)

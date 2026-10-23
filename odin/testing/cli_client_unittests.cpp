@@ -35,7 +35,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 extern std::string g_test_argv0;
 
@@ -2288,4 +2288,4 @@ TEST(OdinRFC032ClientDnsExecChild, T7LibraryInit) {
   EXPECT_EQ(obs.ares_library_init_calls, 1u);
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)

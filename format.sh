@@ -2,39 +2,18 @@
 # Format odin, argcv, and ipsw C/C++ sources in place using
 # ./tool/clang/bin/clang-format and the repository-root .clang-format.
 #
-# Usage:
-#   ./format.sh                # format every odin, argcv, and ipsw C/C++ source
-#   ./format.sh --diff         # format only files changed vs origin/main
-#   ./format.sh --diff HEAD~1  # format only files changed vs HEAD~1
+# Usage: ./format.sh
 
 set -euo pipefail
+
+if [ "$#" -ne 0 ]; then
+    echo "usage: ./format.sh" >&2
+    exit 1
+fi
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 CLANG_FORMAT="$REPO_ROOT/tool/clang/bin/clang-format"
 SOURCE_DIRS=("$REPO_ROOT/odin" "$REPO_ROOT/argcv" "$REPO_ROOT/ipsw")
-
-DIFF_MODE=0
-DIFF_BASE=""
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --diff)
-            DIFF_MODE=1
-            shift
-            if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then
-                DIFF_BASE="$1"
-                shift
-            fi
-            ;;
-        *)
-            echo "error: unknown argument '$1'" >&2
-            exit 1
-            ;;
-    esac
-done
-
-if [ "$DIFF_MODE" -eq 1 ] && [ -z "$DIFF_BASE" ]; then
-    DIFF_BASE="origin/main"
-fi
 
 if [ ! -x "$CLANG_FORMAT" ]; then
     echo "error: $CLANG_FORMAT not found or not executable" >&2
@@ -50,45 +29,20 @@ for dir in "${SOURCE_DIRS[@]}"; do
 done
 
 FILES=()
-if [ "$DIFF_MODE" -eq 1 ]; then
-    if ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$DIFF_BASE" >/dev/null; then
-        echo "error: diff base '$DIFF_BASE' not found in git" >&2
-        exit 1
-    fi
-    echo "collecting odin, argcv, and ipsw changes vs $DIFF_BASE"
-    while IFS= read -r -d '' rel; do
-        case "$rel" in odin/*|argcv/*|ipsw/*) ;; *) continue ;; esac
-        case "$rel" in
-            *.c|*.h|*.cc|*.cpp|*.hpp) ;;
-            *) continue ;;
-        esac
-        abs="$REPO_ROOT/$rel"
-        [ -f "$abs" ] || continue
-        FILES+=("$abs")
-    done < <(git -C "$REPO_ROOT" diff --name-only -z --diff-filter=ACMRTUB "$DIFF_BASE" -- odin argcv ipsw)
-else
-    while IFS= read -r -d '' f; do
-        FILES+=("$f")
-    done < <(find "${SOURCE_DIRS[@]}" \
-        -type f \
-        \( -name '*.c' -o -name '*.h' -o -name '*.cc' -o -name '*.cpp' -o -name '*.hpp' \) \
-        -print0)
-fi
+while IFS= read -r -d '' f; do
+    FILES+=("$f")
+done < <(find "${SOURCE_DIRS[@]}" \
+    -type f \
+    \( -name '*.c' -o -name '*.h' -o -name '*.cc' -o -name '*.cpp' -o -name '*.hpp' \) \
+    -print0)
 
 COUNT="${#FILES[@]}"
 
 if [ "$COUNT" -eq 0 ]; then
-    if [ "$DIFF_MODE" -eq 1 ]; then
-        echo "no odin, argcv, or ipsw C/C++ sources changed vs $DIFF_BASE"
-    else
-        echo "no C/C++ sources found under odin/, argcv/, or ipsw/"
-    fi
+    echo "no C/C++ sources found under odin/, argcv/, or ipsw/"
     exit 0
 fi
 
-for f in "${FILES[@]}"; do
-    echo "formatting ${f#$REPO_ROOT/}"
-    "$CLANG_FORMAT" -i --style=file "$f"
-done
+"$CLANG_FORMAT" -i --verbose "${FILES[@]}"
 
 echo "done. formatted $COUNT file(s)."

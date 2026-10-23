@@ -45,7 +45,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 extern std::string g_test_argv0;
 
@@ -5030,4 +5030,4 @@ TEST_F(OdinXqcClientRuntimeTest, CaFileT14VerifierAcceptsIntermediateChain) {
 
 } // namespace
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)

@@ -15,7 +15,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 namespace {
 
@@ -1080,4 +1080,4 @@ TEST(OdinEventLoopTest, T27) {
   EXPECT_EQ(after_destroy.task_nodes, 0u);
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)

@@ -11,3 +11,10 @@ Checks: >
   -misc-no-recursion,
   -performance-enum-size
 WarningsAsErrors: '*'
+# Share header diagnostics with direct clang-tidy invocations.
+# Source-file selection is handled by the project entry point.
+HeaderFilterRegex: '(^|/)(argcv|odin|ipsw)/.*'
+
+CheckOptions:
+  # Recommend Annex K alternatives only when the target provides them.
+  'clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling:ReportMode': actionable

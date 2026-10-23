@@ -39,8 +39,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage,
-// performance-no-int-to-ptr)
+// NOLINTBEGIN(misc-const-correctness, performance-no-int-to-ptr)
 
 namespace {
 
@@ -123,6 +122,8 @@ struct ContinueRecord {
 };
 
 #if defined(ODIN_XQC_UDP_TESTING)
+// Keep callbacks, state, and actions grouped for test setup.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct FakeXqc {
   xqc_set_event_timer_pt set_event_timer = nullptr;
   xqc_stateless_reset_pt stateless_reset = nullptr;
@@ -163,6 +164,7 @@ struct FakeXqc {
 };
 
 FakeXqc *g_fake = nullptr;
+xqc_usec_t g_caller_clock_value = 0;
 
 xqc_engine_t *FakeEngineCreate(xqc_engine_type_t engine_type,
                                const xqc_config_t *engine_config,
@@ -293,25 +295,22 @@ void ClearFakeXqc() {
   g_fake = nullptr;
 }
 
+// Sentinel callbacks are compared only; creation must replace them before use.
 xqc_engine_callback_t MakeEngineCallbacks() {
   xqc_engine_callback_t cbs;
   std::memset(&cbs, 0, sizeof(cbs));
-  cbs.set_event_timer =
-      reinterpret_cast<xqc_set_event_timer_pt>(reinterpret_cast<void *>(0x1));
+  cbs.set_event_timer = reinterpret_cast<xqc_set_event_timer_pt>(0x1);
   return cbs;
 }
 
 xqc_transport_callbacks_t MakeTransportCallbacks() {
   xqc_transport_callbacks_t cbs;
   std::memset(&cbs, 0, sizeof(cbs));
-  cbs.stateless_reset =
-      reinterpret_cast<xqc_stateless_reset_pt>(reinterpret_cast<void *>(0x2));
-  cbs.write_socket =
-      reinterpret_cast<xqc_socket_write_pt>(reinterpret_cast<void *>(0x3));
-  cbs.write_socket_ex =
-      reinterpret_cast<xqc_socket_write_ex_pt>(reinterpret_cast<void *>(0x4));
+  cbs.stateless_reset = reinterpret_cast<xqc_stateless_reset_pt>(0x2);
+  cbs.write_socket = reinterpret_cast<xqc_socket_write_pt>(0x3);
+  cbs.write_socket_ex = reinterpret_cast<xqc_socket_write_ex_pt>(0x4);
   cbs.conn_send_packet_before_accept =
-      reinterpret_cast<xqc_socket_write_pt>(reinterpret_cast<void *>(0x5));
+      reinterpret_cast<xqc_socket_write_pt>(0x5);
   return cbs;
 }
 
@@ -385,17 +384,15 @@ TEST(OdinXqcUdpTest, T1) {
 
     EXPECT_EQ(fake.engine_create_calls, 1);
     EXPECT_EQ(fake.engine_user_data, odin_xqc_udp_xqc_user_data(xu));
-    EXPECT_NE(fake.set_event_timer, reinterpret_cast<xqc_set_event_timer_pt>(
-                                        reinterpret_cast<void *>(0x1)));
-    EXPECT_NE(fake.stateless_reset, reinterpret_cast<xqc_stateless_reset_pt>(
-                                        reinterpret_cast<void *>(0x2)));
-    EXPECT_NE(fake.write_socket, reinterpret_cast<xqc_socket_write_pt>(
-                                     reinterpret_cast<void *>(0x3)));
-    EXPECT_NE(fake.write_socket_ex, reinterpret_cast<xqc_socket_write_ex_pt>(
-                                        reinterpret_cast<void *>(0x4)));
-    EXPECT_NE(
-        fake.conn_send_packet_before_accept,
-        reinterpret_cast<xqc_socket_write_pt>(reinterpret_cast<void *>(0x5)));
+    EXPECT_NE(fake.set_event_timer,
+              reinterpret_cast<xqc_set_event_timer_pt>(0x1));
+    EXPECT_NE(fake.stateless_reset,
+              reinterpret_cast<xqc_stateless_reset_pt>(0x2));
+    EXPECT_NE(fake.write_socket, reinterpret_cast<xqc_socket_write_pt>(0x3));
+    EXPECT_NE(fake.write_socket_ex,
+              reinterpret_cast<xqc_socket_write_ex_pt>(0x4));
+    EXPECT_NE(fake.conn_send_packet_before_accept,
+              reinterpret_cast<xqc_socket_write_pt>(0x5));
     EXPECT_EQ(odin_xqc_udp_engine(xu), fake.engine_handle);
     EXPECT_EQ(odin_xqc_udp_xqc_user_data(xu), xu);
     EXPECT_EQ(odin_xqc_udp_app_user_data(xu), &test_app_pointer);
@@ -635,7 +632,7 @@ TEST(OdinXqcUdpTest, T5) {
       EXPECT_EQ(wait_rec.macos_kevent.rel_nsec, 500 * 1000);
     } else {
       EXPECT_EQ(wait_rec.linux_timerfd.armed, 1);
-      const int64_t want_ns = 500 * 1000;
+      const int64_t want_ns = 500LL * 1000;
       const int64_t got_ns = wait_rec.linux_timerfd.abs_sec * 1000000000LL +
                              wait_rec.linux_timerfd.abs_nsec - 1000000LL * 1000;
       EXPECT_EQ(got_ns, want_ns);
@@ -1561,7 +1558,6 @@ TEST(OdinXqcUdpTest, T18) {
 TEST(OdinXqcUdpTest, T18) { GTEST_SKIP() << "T18 is macOS-only (kqueue hook)"; }
 #endif
 
-static xqc_usec_t g_caller_clock_value = 0;
 extern "C" xqc_usec_t TestCallerClock(void) { return g_caller_clock_value; }
 
 TEST(OdinXqcUdpTest, T19) {
@@ -1687,5 +1683,4 @@ TEST(OdinXqcUdpTest, T20) {
 
 #endif // ODIN_XQC_UDP_TESTING
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage,
-// performance-no-int-to-ptr)
+// NOLINTEND(misc-const-correctness, performance-no-int-to-ptr)

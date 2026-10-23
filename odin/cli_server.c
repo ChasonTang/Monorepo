@@ -203,7 +203,6 @@ static void cleanup_all(cli_server_state_t *state) {
 
 static int startup_fail_quic(cli_server_state_t *state, FILE *err,
                              const char *step) {
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
   (void)fprintf(err, "odin: quic server startup failed at %s\n", step);
   (void)fflush(err);
   cleanup_all(state);
@@ -334,7 +333,6 @@ static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
     return startup_fail_quic(&state, err, "signal_timer_start");
   }
 
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
   (void)fprintf(err, "odin: mode=server transport=quic listen=%u\n",
                 (unsigned)actual_port);
   (void)fflush(err);

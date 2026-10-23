@@ -30,7 +30,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 namespace {
 
@@ -1111,4 +1111,4 @@ TEST(OdinConnectSessionTest, T27) {
   EXPECT_EQ(done.calls, 0);
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)

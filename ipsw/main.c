@@ -463,7 +463,8 @@ search_dylib_symbol_table(const uint8_t *cache, size_t cache_size,
     } else if (lc->cmd == LC_SEGMENT_64) {
       const struct segment_command_64 *seg =
           (const struct segment_command_64 *)lc;
-      if (strncmp(seg->segname, "__LINKEDIT", 16) == 0) {
+      /* Include the terminator to reject names with a __LINKEDIT prefix. */
+      if (memcmp(seg->segname, "__LINKEDIT", sizeof("__LINKEDIT")) == 0) {
         linkedit_vmaddr = seg->vmaddr;
         linkedit_fileoff = seg->fileoff;
       }
@@ -713,20 +714,26 @@ static const char *strip_leading_underscore(const char *name) {
   return name;
 }
 
+/* Usage and error messages are best-effort; ignore stderr write failures. */
 static void print_usage(const char *prog_name) {
-  fprintf(stderr, "Usage: %s [-v] <dyld_shared_cache_path> <hex_address>\n",
-          prog_name);
-  fprintf(stderr, "\n");
-  fprintf(stderr, "Arguments:\n");
-  fprintf(stderr, "  -v                      Verbose mode (show cache info)\n");
-  fprintf(stderr,
-          "  dyld_shared_cache_path  Path to the dyld shared cache file\n");
-  fprintf(stderr, "  hex_address             Hexadecimal address (with or "
-                  "without 0x prefix)\n");
-  fprintf(stderr, "\n");
-  fprintf(stderr, "Example:\n");
-  fprintf(stderr, "  %s dyld_shared_cache_arm64 0x180028000\n", prog_name);
-  fprintf(stderr, "  %s -v dyld_shared_cache_arm64 0x180028000\n", prog_name);
+  (void)fprintf(stderr,
+                "Usage: %s [-v] <dyld_shared_cache_path> <hex_address>\n",
+                prog_name);
+  (void)fprintf(stderr, "\n");
+  (void)fprintf(stderr, "Arguments:\n");
+  (void)fprintf(stderr,
+                "  -v                      Verbose mode (show cache info)\n");
+  (void)fprintf(
+      stderr, "  dyld_shared_cache_path  Path to the dyld shared cache file\n");
+  (void)fprintf(stderr,
+                "  hex_address             Hexadecimal address (with or "
+                "without 0x prefix)\n");
+  (void)fprintf(stderr, "\n");
+  (void)fprintf(stderr, "Example:\n");
+  (void)fprintf(stderr, "  %s dyld_shared_cache_arm64 0x180028000\n",
+                prog_name);
+  (void)fprintf(stderr, "  %s -v dyld_shared_cache_arm64 0x180028000\n",
+                prog_name);
 }
 
 int main(int argc, const char *argv[]) {
@@ -751,7 +758,8 @@ int main(int argc, const char *argv[]) {
   char *endptr;
   uint64_t target_addr = strtoull(addr_str, &endptr, 16);
   if (*endptr != '\0' || endptr == addr_str) {
-    fprintf(stderr, "Error: Invalid hexadecimal address '%s'\n", addr_str);
+    (void)fprintf(stderr, "Error: Invalid hexadecimal address '%s'\n",
+                  addr_str);
     return 1;
   }
 
@@ -782,7 +790,8 @@ int main(int argc, const char *argv[]) {
 
   /* Verify file is large enough for header */
   if (cache_size < sizeof(struct dyld_cache_header)) {
-    fprintf(stderr, "Error: File too small for dyld shared cache header\n");
+    (void)fprintf(stderr,
+                  "Error: File too small for dyld shared cache header\n");
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -793,8 +802,8 @@ int main(int argc, const char *argv[]) {
 
   /* Check magic - should start with "dyld_v1" */
   if (strncmp(header->magic, "dyld_v1", 7) != 0) {
-    fprintf(stderr, "Error: Invalid dyld shared cache magic: %.16s\n",
-            header->magic);
+    (void)fprintf(stderr, "Error: Invalid dyld shared cache magic: %.16s\n",
+                  header->magic);
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -808,7 +817,7 @@ int main(int argc, const char *argv[]) {
       (size_t)header->mappingCount * sizeof(struct dyld_cache_mapping_info);
   if (header->mappingOffset > cache_size ||
       mappings_size > cache_size - header->mappingOffset) {
-    fprintf(stderr, "Error: Invalid mapping offset or count\n");
+    (void)fprintf(stderr, "Error: Invalid mapping offset or count\n");
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -817,7 +826,7 @@ int main(int argc, const char *argv[]) {
       (size_t)header->imagesCount * sizeof(struct dyld_cache_image_info);
   if (header->imagesOffset > cache_size ||
       images_size > cache_size - header->imagesOffset) {
-    fprintf(stderr, "Error: Invalid images offset or count\n");
+    (void)fprintf(stderr, "Error: Invalid images offset or count\n");
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -832,7 +841,7 @@ int main(int argc, const char *argv[]) {
   for (uint32_t i = 0; i < header->mappingCount; i++) {
     if (mappings[i].fileOffset > cache_size ||
         mappings[i].size > cache_size - mappings[i].fileOffset) {
-      fprintf(stderr, "Error: Mapping %u has invalid file range\n", i);
+      (void)fprintf(stderr, "Error: Mapping %u has invalid file range\n", i);
       munmap((void *)cache, cache_size);
       return 1;
     }
@@ -842,8 +851,8 @@ int main(int argc, const char *argv[]) {
   const struct dyld_cache_accelerator_info *accel_info = get_accelerator_info(
       cache, cache_size, header, mappings, header->mappingCount);
   if (accel_info == NULL) {
-    fprintf(stderr, "Error: This cache lacks accelerator info. "
-                    "Only iOS 9+ / macOS 10.11+ caches are supported.\n");
+    (void)fprintf(stderr, "Error: This cache lacks accelerator info. "
+                          "Only iOS 9+ / macOS 10.11+ caches are supported.\n");
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -879,8 +888,8 @@ int main(int argc, const char *argv[]) {
   /* Check if we at least found the containing dylib */
   if (image_index < 0) {
     /* Address not in any dylib */
-    fprintf(stderr, "Error: Address 0x%llx not found in any dylib\n",
-            (unsigned long long)target_addr);
+    (void)fprintf(stderr, "Error: Address 0x%llx not found in any dylib\n",
+                  (unsigned long long)target_addr);
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -888,7 +897,8 @@ int main(int argc, const char *argv[]) {
   /* Get the dylib path */
   const struct dyld_cache_image_info *image = &images[image_index];
   if (image->pathFileOffset >= cache_size) {
-    fprintf(stderr, "Error: Invalid path offset for image %d\n", image_index);
+    (void)fprintf(stderr, "Error: Invalid path offset for image %d\n",
+                  image_index);
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -899,8 +909,9 @@ int main(int argc, const char *argv[]) {
   size_t max_path_len = cache_size - image->pathFileOffset;
   size_t path_len = strnlen(dylib_path, max_path_len);
   if (path_len == max_path_len) {
-    fprintf(stderr, "Error: Path string not null-terminated for image %d\n",
-            image_index);
+    (void)fprintf(stderr,
+                  "Error: Path string not null-terminated for image %d\n",
+                  image_index);
     munmap((void *)cache, cache_size);
     return 1;
   }
@@ -925,7 +936,7 @@ int main(int argc, const char *argv[]) {
   } else {
     /* No symbol found - fallback to dylib-only output */
     if (local_info == NULL) {
-      fprintf(stderr, "Note: No local symbols available\n");
+      (void)fprintf(stderr, "Note: No local symbols available\n");
     }
 
     /* Calculate offset from dylib's __TEXT base */

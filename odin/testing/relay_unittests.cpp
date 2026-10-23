@@ -41,7 +41,7 @@
 
 #include "gtest/gtest.h"
 
-// NOLINTBEGIN(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTBEGIN(misc-const-correctness)
 
 namespace {
 
@@ -1202,4 +1202,4 @@ TEST(OdinRelayTest, T16) {
   odin_relay_destroy(r);
 }
 
-// NOLINTEND(misc-const-correctness, misc-use-internal-linkage)
+// NOLINTEND(misc-const-correctness)
