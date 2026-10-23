@@ -6,6 +6,8 @@
  * performs no I/O. The status table mapped by `odin_cli_main` is pinned
  * in odin/cli.c.
  *
+ * argv must include a NULL terminator at argv[argc], as provided to main.
+ *
  * Status semantics for odin_cli_parse:
  *   - argc < 1, argv[0] == NULL, or empty basename → ERR_UNKNOWN_MODE;
  *     `*out` is fully zeroed on this path.

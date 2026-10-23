@@ -1786,7 +1786,8 @@ TEST(OdinDnsResolverTest, T17) {
     odin_event_io_t *io = nullptr;
     int fd = -1;
     ASSERT_EQ(odin_dns_resolver_test_first_watch(query, &io, &fd), 0);
-    PushSockState(1, 0);
+    // A reply may advance the next deadline without changing socket interest.
+    PushProcessStatus(ARES_SUCCESS, ARES_FD_EVENT_READ);
     PushTimeoutStep(0, 500000);
     DispatchReady(io, ODIN_EVENT_READ, loop);
     odin_dns_resolver_test_liveness_t live;
@@ -1843,6 +1844,25 @@ TEST(OdinDnsResolverTest, T17) {
     PushProcessStatus(ARES_ENOMEM, 0, true);
     RunLoopUntil(loop, &cb, 1);
     ExpectErrorNoAddresses(cb.records[0], ENOMEM);
+    odin_dns_query_destroy(query);
+    odin_dns_resolver_destroy(resolver);
+    odin_event_loop_destroy(loop);
+    ExpectZeroLiveness();
+
+    ASSERT_EQ(odin_dns_resolver_test_reset_liveness(), 0);
+    BasicLoopResolver(&loop, &resolver, &config);
+    PushTimeoutStep(0, 0);
+    cb = CallbackState();
+    query = StartFixtureQuery(resolver, "timer.test", 80, AF_UNSPEC, &cb);
+    // The first timeout leaves another DNS request pending on the same socket.
+    // No socket-state callback fires, but the next deadline must still be
+    // armed.
+    PushProcessStatus(ARES_SUCCESS, 0, true);
+    PushTimeoutStep(0, 0);
+    PushResultStatus(ARES_ETIMEOUT);
+    RunLoopUntil(loop, &cb, 1);
+    ASSERT_EQ(cb.records.size(), static_cast<size_t>(1));
+    ExpectErrorNoAddresses(cb.records[0], ETIMEDOUT);
     odin_dns_query_destroy(query);
     odin_dns_resolver_destroy(resolver);
     odin_event_loop_destroy(loop);

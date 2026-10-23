@@ -92,19 +92,15 @@ public:
 
   int argc() const { return static_cast<int>(storage_.size()); }
   char *const *argv() { return ptrs_.data(); }
-  char *const *argv_terminated() {
-    if (ptrs_.empty() || ptrs_.back() != nullptr) {
-      ptrs_.push_back(nullptr);
-    }
-    return ptrs_.data();
-  }
 
 private:
   void rebuild_ptrs() {
     ptrs_.clear();
+    ptrs_.reserve(storage_.size() + 1);
     for (auto &s : storage_) {
       ptrs_.push_back(&s[0]);
     }
+    ptrs_.push_back(nullptr);
   }
 
   std::vector<std::string> storage_;

@@ -56,7 +56,6 @@ struct odin_dns_query_t {
   int fatal_pending;
   int fatal_errno;
   int sock_state_dirty;
-  int timeout_dirty;
   int published;
   int completed;
   int destroying;
@@ -795,7 +794,6 @@ static void dns_sock_state_cb(void *data, ares_socket_t socket_fd, int readable,
   }
   watch->desired_events = mask;
   query->sock_state_dirty = 1;
-  query->timeout_dirty = 1;
 }
 
 static void dns_result_cb(void *arg, int status, int timeouts,
@@ -874,7 +872,6 @@ static int refresh_timeout(odin_dns_query_t *query) {
   struct timeval *tvp = dns_ares_timeout(query, NULL, &tv);
   if (tvp == NULL) {
     clear_timeout_timer(query);
-    query->timeout_dirty = 0;
     return 0;
   }
 
@@ -897,7 +894,6 @@ static int refresh_timeout(odin_dns_query_t *query) {
     }
     test_live_timers_add();
   }
-  query->timeout_dirty = 0;
   return 0;
 }
 
@@ -940,7 +936,9 @@ static int after_cares_entrypoint(odin_dns_query_t *query,
     return 0;
   }
 
-  if (query->timeout_dirty && refresh_timeout(query) != 0) {
+  /* A reply or timeout can advance the next deadline without changing socket
+   * interests, e.g. when A and AAAA requests have different deadlines. */
+  if (refresh_timeout(query) != 0) {
     stop_all_watches(query);
     clear_timeout_timer(query);
     if (came_from_start) {

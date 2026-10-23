@@ -170,7 +170,8 @@ odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
        * was a separate argument (--name value, two tokens consumed); for
        * --name and --name=value the option sits at argv[optind - 1]. */
       int tok_idx;
-      if (optarg != NULL && optind >= 2 && optarg == argv[optind - 1]) {
+      if (optarg != NULL && optind >= 2 && optind <= argc &&
+          optarg == argv[optind - 1]) {
         tok_idx = optind - 2;
       } else {
         tok_idx = optind - 1;

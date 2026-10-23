@@ -32,10 +32,8 @@ std::string g_test_argv0;
 
 namespace {
 
-// Owns mutable storage for argv tokens and exposes a NULL-terminable
-// std::vector<char *> to the C API and to execve. No std::string content
-// is mutated after construction; only the pointer vector grows when
-// argv_terminated() appends the NULL.
+// Owns mutable argv tokens and a NULL-terminated pointer vector for both
+// getopt_long and execve. argc() excludes the trailing NULL.
 class MutableArgv {
 public:
   MutableArgv(std::initializer_list<const char *> tokens) {
@@ -53,21 +51,15 @@ public:
 
   int argc() const { return static_cast<int>(storage_.size()); }
   char *const *argv() { return ptrs_.data(); }
-  // execve / posix_spawn want a NULL-terminated vector.
-  char *const *argv_terminated() {
-    if (ptrs_.empty() || ptrs_.back() != nullptr) {
-      ptrs_.push_back(nullptr);
-    }
-    return ptrs_.data();
-  }
 
 private:
   void rebuild_ptrs() {
     ptrs_.clear();
-    ptrs_.reserve(storage_.size());
+    ptrs_.reserve(storage_.size() + 1);
     for (auto &s : storage_) {
       ptrs_.push_back(&s[0]);
     }
+    ptrs_.push_back(nullptr);
   }
 
   std::vector<std::string> storage_;
@@ -216,6 +208,12 @@ TEST(OdinCliTest, T5UnknownFlagPrecedesMissingRequired) {
       {"odin-client", "-x"},
       {"odin-server", "-s", "S"},
       {"odin-client", "-l"},
+      {"odin-client", "--listen"},
+      {"odin-client", "--server"},
+      {"odin-client", "--ca-file"},
+      {"odin-server", "--listen"},
+      {"odin-server", "--quic-cert"},
+      {"odin-server", "--quic-key"},
       {"odin-client", "-l", "8080", "-s", "S", "extra"},
       {"odin-client", "extra"},
       // Abbreviated --listen (unique prefix of an allowed long option).
@@ -234,6 +232,8 @@ TEST(OdinCliTest, T5UnknownFlagPrecedesMissingRequired) {
   for (const auto &tokens : cases) {
     MutableArgv argv(tokens);
     odin_cli_args_t out{};
+    // getopt_long may inspect argv[argc] when an option's value is missing.
+    ASSERT_EQ(argv.argv()[argv.argc()], nullptr);
     ASSERT_EQ(odin_cli_parse(argv.argc(), argv.argv(), &out),
               ODIN_CLI_ERR_UNKNOWN_FLAG);
     EXPECT_EQ(out.listen_port, 0);
@@ -367,7 +367,7 @@ TEST(OdinCliTest, T9SymlinkDispatchExec) {
   ASSERT_NE(pid, -1) << "fork failed: " << std::strerror(errno);
   if (pid == 0) {
     MutableArgv child_argv({client_path.c_str(), "--help"});
-    execve(client_path.c_str(), child_argv.argv_terminated(), environ);
+    execve(client_path.c_str(), child_argv.argv(), environ);
     // execve only returns on failure.
     _exit(127);
   }

@@ -80,10 +80,11 @@ public:
 private:
   void rebuild() {
     ptrs_.clear();
-    ptrs_.reserve(storage_.size());
+    ptrs_.reserve(storage_.size() + 1);
     for (std::string &s : storage_) {
       ptrs_.push_back(&s[0]);
     }
+    ptrs_.push_back(nullptr);
   }
 
   std::vector<std::string> storage_;
