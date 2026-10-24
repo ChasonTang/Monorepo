@@ -72,14 +72,15 @@ template("clang_toolchain") {
       # --target= must be in both compile and link flags so the driver picks
       # the right backend and passes -arch + -platform_version to ld64.lld.
       compile_flags = "--target=$target_triple -isysroot $sysroot"
-      cxx_header_flags = "-nostdinc++ -isystem $sysroot/usr/include/c++/v1"
+      cxx_header_flags =
+          "-stdlib=libc++ -nostdinc++ -isystem $sysroot/usr/include/c++/v1"
 
       # -fuse-ld=lld picks tool/clang/bin/ld64.lld instead of /usr/bin/ld
       # (Xcode's ld64), so the link is fully hermetic and faster.
-      # -nostdlib++ suppresses the driver's automatic C++ runtime selection.
-      # C++ / ObjC++ targets explicitly select the SDK's system libc++ with
-      # //build:cxx_stdlib. Pure C targets do not select a C++ standard library.
-      link_flags = "$compile_flags -fuse-ld=lld -nostdlib++"
+      # Select the SDK's system libc++ for every link. -dead_strip_dylibs
+      # omits unused dynamic libraries, including libc++ for pure C targets.
+      link_flags =
+          "$compile_flags -fuse-ld=lld -stdlib=libc++ -Wl,-dead_strip_dylibs"
     } else {
       # -fPIC is required for code that ends up in a .so. Mach-O is PIC by
       # construction so the Apple toolchains don't need this; ELF defaults
@@ -99,12 +100,14 @@ template("clang_toolchain") {
       # invoke /usr/bin/ld (ld64 on a macOS host) and refuse the ELF
       # objects.
       #
-      # -nostdlib++ suppresses the driver's bundled libc++.a; C++ targets
-      # select sysroot libstdc++ via //build:cxx_stdlib. Use the matching
-      # libgcc unwinder instead of the driver's bundled static libunwind.
+      # Select sysroot libstdc++ at link time too: this Fuchsia Clang
+      # otherwise defaults to its bundled libc++. Use the matching libgcc
+      # unwinder instead of the driver's bundled static libunwind.
       # This pinned Fuchsia Clang defaults to compiler-rt builtins; leave
       # -rtlib unset. clang++ still selects platform math and sanitizer libs.
-      link_flags = "$compile_flags -fuse-ld=lld -nostdlib++ -unwindlib=libgcc"
+      # --as-needed omits unused shared-library dependencies from DT_NEEDED,
+      # including libstdc++ and libm when their symbols are not needed.
+      link_flags = "$compile_flags -fuse-ld=lld -stdlib=libstdc++ -unwindlib=libgcc -Wl,--as-needed"
     }
 
     cc = "$prefix/clang"
@@ -158,7 +161,7 @@ template("clang_toolchain") {
     if (is_apple) {
       # ObjC is a superset of C and ObjC++ a superset of C++, so the C / C++
       # flag streams are inherited too — a config that sets cflags_cc (e.g.
-      # //build:no_rtti / //build:no_exceptions) takes effect on .mm sources
+      # //build:compiler_defaults) takes effect on .mm sources
       # without having to also set cflags_objcc. This matches the convention
       # in Chromium / Flutter engine's mac toolchains.
       #

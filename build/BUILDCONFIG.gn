@@ -55,24 +55,21 @@ if (target_os == "mac" && (target_cpu == "x64" || target_cpu == "arm64")) {
          "iOS device only supports target_cpu=\"arm64\" (got $target_cpu)")
   set_default_toolchain("//build/toolchain:clang_ios_device")
 } else if (target_os == "ios" && target_environment == "simulator") {
-  assert(target_cpu == "arm64" || target_cpu == "x64",
-         "iOS simulator requires target_cpu=\"arm64\" or \"x64\" (got $target_cpu)")
+  assert(
+      target_cpu == "arm64" || target_cpu == "x64",
+      "iOS simulator requires target_cpu=\"arm64\" or \"x64\" (got $target_cpu)")
   set_default_toolchain("//build/toolchain:clang_ios_sim")
 } else if (target_os == "ios") {
-  assert(false,
-         "target_os=\"ios\" requires target_environment=\"device\" or \"simulator\"")
+  assert(
+      false,
+      "target_os=\"ios\" requires target_environment=\"device\" or \"simulator\"")
 } else {
   assert(false,
          "Unsupported target: target_os=$target_os target_cpu=$target_cpu")
 }
 
 # Configs that will be applied to all targets.
-_native_compiler_configs = [
-  "//build:compiler_defaults",
-  "//build:visibility_hidden",
-  "//build:no_rtti",
-  "//build:no_exceptions",
-]
+_native_compiler_configs = [ "//build:compiler_defaults" ]
 
 if (is_debug) {
   _native_compiler_configs += [ "//build:debug" ]

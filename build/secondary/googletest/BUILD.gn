@@ -14,8 +14,8 @@
 # own.
 #
 # RTTI / exceptions: googletest auto-detects via __cpp_rtti / __cpp_exceptions
-# (gtest-port.h), so the project-wide //build:no_rtti / //build:no_exceptions
-# defaults are fine — gtest compiles with GTEST_HAS_RTTI=0 /
+# (gtest-port.h), so the settings in //build:compiler_defaults are fine —
+# gtest compiles with GTEST_HAS_RTTI=0 /
 # GTEST_HAS_EXCEPTIONS=0 and the affected matchers fall back to non-RTTI paths.
 #
 # Linux: gtest uses libm functions in floating-point matchers and pthread in
@@ -69,10 +69,7 @@ source_set("gtest") {
   testonly = true
 
   public_configs = [ ":gtest_public_config" ]
-  configs += [
-    ":gtest_internal_config",
-    "//build:cxx_stdlib",
-  ]
+  configs += [ ":gtest_internal_config" ]
 
   sources = [
     "//googletest/googletest/src/gtest-assertion-result.cc",
@@ -116,10 +113,7 @@ source_set("gtest_main") {
   testonly = true
 
   public_configs = [ ":gtest_public_config" ]
-  configs += [
-    ":gtest_internal_config",
-    "//build:cxx_stdlib",
-  ]
+  configs += [ ":gtest_internal_config" ]
 
   sources = [ "//googletest/googletest/src/gtest_main.cc" ]
 
@@ -131,10 +125,7 @@ source_set("gmock") {
 
   public_configs = [ ":gmock_public_config" ]
   public_deps = [ ":gtest" ]
-  configs += [
-    ":gmock_internal_config",
-    "//build:cxx_stdlib",
-  ]
+  configs += [ ":gmock_internal_config" ]
 
   sources = [
     "//googletest/googlemock/src/gmock-cardinalities.cc",
@@ -161,10 +152,7 @@ source_set("gmock_main") {
   testonly = true
 
   public_configs = [ ":gmock_public_config" ]
-  configs += [
-    ":gmock_internal_config",
-    "//build:cxx_stdlib",
-  ]
+  configs += [ ":gmock_internal_config" ]
 
   sources = [ "//googletest/googlemock/src/gmock_main.cc" ]
 

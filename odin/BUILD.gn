@@ -285,7 +285,6 @@ executable("odin_main") {
   deps = [ ":odin" ]
 
   if (target_os == "linux") {
-    configs -= [ "//build:visibility_hidden" ]
     configs += [ "//build:visibility_default" ]
   }
 }

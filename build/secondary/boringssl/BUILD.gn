@@ -9,9 +9,9 @@ config("boringssl_config") {
     "BORINGSSL_IMPLEMENTATION",
     "BORINGSSL_SHARED_LIBRARY",
   ]
-  # //build:visibility_hidden + //build:no_rtti + //build:no_exceptions are
-  # applied by default via BUILDCONFIG.gn. OPENSSL_EXPORT marks the public API
-  # as visibility("default") so it stays exported under the global hidden default.
+  # //build:compiler_defaults hides symbols and disables RTTI / exceptions.
+  # OPENSSL_EXPORT marks the public API as visibility("default") so it stays
+  # exported under the global hidden default.
 }
 
 component("crypto") {
@@ -19,7 +19,6 @@ component("crypto") {
 
   configs += [
     ":boringssl_config",
-    "//build:cxx_stdlib",
     "//build:no_unused_parameter",
   ]
 
@@ -671,7 +670,6 @@ component("ssl") {
 
   configs += [
     ":boringssl_config",
-    "//build:cxx_stdlib",
     "//build:no_unused_parameter",
   ]
 

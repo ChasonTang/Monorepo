@@ -2,8 +2,9 @@
 
 # Defaults applied to every target via BUILDCONFIG.gn. Aim for the smallest
 # binaries and the smallest surface area exposed across module boundaries;
-# targets that need the opposite remove the default config and add the
-# permissive one (e.g. configs -= [":no_rtti"] configs += [":rtti"]).
+# targets that need the opposite append the corresponding opt-out config
+# (e.g. configs += [ "//build:rtti" ]). Later configs override these flags;
+# flags set directly on a target precede configs in the same flag list.
 config("compiler_defaults") {
   # Monorepo root is always in the include search path so every header is
   # referenced by its full repo-relative path (e.g. "odin/protocol.h").
@@ -13,40 +14,18 @@ config("compiler_defaults") {
     "-Wall",
     "-Wextra",
     "-Werror",
+
+    # Public APIs must be annotated with __attribute__((visibility("default"))).
+    "-fvisibility=hidden",
   ]
-}
 
-# Explicitly selected by each target containing C++ or Objective-C++ sources.
-# GN propagates libs from source sets and static libraries to the final link.
-config("cxx_stdlib") {
-  if (current_os == "mac" || current_os == "ios") {
-    libs = [ "c++" ]
-  } else if (current_os == "linux") {
-    libs = [ "stdc++" ]
-  }
-}
-
-# Hidden by default so C++ template / inline symbols don't leak and collide
-# across modules, and dyld/ld.so see a smaller dynamic symbol table. APIs that
-# must cross module boundaries need
-# __attribute__((visibility("default"))).
-config("visibility_hidden") {
-  cflags = [ "-fvisibility=hidden" ]
-
-  # Also hide inline member functions and template instantiations, otherwise
-  # vtables and inline thunks would still be exported.
-  cflags_cc = [ "-fvisibility-inlines-hidden" ]
-}
-
-# No RTTI: drops typeinfo from the binary and removes cross-dylib RTTI ABI risk.
-config("no_rtti") {
-  cflags_cc = [ "-fno-rtti" ]
-}
-
-# No exceptions: drops .eh_frame / __unwind_info from the binary and removes
-# cross-dylib exception ABI risk.
-config("no_exceptions") {
-  cflags_cc = [ "-fno-exceptions" ]
+  # Also hide inline C++ functions. RTTI and exception handling are opt-in
+  # to reduce binary overhead and keep module interfaces explicit.
+  cflags_cc = [
+    "-fvisibility-inlines-hidden",
+    "-fno-rtti",
+    "-fno-exceptions",
+  ]
 }
 
 config("no_unused_parameter") {
@@ -55,20 +34,20 @@ config("no_unused_parameter") {
 
 # Opt-out: re-enable RTTI for targets that need dynamic_cast / typeid /
 # std::any (rare; mostly imported third-party code).
-# Usage: configs -= [ "//build:no_rtti" ]  configs += [ "//build:rtti" ]
+# Usage: configs += [ "//build:rtti" ]
 config("rtti") {
   cflags_cc = [ "-frtti" ]
 }
 
 # Opt-out: re-enable C++ exceptions for targets that throw / catch.
-# Usage: configs -= [ "//build:no_exceptions" ]  configs += [ "//build:exceptions" ]
+# Usage: configs += [ "//build:exceptions" ]
 config("exceptions") {
   cflags_cc = [ "-fexceptions" ]
 }
 
 # Opt-out: undo hidden visibility for targets whose public API isn't annotated
 # with explicit visibility attributes (typical of imported third-party headers).
-# Usage: configs -= [ "//build:visibility_hidden" ]  configs += [ "//build:visibility_default" ]
+# Usage: configs += [ "//build:visibility_default" ]
 config("visibility_default") {
   cflags = [ "-fvisibility=default" ]
   cflags_cc = [ "-fno-visibility-inlines-hidden" ]
