@@ -142,7 +142,9 @@ template("clang_toolchain") {
 
     tool("alink") {
       rspfile = "{{output}}.rsp"
-      command = "$ar rcs {{output}} @$rspfile"
+
+      # Recreate the archive so removed inputs cannot leave stale members.
+      command = "rm -f {{output}} && $ar rcs {{output}} @$rspfile"
       rspfile_content = "{{inputs}}"
       outputs =
           [ "{{target_out_dir}}/{{target_output_name}}{{output_extension}}" ]
@@ -165,22 +167,24 @@ template("clang_toolchain") {
       # without having to also set cflags_objcc. This matches the convention
       # in Chromium / Flutter engine's mac toolchains.
       #
-      # -fobjc-arc is appended after {{cflags_objc}} / {{cflags_objcc}} so
-      # it wins over any per-target opt-out — ARC is a project-wide policy,
-      # not a knob. Manual retain/release/autorelease in .m/.mm sources will
-      # fail to compile, which is the intended guardrail.
+      # Enable ARC before the per-target flag streams so targets can opt out
+      # with -fno-objc-arc in cflags_objc / cflags_objcc.
       tool("objc") {
         depfile = "{{output}}.d"
-        command = "$cc $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} {{cflags_objc}} -fobjc-arc -c {{source}} -o {{output}}"
+        command = "$cc $compile_flags -fobjc-arc -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_c}} {{cflags_objc}} -c {{source}} -o {{output}}"
         depsformat = "gcc"
-        outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+        outputs = [
+          "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o",
+        ]
       }
 
       tool("objcxx") {
         depfile = "{{output}}.d"
-        command = "$cxx $compile_flags $cxx_header_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -fobjc-arc -c {{source}} -o {{output}}"
+        command = "$cxx $compile_flags $cxx_header_flags -fobjc-arc -MMD -MF $depfile {{defines}} {{include_dirs}} {{cflags}} {{cflags_cc}} {{cflags_objcc}} -c {{source}} -o {{output}}"
         depsformat = "gcc"
-        outputs = [ "{{source_out_dir}}/{{source_name_part}}.o" ]
+        outputs = [
+          "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o",
+        ]
       }
 
       tool("solink") {
@@ -195,7 +199,7 @@ template("clang_toolchain") {
         # -rpath @loader_path lets a dylib find its sibling dylibs in its
         # own directory regardless of which binary loaded it, instead of
         # relying on the consumer's rpath being set up correctly.
-        command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}}"
+        command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} {{frameworks}}"
         rspfile_content = "{{inputs}}"
         default_output_extension = ".dylib"
         output_prefix = "lib"
@@ -211,7 +215,7 @@ template("clang_toolchain") {
 
         # -rpath @executable_path lets the binary resolve sibling dylibs
         # whose install names start with @rpath/.
-        command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}}"
+        command = "$ld $link_flags -Wl,-rpath,@executable_path {{ldflags}} -o $outfile @$rspfile {{solibs}} {{libs}} {{frameworks}}"
         rspfile_content = "{{inputs}}"
         outputs = [ outfile ]
       }

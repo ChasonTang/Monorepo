@@ -4,7 +4,7 @@ declare_args() {
   # Debug build (built-in argument, setting default value)
   is_debug = true
 
-  # Enable AddressSanitizer
+  # Enable AddressSanitizer (macOS and Linux only).
   is_asan = false
 
   # "device" or "simulator" — only meaningful when target_os == "ios".
@@ -81,6 +81,10 @@ if (is_debug) {
 }
 
 if (is_asan) {
+  # GN also initializes unused toolchains; validate the requested target OS.
+  assert(
+      target_os != "ios",
+      "is_asan=true is not supported for iOS device or simulator builds: the bundled Clang toolchain has no iOS ASan runtimes.")
   _native_compiler_configs += [ "//build:asan" ]
 }
 

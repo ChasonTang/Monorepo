@@ -46,7 +46,7 @@ Pass `--args=` to `./tool/gn gen`; see [build/BUILDCONFIG.gn](build/BUILDCONFIG.
 | Argument             | Default | Effect                                            |
 | -------------------- | ------- | ------------------------------------------------- |
 | `is_debug`           | `true`  | `false` enables release builds with ThinLTO.       |
-| `is_asan`            | `false` | Enable AddressSanitizer.                           |
+| `is_asan`            | `false` | Enable AddressSanitizer (macOS/Linux only).         |
 | `target_os`          | host    | `mac`, `linux`, or `ios`; Linux is x64 only.       |
 | `target_cpu`         | host    | `x64` or `arm64`; iOS devices are arm64 only.      |
 | `target_environment` | `""`    | Required for iOS: `device` or `simulator`.         |
@@ -67,6 +67,10 @@ configs += [ "//build:visibility_default" ]  # Restore default and inline visibi
 
 Overrides affect only the target's own sources. Use `configs +=`: configs can
 override flags set directly on a target.
+
+Objective-C and Objective-C++ use ARC by default. Targets can disable it with
+`cflags_objc = [ "-fno-objc-arc" ]` for `.m` sources and
+`cflags_objcc = [ "-fno-objc-arc" ]` for `.mm` sources.
 
 C++ links automatically use system libc++ on macOS/iOS and sysroot libstdc++
 on Linux, including mixed C/C++ targets; no per-target standard-library config
