@@ -101,14 +101,22 @@ root `.clang-format` / `.clang-tidy` rules:
 ./format.sh                  # format project C/C++ files in place
 ./tidy.sh --staged            # analyze staged paths
 ./tidy.sh                     # analyze all project sources in the selected build
-JOBS=4 BUILD_DIR=out ./tidy.sh # override parallelism and build directory
+JOBS=12 BUILD_DIR=out ./tidy.sh # override parallelism and build directory
 ```
 
 `gn gen --check` and Tidy also check header dependencies. Tidy analyzes only
 sources in the selected build; `JOBS` defaults to the logical CPU count and
 `BUILD_DIR` to `out/` relative to the repository root. `--staged` selects staged
-paths but analyzes working-tree contents; run the full check after shared header
-changes.
+sources and same-basename source siblings of staged headers, but analyzes
+working-tree contents. It does not discover other direct or indirect includers
+of a header; if no matching paths are staged, it skips analysis.
+
+Use `--staged` when its selection covers the affected sources. For header
+changes, also cover affected direct and indirect includers. A header being
+`public` does not by itself require a full run; use the full check when the
+affected set is broad or cannot be reliably identified or covered. New headers
+must be included by a source or test in the selected build to be analyzed,
+even during a full run.
 
 ## Layout
 
