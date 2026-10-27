@@ -33,7 +33,7 @@ config("ngtcp2_internal_config") {
     "HAVE_UNISTD_H=1",
   ]
 
-  # These are the configure results for the supported SDKs/sysroot. All
+  # These macros describe capabilities of the supported SDKs/sysroot. All
   # supported CPUs are little-endian, so WORDS_BIGENDIAN stays undefined.
   # Pass macros directly instead of requiring an upstream-generated config.h.
   if (current_os == "linux") {
@@ -45,11 +45,14 @@ config("ngtcp2_internal_config") {
       "HAVE_EXPLICIT_BZERO=1",
     ]
   } else {
-    # macOS and iOS use OSByteOrder.h and memset_s.
+    # macOS and iOS provide be64toh/htobe64 through sys/endian.h.
+    # Use that header explicitly: iOS's legacy Endian.h can also match
+    # endian.h on case-insensitive filesystems.
     defines += [
-      "HAVE_DECL_BE64TOH=0",
+      "HAVE_DECL_BE64TOH=1",
       "HAVE_DECL_BSWAP_64=0",
       "HAVE_MEMSET_S=1",
+      "HAVE_SYS_ENDIAN_H=1",
     ]
   }
 
