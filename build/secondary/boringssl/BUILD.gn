@@ -2,16 +2,16 @@ import("//build/component.gni")
 
 config("boringssl_public_config") {
   include_dirs = [ "include" ]
+
+  # Match component() and propagate the shared-library mode to consumers.
+  if (is_debug) {
+    defines = [ "BORINGSSL_SHARED_LIBRARY" ]
+  }
 }
 
 config("boringssl_config") {
-  defines = [
-    "BORINGSSL_IMPLEMENTATION",
-    "BORINGSSL_SHARED_LIBRARY",
-  ]
-  # //build:compiler_defaults hides symbols and disables RTTI / exceptions.
-  # OPENSSL_EXPORT marks the public API as visibility("default") so it stays
-  # exported under the global hidden default.
+  # Keep implementation-side export annotations private to BoringSSL.
+  defines = [ "BORINGSSL_IMPLEMENTATION" ]
 }
 
 component("crypto") {
