@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Download pinned build tools. A successful install records its URL, including
-# the exact package version and architecture, in tool/.<name>.stamp.
+# Download pinned build tools. Skip an existing Ninja binary; compare reported
+# versions for GN, Clang, CFSSL, and CFSSLJSON.
 
 set -euo pipefail
 
@@ -41,11 +41,38 @@ echo "Syncing build tools..."
 echo "Target directory: $TOOL_DIR"
 
 tool_is_current() {
-    local binary="$1"
-    local stamp="$2"
-    local url="$3"
-    [ -f "$binary" ] && [ -x "$binary" ] &&
-        [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$url" ]
+    local tool_name="$1"
+    local binary="$2"
+    local version_arg="--version"
+    local version_output
+    local gn_version_pattern='^[0-9]+ \(([0-9a-f]+)\)$'
+
+    [ -f "$binary" ] || return 1
+    if [ "$tool_name" = "ninja" ]; then
+        return 0
+    fi
+
+    [ -x "$binary" ] || return 1
+    case "$tool_name" in
+        cfssl) version_arg="version" ;;
+        cfssljson) version_arg="-version" ;;
+    esac
+    version_output=$("$binary" "$version_arg" 2>/dev/null) || return 1
+
+    case "$tool_name" in
+        gn)
+            # GN reports a short hash, so match the pinned revision's prefix.
+            [[ "$version_output" =~ $gn_version_pattern ]] &&
+                [[ "$GN_GIT_REVISION" == "${BASH_REMATCH[1]}"* ]]
+            ;;
+        clang)
+            [[ "$version_output" == *" $CLANG_GIT_REVISION)"* ]]
+            ;;
+        cfssl|cfssljson)
+            printf '%s\n' "$version_output" | grep -Fx "Version: $CFSSL_VERSION" >/dev/null
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 sync_cipd_tool() {
@@ -55,7 +82,6 @@ sync_cipd_tool() {
     local binary="$4"
     local url="https://chrome-infra-packages.appspot.com/dl/${package}/+/${version}"
     local output_path="$TOOL_DIR/$tool_name"
-    local stamp="$TOOL_DIR/.$tool_name.stamp"
     local installed_binary="$output_path"
     local archive="$WORK/$tool_name.zip"
     local extracted="$WORK/$tool_name"
@@ -66,8 +92,8 @@ sync_cipd_tool() {
         install_path="$extracted"
     fi
 
-    if tool_is_current "$installed_binary" "$stamp" "$url"; then
-        echo "$tool_name $version already installed for $package, skipping"
+    if tool_is_current "$tool_name" "$installed_binary"; then
+        echo "$tool_name already installed, skipping"
         return
     fi
 
@@ -89,11 +115,8 @@ sync_cipd_tool() {
     "$extracted/$binary" --version
 
     # Replace the whole artifact so files removed by an upgrade cannot linger.
-    # Invalidate the old stamp before replacing; record success only at the end.
-    rm -f "$stamp"
     rm -rf "$output_path"
     mv "$install_path" "$output_path"
-    printf '%s\n' "$url" > "$stamp"
     echo "$tool_name $version installed successfully"
 }
 
@@ -102,14 +125,13 @@ download_cfssl_tool() {
     local download_url="$2"
     local output_path="$TOOL_DIR/$tool_name"
     local temp_path="$WORK/$tool_name"
-    local stamp="$TOOL_DIR/.$tool_name.stamp"
     local version_arg="version"
 
     if [ "$tool_name" = "cfssljson" ]; then
         version_arg="-version"
     fi
 
-    if tool_is_current "$output_path" "$stamp" "$download_url"; then
+    if tool_is_current "$tool_name" "$output_path"; then
         echo "$tool_name $CFSSL_VERSION already installed, skipping"
         return
     fi
@@ -126,10 +148,8 @@ download_cfssl_tool() {
         exit 1
     fi
 
-    rm -f "$stamp"
     rm -rf "$output_path"
     mv "$temp_path" "$output_path"
-    printf '%s\n' "$download_url" > "$stamp"
     echo "$tool_name $CFSSL_VERSION installed successfully"
 }
 

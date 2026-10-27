@@ -19,7 +19,10 @@ git submodule update --init --recursive
 Use `./tool/` tools for top-level builds; GN automatically selects the compiler
 from `./tool/clang/bin/`.
 
-Rerun the sync/extract scripts to update existing tools and SDKs.
+Rerun `sync_tools.sh` to update GN, Clang, CFSSL, and CFSSLJSON when their reported
+versions differ from the pins. Ninja is skipped whenever `tool/ninja` exists;
+remove it before rerunning to reinstall or upgrade it. Rerun `extract_sdk.sh` to
+refresh Apple SDKs.
 
 See [Dependency upgrades](docs/dependency_upgrades.md) for updating the tools
 and Linux sysroot from a newer Flutter release.
@@ -29,6 +32,8 @@ and Linux sysroot from a newer Flutter release.
 Apple targets use `build/sdk/{MacOSX,iPhoneOS,iPhoneSimulator}.sdk/` from Quick
 Start. For Linux x64, run `./sync_linux_sysroot.sh` to install the Debian
 bullseye sysroot at `build/sdk/debian_bullseye_amd64-sysroot/`.
+An existing sysroot directory is skipped without a version check; remove it
+before rerunning to reinstall or upgrade it. New downloads are SHA256-verified.
 
 All targets build on macOS. Use a separate output directory per target:
 

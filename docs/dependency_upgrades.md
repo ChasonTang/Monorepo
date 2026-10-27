@@ -61,6 +61,19 @@ support and adjust `CFSSLJSON_PLATFORM` and download URLs as needed.
 
 ## Refresh local dependencies
 
+`sync_tools.sh` compares version output for GN (Git revision prefix), Clang
+(full Git revision), and CFSSL/CFSSLJSON (release version).
+
+Ninja and the Linux sysroot are skipped whenever their binary or directory
+exists. Changing their pins alone does not reinstall them. Before upgrading
+either, remove its existing installation from the repository root, running
+only the applicable command:
+
+```bash
+rm -f tool/ninja
+rm -rf build/sdk/debian_bullseye_amd64-sysroot
+```
+
 After updating the pins, run from the repository root:
 
 ```bash

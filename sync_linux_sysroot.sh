@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Download a SHA256-pinned Debian bullseye amd64 sysroot for Linux x86_64
-# cross-compilation. Mirrors what Chromium's install-sysroot.py does, but
-# inlined here so the build is hermetic and free of the gclient/Python stack.
+# cross-compilation when the destination is absent. Uses Chromium's sysroot
+# archives without requiring the gclient/Python stack.
 #
 # Source: chrome-linux-sysroot GCS bucket. Object key is the sha256.
 # To bump: copy a new SysrootDict from chromium/src/build/linux/sysroot_scripts/sysroots.json
 # Output: build/sdk/debian_bullseye_amd64-sysroot/
+# An existing destination directory is skipped; remove it to reinstall or upgrade.
 
 set -euo pipefail
 
@@ -15,16 +16,14 @@ SYSROOT_NAME="debian_bullseye_amd64-sysroot"
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEST="$REPO_ROOT/build/sdk/$SYSROOT_NAME"
-STAMP="$DEST/.stamp"
 
 sysroot_is_complete() {
     [ -f "$1/usr/include/stdio.h" ] &&
         [ -f "$1/usr/lib/x86_64-linux-gnu/libc.so" ]
 }
 
-if sysroot_is_complete "$DEST" &&
-    [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$SYSROOT_URL" ]; then
-    echo "$SYSROOT_NAME already at $SYSROOT_SHA256, skipping"
+if [ -d "$DEST" ]; then
+    echo "$SYSROOT_NAME already exists at $DEST, skipping"
     exit 0
 fi
 
@@ -60,9 +59,7 @@ if ! sysroot_is_complete "$EXTRACTED"; then
     exit 1
 fi
 
-# Publish only a complete extraction; failed downloads/extractions leave the
-# previous sysroot intact. Replacing the directory also removes obsolete files.
-printf '%s\n' "$SYSROOT_URL" > "$EXTRACTED/.stamp"
+# Publish only after the archive has been verified and fully extracted.
 rm -rf "$DEST"
 mv "$EXTRACTED" "$DEST"
 
