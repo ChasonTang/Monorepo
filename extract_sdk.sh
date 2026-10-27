@@ -5,10 +5,10 @@
 #   build/sdk/iPhoneOS.sdk/
 #   build/sdk/iPhoneSimulator.sdk/
 #
-# We deliberately do NOT use xcode-select -p / /Applications/Xcode.app: the
-# extraction must be hermetic so every developer pulls the same SDK version
-# regardless of what the host machine happens to have installed. Drop the
-# matching Xcode.app at $REPO_ROOT/Xcode.app (or symlink it) before running.
+# Use the repo-local Xcode.app so extraction does not depend on the host's
+# xcode-select setting. See docs/dependency_upgrades.md for the required Xcode
+# version and build. Place that Xcode.app at $REPO_ROOT/Xcode.app (or symlink it)
+# before running.
 #
 # The standalone Command Line Tools .dmg is not an option for any of the
 # three SDKs — it ships MacOSX.sdk without the Platforms/ wrapper and skips
@@ -29,26 +29,50 @@ if [ ! -d "$DEVDIR/Platforms/MacOSX.platform" ] ||
     exit 1
 fi
 
+mkdir -p "$DEST_DIR"
+WORK=$(mktemp -d "$DEST_DIR/.extract-sdk.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
+
+sdk_version() {
+    local sdk="$1"
+    local version build
+    [ -d "$sdk/usr/include" ] && [ -d "$sdk/usr/lib" ] &&
+        [ -d "$sdk/System/Library/Frameworks" ] || return 1
+    version=$(/usr/libexec/PlistBuddy -c 'Print :Version' "$sdk/SDKSettings.plist") || return 1
+    build=$(/usr/libexec/PlistBuddy -c 'Print :ProductBuildVersion' \
+        "$sdk/System/Library/CoreServices/SystemVersion.plist") || return 1
+    [ -n "$version" ] && [ -n "$build" ] || return 1
+    printf '%s (%s)\n' "$version" "$build"
+}
+
 extract_one() {
     local platform="$1"  # MacOSX | iPhoneOS | iPhoneSimulator
     local dest="$DEST_DIR/${platform}.sdk"
+    local src="$DEVDIR/Platforms/${platform}.platform/Developer/SDKs/${platform}.sdk"
+    local version installed_version
 
-    if [ -e "$dest" ]; then
-        echo "${platform} SDK already at $dest (delete to re-extract)"
+    if [ ! -d "$src" ]; then
+        echo "error: missing SDK at $src" >&2
+        exit 1
+    fi
+    # Resolve symlinks so the SDK contents are copied.
+    src="$(cd "$src" && pwd -P)"
+
+    if ! version=$(sdk_version "$src"); then
+        echo "error: incomplete SDK or missing version/build metadata at $src" >&2
+        exit 1
+    fi
+    installed_version=$(sdk_version "$dest" 2>/dev/null) || installed_version=""
+    if [ "$installed_version" = "$version" ]; then
+        echo "${platform} SDK $version already at $dest, skipping"
         return 0
     fi
 
-    # Inside the platform dir, ${platform}.sdk is a symlink to ${platform}<ver>.sdk;
-    # pick the real directory so the copy captures concrete files instead of
-    # recreating the symlink.
-    local sdks="$DEVDIR/Platforms/${platform}.platform/Developer/SDKs"
-    local src
-    src="$(find "$sdks" -maxdepth 1 -type d -name "${platform}*.sdk" ! -type l -print | sort -r | head -1)"
-    [ -n "$src" ] || { echo "error: no ${platform}*.sdk under $sdks" >&2; exit 1; }
-
-    echo "==> Copying $(basename "$src") -> $dest"
-    mkdir -p "$DEST_DIR"
-    cp -a "$src" "$dest"
+    echo "==> Copying ${platform} SDK $version -> $dest"
+    # Stage the copy so an interrupted extraction cannot look up to date.
+    cp -a "$src" "$WORK/${platform}.sdk"
+    rm -rf "$dest"
+    mv "$WORK/${platform}.sdk" "$dest"
 }
 
 extract_one MacOSX

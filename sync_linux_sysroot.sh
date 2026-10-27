@@ -17,8 +17,14 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 DEST="$REPO_ROOT/build/sdk/$SYSROOT_NAME"
 STAMP="$DEST/.stamp"
 
-if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$SYSROOT_URL" ]; then
-    echo "$SYSROOT_NAME already at $SYSROOT_SHA256 (delete $DEST to re-install)"
+sysroot_is_complete() {
+    [ -f "$1/usr/include/stdio.h" ] &&
+        [ -f "$1/usr/lib/x86_64-linux-gnu/libc.so" ]
+}
+
+if sysroot_is_complete "$DEST" &&
+    [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$SYSROOT_URL" ]; then
+    echo "$SYSROOT_NAME already at $SYSROOT_SHA256, skipping"
     exit 0
 fi
 
@@ -28,7 +34,8 @@ else
     sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
 fi
 
-WORK=$(mktemp -d /tmp/sysroot.XXXXXX)
+mkdir -p "$REPO_ROOT/build/sdk"
+WORK=$(mktemp -d "$REPO_ROOT/build/sdk/.sysroot.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
 TARBALL="$WORK/sysroot.tar.xz"
@@ -45,11 +52,19 @@ if [ "$ACTUAL" != "$SYSROOT_SHA256" ]; then
 fi
 
 echo "==> Extracting -> $DEST"
-rm -rf "$DEST"
-mkdir -p "$DEST"
-tar mxf "$TARBALL" -C "$DEST"
+EXTRACTED="$WORK/$SYSROOT_NAME"
+mkdir -p "$EXTRACTED"
+tar mxf "$TARBALL" -C "$EXTRACTED"
+if ! sysroot_is_complete "$EXTRACTED"; then
+    echo "error: extracted sysroot is missing required headers or libraries" >&2
+    exit 1
+fi
 
-echo "$SYSROOT_URL" > "$STAMP"
+# Publish only a complete extraction; failed downloads/extractions leave the
+# previous sysroot intact. Replacing the directory also removes obsolete files.
+printf '%s\n' "$SYSROOT_URL" > "$EXTRACTED/.stamp"
+rm -rf "$DEST"
+mv "$EXTRACTED" "$DEST"
 
 echo ""
 echo "Done. Sysroot at: $DEST"

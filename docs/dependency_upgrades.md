@@ -61,19 +61,14 @@ support and adjust `CFSSLJSON_PLATFORM` and download URLs as needed.
 
 ## Refresh local dependencies
 
-Run from the repository root. `sync_tools.sh` skips installed GN, Ninja, and Clang,
-so remove the generated files before syncing:
+After updating the pins, run from the repository root:
 
 ```bash
-rm -f tool/gn tool/ninja
-rm -rf tool/clang
 ./sync_tools.sh
 ./sync_linux_sysroot.sh
 ```
 
-The sysroot script verifies SHA256 and reinstalls when its URL changes. For a
-CFSSL-only upgrade, run `./sync_tools.sh` directly; it replaces mismatched
-versions automatically.
+For a CFSSL-only upgrade, run `./sync_tools.sh`.
 
 Download and unpack the matching full Xcode distribution from Apple, place or
 symlink it at `./Xcode.app`, and verify its version and build against the Engine pin:
@@ -82,11 +77,9 @@ symlink it at `./Xcode.app`, and verify its version and build against the Engine
 DEVELOPER_DIR="$PWD/Xcode.app/Contents/Developer" xcodebuild -version
 ```
 
-After confirming the match, remove existing SDKs (their versions are not checked)
-and run [extract_sdk.sh](../extract_sdk.sh):
+After confirming the match, run [extract_sdk.sh](../extract_sdk.sh):
 
 ```bash
-rm -rf build/sdk/MacOSX.sdk build/sdk/iPhoneOS.sdk build/sdk/iPhoneSimulator.sdk
 ./extract_sdk.sh
 ```
 
