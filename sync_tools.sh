@@ -9,7 +9,7 @@ set -e  # Exit on any error
 GN_GIT_REVISION="81b24e01531ecf0eff12ec9359a555ec3944ec4e"  # Fixed gn git revision
 NINJA_VERSION="version:2@1.11.1.chromium.4"  # Ninja CIPD tag
 CLANG_GIT_REVISION="80743bd43fd5b38fedc503308e7a652e23d3ec93"  # Clang git revision
-CFSSL_VERSION="1.6.5"  # Cloudflare CFSSL release version
+CFSSL_VERSION="1.7.1"  # Cloudflare CFSSL release version
 PLATFORM="mac"  # Target platform
 
 # Detect current machine architecture to download corresponding tool versions
@@ -45,9 +45,15 @@ download_cfssl_tool() {
     local download_url="$2"
     local output_path="$TOOL_DIR/$tool_name"
     local temp_path="$TOOL_DIR/$tool_name.tmp"
+    local version_arg="version"
 
-    if [ -f "$output_path" ]; then
-        echo "$tool_name already exists, skipping download"
+    if [ "$tool_name" = "cfssljson" ]; then
+        version_arg="-version"
+    fi
+
+    if [ -x "$output_path" ] &&
+        "$output_path" "$version_arg" 2>/dev/null | grep -Fxq "Version: $CFSSL_VERSION"; then
+        echo "$tool_name $CFSSL_VERSION already exists, skipping download"
         return
     fi
 

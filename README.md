@@ -19,6 +19,9 @@ git submodule update --init --recursive
 Use `./tool/` tools for top-level builds; GN automatically selects the compiler
 from `./tool/clang/bin/`.
 
+See [Dependency upgrades](docs/dependency_upgrades.md) for updating the tools
+and Linux sysroot from a newer Flutter release.
+
 ## Cross-compilation
 
 Apple targets use `build/sdk/{MacOSX,iPhoneOS,iPhoneSimulator}.sdk/` from Quick

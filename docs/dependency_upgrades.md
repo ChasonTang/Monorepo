@@ -1,0 +1,112 @@
+# Dependency upgrades
+
+Use **Flutter 3.47.8** as the reference for GN, Ninja, Clang, the Linux x64
+sysroot, and Apple SDKs. For an upgrade, replace `3.47.8` in the Flutter source
+links below with the target release tag.
+
+## Update the pins
+
+Update [sync_tools.sh](../sync_tools.sh) from Flutter's
+[DEPS](https://github.com/flutter/flutter/blob/3.47.8/DEPS):
+
+| Monorepo variable | Flutter value |
+| ----------------- | ------------- |
+| `GN_GIT_REVISION` | `version` of the `gn/gn/${{platform}}` package, without `git_revision:`. |
+| `NINJA_VERSION` | Full `version` of the `infra/3pp/tools/ninja/${{platform}}` package, including `version:`. |
+| `CLANG_GIT_REVISION` | `clang_version` used by the macOS `fuchsia/third_party/clang` packages, without `git_revision:`. |
+
+Check `mac-arm64` and `mac-amd64` support; adjust download URLs if package names
+or version formats change.
+
+Update [sync_linux_sysroot.sh](../sync_linux_sysroot.sh) from `bullseye_amd64` in
+[sysroots.json](https://github.com/flutter/flutter/blob/3.47.8/engine/src/build/linux/sysroot_scripts/sysroots.json):
+set `SYSROOT_SHA256` to `Sha256Sum`, `SYSROOT_NAME` to `SysrootDir`, and
+`SYSROOT_URL` to `URL` + `/` + `Sha256Sum` (not `Tarball`). If the Debian release
+changes, use the replacement amd64 entry and update `sysroot_path` in
+[build/toolchain/BUILD.gn](../build/toolchain/BUILD.gn) and [README.md](../README.md).
+
+## Find the matching Xcode version
+
+1. Read [bin/internal/engine.version](https://github.com/flutter/flutter/blob/3.47.8/bin/internal/engine.version)
+   at the release tag. Use that Engine revision in the configuration URLs below
+   to match the published binaries.
+2. In [engine/src/flutter/.ci.yaml](https://github.com/flutter/flutter/blob/3.47.8/engine/src/flutter/.ci.yaml),
+   read `sdk_version` under `$flutter/osx_sdk` on the `Mac mac_host_engine` and
+   `Mac mac_ios_engine` release tasks (`release_build: "true"`). Check overrides in
+   [mac_host_engine.json](https://github.com/flutter/flutter/blob/3.47.8/engine/src/flutter/ci/builders/mac_host_engine.json)
+   and [mac_ios_engine.json](https://github.com/flutter/flutter/blob/3.47.8/engine/src/flutter/ci/builders/mac_ios_engine.json)
+   for macOS x64/arm64 and iOS device/simulator builds across Debug, Profile,
+   and Release.
+3. `sdk_version` is an **Xcode build number**; the CI `os` field describes the
+   host OS. Match the build number at
+   [Apple Developer Downloads](https://developer.apple.com/download/all/) and
+   check the Xcode release notes for bundled SDK versions.
+
+For Flutter 3.47.8, the release tasks and sub-builds pin `17c52`:
+**Xcode 26.2 (17C52)** with **macOS 26.2 and iOS 26.2 SDKs**
+([release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_2-release-notes)).
+
+## Update CFSSL
+
+CFSSL follows [Cloudflare releases](https://github.com/cloudflare/cfssl/releases/latest)
+independently of Flutter. Set `CFSSL_VERSION` in `sync_tools.sh` to the release
+tag without `v` (currently [1.7.1](https://github.com/cloudflare/cfssl/releases/tag/v1.7.1));
+this pins both `cfssl` and `cfssljson`.
+
+Check the release assets for
+`cfssl_<version>_darwin_arm64`, `cfssl_<version>_darwin_amd64`, and
+`cfssljson_<version>_darwin_amd64`. In v1.7.1, the script installs `cfssljson`
+only on Intel Macs because no macOS arm64 asset is published. Recheck platform
+support and adjust `CFSSLJSON_PLATFORM` and download URLs as needed.
+
+## Refresh local dependencies
+
+Run from the repository root. `sync_tools.sh` skips installed GN, Ninja, and Clang,
+so remove the generated files before syncing:
+
+```bash
+rm -f tool/gn tool/ninja
+rm -rf tool/clang
+./sync_tools.sh
+./sync_linux_sysroot.sh
+```
+
+The sysroot script verifies SHA256 and reinstalls when its URL changes. For a
+CFSSL-only upgrade, run `./sync_tools.sh` directly; it replaces mismatched
+versions automatically.
+
+Download and unpack the matching full Xcode distribution from Apple, place or
+symlink it at `./Xcode.app`, and verify its version and build against the Engine pin:
+
+```bash
+DEVELOPER_DIR="$PWD/Xcode.app/Contents/Developer" xcodebuild -version
+```
+
+After confirming the match, remove existing SDKs (their versions are not checked)
+and run [extract_sdk.sh](../extract_sdk.sh):
+
+```bash
+rm -rf build/sdk/MacOSX.sdk build/sdk/iPhoneOS.sdk build/sdk/iPhoneSimulator.sdk
+./extract_sdk.sh
+```
+
+## Validate and record
+
+For Flutter-derived upgrades, follow [README.md](../README.md): use fresh output
+directories to build all supported macOS, Linux x64, and iOS targets, check a
+ThinLTO release build, and run native unit tests. After a Clang upgrade, run
+`BUILD_DIR=<native-output-directory> ./tidy.sh`; `--staged` may select no sources
+for a version-only change.
+
+For CFSSL, check both versions against `CFSSL_VERSION`:
+
+```bash
+./tool/cfssl version
+./tool/cfssljson -version  # Intel Macs only with the current release.
+```
+
+When both tools are available, issue and verify a test certificate with
+[Thor](../thor/README.md).
+
+Update this document's versions and links with the pins; record validation
+results in the commit or PR description.
