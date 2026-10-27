@@ -54,6 +54,7 @@ config("visibility_default") {
 }
 
 config("debug") {
+  asmflags = [ "-g" ]
   cflags = [
     "-g",
     "-O0",
@@ -62,6 +63,7 @@ config("debug") {
 
 config("release") {
   defines = [ "NDEBUG=1" ]
+  asmflags = [ "-g" ]
   cflags = [
     "-Os",  # Optimize for size rather than speed
     "-g",  # Keep debug symbols for crash analysis
@@ -72,8 +74,8 @@ config("release") {
   #   ELF (Linux):
   #     -ffunction-sections / -fdata-sections emit each function and data
   #     object into its own section so --gc-sections can drop them
-  #     individually. Without them every .o has one .text / .data and
-  #     --gc-sections degenerates to no-op.
+  #     individually. Otherwise a live symbol can retain unrelated code
+  #     or data in the same input section.
   #   Mach-O (mac, ios):
   #     The assembler emits .subsections_via_symbols by default for
   #     C / C++ / ObjC, giving the linker symbol-level granularity for
@@ -82,9 +84,19 @@ config("release") {
     cflags += [
       "-ffunction-sections",
       "-fdata-sections",
+
+      # Record which symbol addresses matter so safe ICF can fold identical
+      # machine code while preserving function pointer identity.
+      "-faddrsig",
     ]
-    ldflags = [ "-Wl,--gc-sections" ]
+    ldflags = [
+      "-Wl,--gc-sections",
+      "-Wl,--icf=safe",
+    ]
   } else if (current_os == "mac" || current_os == "ios") {
+    # The pinned Mach-O LLD lacks llvm-project#188400: --icf=safe can fold
+    # address-significant functions from objects without addrsig. Assembly
+    # inputs still lack that metadata with -faddrsig, so keep ICF disabled.
     ldflags = [ "-Wl,-dead_strip" ]
   }
 }

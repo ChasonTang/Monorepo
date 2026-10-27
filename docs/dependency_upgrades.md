@@ -25,6 +25,33 @@ set `SYSROOT_SHA256` to `Sha256Sum`, `SYSROOT_NAME` to `SysrootDir`, and
 changes, use the replacement amd64 entry and update `sysroot_path` in
 [build/toolchain/BUILD.gn](../build/toolchain/BUILD.gn) and [README.md](../README.md).
 
+## Enable Apple safe ICF when upgrading Clang
+
+For each Clang upgrade, determine whether the bundled `ld64.lld` includes
+[llvm-project#188400](https://github.com/llvm/llvm-project/pull/188400), commit
+`788ea1105438bd866752d7758f4c305d4675e0cc`, or an equivalent backport. This
+[fix](https://lists.llvm.org/pipermail/all-commits/Week-of-Mon-20260323/291955.html)
+makes `--icf=safe` preserve distinct symbol addresses for objects without
+address-significance metadata, including assembly inputs. Use the actual
+source revision to determine whether the fix is included; a newer version
+number or acceptance of the option is insufficient. The current Clang pin
+`80743bd43fd5b38fedc503308e7a652e23d3ec93` lacks this fix.
+
+If the fix is included, enable Apple safe ICF in the same upgrade:
+update the `current_os == "mac" || current_os == "ios"` branch of
+`config("release")` in [build/BUILD.gn](../build/BUILD.gn) to use:
+
+```gn
+cflags += [ "-faddrsig" ]
+ldflags = [
+  "-Wl,-dead_strip",
+  "-Wl,--icf=safe",
+]
+```
+
+Remove the obsolete comment that keeps Apple ICF disabled. If the fix is absent
+or its inclusion is unknown, leave Apple ICF disabled.
+
 ## Find the matching Xcode version
 
 1. Read [bin/internal/engine.version](https://github.com/flutter/flutter/blob/3.47.8/bin/internal/engine.version)
@@ -96,23 +123,4 @@ After confirming the match, run [extract_sdk.sh](../extract_sdk.sh):
 ./extract_sdk.sh
 ```
 
-## Validate and record
-
-For Flutter-derived upgrades, follow [README.md](../README.md): use fresh output
-directories to build all supported macOS, Linux x64, and iOS targets, check a
-ThinLTO release build, and run native unit tests. After a Clang upgrade, run
-`BUILD_DIR=<native-output-directory> ./tidy.sh`; `--staged` may select no sources
-for a version-only change.
-
-For CFSSL, check both versions against `CFSSL_VERSION`:
-
-```bash
-./tool/cfssl version
-./tool/cfssljson -version  # Intel Macs only with the current release.
-```
-
-When both tools are available, issue and verify a test certificate with
-[Thor](../thor/README.md).
-
-Update this document's versions and links with the pins; record validation
-results in the commit or PR description.
+Update this document's versions and links alongside the pins.

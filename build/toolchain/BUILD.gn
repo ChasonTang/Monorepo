@@ -87,8 +87,7 @@ template("clang_toolchain") {
       # to absolute addressing and ld.lld rejects R_X86_64_PC32 against
       # globals when producing a shared object. Applied uniformly because
       # component() in debug mode is shared_library and in release mode is
-      # source_set that gets aggregated into a .so by consumers — both want
-      # PIC.
+      # static_library that may be linked into a .so — both need PIC.
       compile_flags = "--target=$target_triple --sysroot=$sysroot -fPIC"
 
       # Let Clang discover GCC's generic, multiarch and backward headers in
@@ -134,7 +133,7 @@ template("clang_toolchain") {
 
     tool("asm") {
       depfile = "{{output}}.d"
-      command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} {{cflags}} {{cflags_c}} -c {{source}} -o {{output}}"
+      command = "$asm $compile_flags -MMD -MF $depfile {{defines}} {{include_dirs}} {{asmflags}} -c {{source}} -o {{output}}"
       depsformat = "gcc"
       outputs =
           [ "{{source_out_dir}}/{{target_output_name}}.{{source_name_part}}.o" ]

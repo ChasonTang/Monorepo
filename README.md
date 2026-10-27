@@ -55,7 +55,7 @@ Pass `--args=` to `./tool/gn gen`; see [build/BUILDCONFIG.gn](build/BUILDCONFIG.
 
 | Argument             | Default | Effect                                            |
 | -------------------- | ------- | ------------------------------------------------- |
-| `is_debug`           | `true`  | `false` enables release builds with ThinLTO.       |
+| `is_debug`           | `true`  | `false`: ThinLTO and link-time size optimization. |
 | `is_asan`            | `false` | Enable AddressSanitizer (macOS/Linux only).         |
 | `target_os`          | host    | `mac`, `linux`, or `ios`; Linux is x64 only.       |
 | `target_cpu`         | host    | `x64` or `arm64`; iOS devices are arm64 only.      |
@@ -143,7 +143,8 @@ even during a full run.
 
 1. Create `your_component/BUILD.gn` and add its target to the root `BUILD.gn`'s
    `default` group. Import `//build/component.gni` and use `component()` for
-   libraries that should be `shared_library` in debug and `source_set` in release.
+   libraries that should be `shared_library` in debug and `static_library` in
+   release.
 2. Declare `deps`; use `public_deps` when consumers need dependency headers.
    List exported headers in `public` and private headers in `sources`.
 3. Use repository-relative includes, such as `"argcv/argcv.h"`; the root is

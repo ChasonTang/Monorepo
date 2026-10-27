@@ -14,7 +14,7 @@ config("ngtcp2_public_config") {
     "lib/includes",
   ]
 
-  # component() becomes a source_set in release; consumers must use the same
+  # component() becomes a static_library in release; consumers must use the same
   # export declarations as the library.
   if (!is_debug) {
     defines = [ "NGTCP2_STATICLIB" ]
