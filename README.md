@@ -147,10 +147,45 @@ even during a full run.
    release.
 2. Declare `deps`; use `public_deps` when consumers need dependency headers.
    List exported headers in `public` and private headers in `sources`.
-3. Use repository-relative includes, such as `"argcv/argcv.h"`; the root is
-   already on every native target's include path.
-4. Add `//your_component/*` to `check_targets` in `.gn` for header checks.
+3. Add an export macro in a public `export.h` and configure it through
+   `public_configs`, as shown below.
+4. Use repository-relative includes, such as `"argcv/argcv.h"`.
+5. Add `//your_component/*` to `check_targets` in `.gn` for header checks.
 
 GN does not evaluate preprocessor guards. For false positives from conditional
 test includes or wrappers including production `.c` files, add a per-include
 `nogncheck` with an explanation; keep target header checking enabled.
+
+Put settings required by public headers in `public_configs` and
+implementation-only settings in `configs`. Use a component-specific macro
+and config name, following [argcv/BUILD.gn](argcv/BUILD.gn):
+
+```gn
+config("your_component_public_config") {
+  # Match the shared-library branch of //build/component.gni.
+  if (is_debug) {
+    defines = [ "YOUR_COMPONENT_SHARED_LIBRARY" ]
+  }
+}
+```
+
+Attach the config to each component target exposing these headers:
+
+```gn
+public_configs = [ ":your_component_public_config" ]
+```
+
+Include `export.h` from public headers and annotate API declarations with
+`YOUR_COMPONENT_EXPORT`. Follow [argcv/export.h](argcv/export.h):
+
+```c
+#if defined(YOUR_COMPONENT_SHARED_LIBRARY)
+#define YOUR_COMPONENT_EXPORT __attribute__((visibility("default")))
+#else
+#define YOUR_COMPONENT_EXPORT
+#endif
+```
+
+Match the macro condition to the shared-library branch of
+[component.gni](build/component.gni). Leave `YOUR_COMPONENT_SHARED_LIBRARY`
+undefined in static builds; do not define it as `0`.

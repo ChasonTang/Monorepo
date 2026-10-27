@@ -1,12 +1,21 @@
 import("//build/component.gni")
 
+config("argcv_public_config") {
+  # Match the shared-library branch of //build/component.gni.
+  if (is_debug) {
+    defines = [ "ARGCV_SHARED_LIBRARY" ]
+  }
+}
+
 component("argcv") {
+  public_configs = [ ":argcv_public_config" ]
   sources = [ "argcv.c" ]
   public = [ "argcv.h" ]
   public_deps = [ ":argcv_value" ]
 }
 
 component("argcv_value") {
+  public_configs = [ ":argcv_public_config" ]
   sources = [ "value.c" ]
   public = [
     "export.h",
