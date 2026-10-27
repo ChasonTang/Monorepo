@@ -4,7 +4,7 @@ A C/C++ monorepo built with GN + Ninja.
 
 ## Quick Start
 
-Requires macOS (Intel or Apple Silicon), `python3`, and the full
+Requires macOS, `python3`, and the full
 [Xcode app](https://developer.apple.com/download/all/) placed or symlinked at
 `./Xcode.app`. Run from the repository root:
 
@@ -15,9 +15,6 @@ git submodule update --init --recursive
 ./tool/gn gen out --check
 ./tool/ninja -C out
 ```
-
-Use `./tool/` tools for top-level builds; GN automatically selects the compiler
-from `./tool/clang/bin/`.
 
 Rerun `sync_tools.sh` to update GN, Clang, CFSSL, and CFSSLJSON when their reported
 versions differ from the pins. Ninja is skipped whenever `tool/ninja` exists;
@@ -38,16 +35,16 @@ before rerunning to reinstall or upgrade it. New downloads are SHA256-verified.
 All targets build on macOS. Use a separate output directory per target:
 
 ```bash
-./tool/gn gen out/mac_arm64  --check --args='target_cpu="arm64"'
+./tool/gn gen out/mac  --check --args='target_cpu="arm64"'
 ./tool/gn gen out/mac_x64    --check --args='target_cpu="x64"'
-./tool/gn gen out/linux_x64  --check --args='target_os="linux" target_cpu="x64"'
-./tool/gn gen out/ios_device --check --args='target_os="ios" target_environment="device" target_cpu="arm64"'
+./tool/gn gen out/linux  --check --args='target_os="linux" target_cpu="x64"'
+./tool/gn gen out/ios --check --args='target_os="ios" target_environment="device" target_cpu="arm64"'
 ./tool/gn gen out/ios_sim    --check --args='target_os="ios" target_environment="simulator" target_cpu="arm64"'
+./tool/gn gen out/ios_sim_x64    --check --args='target_os="ios" target_environment="simulator" target_cpu="x64"'
 ```
 
-Build with `./tool/ninja -C out/linux_x64`, substituting your output directory.
-Intel iOS simulators use `target_cpu="x64"`. Minimum deployment versions:
-macOS 10.15 (x64), macOS 11.0 (arm64), iOS 15.0.
+Build with `./tool/ninja -C {BUILD_DIR}`, substituting your output directory.
+Minimum deployment versions: macOS 10.15 (x64), macOS 11.0 (arm64), iOS 15.0.
 
 ## Build Arguments
 
@@ -107,26 +104,51 @@ These checks cover `argcv/`, `odin/`, and `ipsw/`, using bundled tools and the
 root `.clang-format` / `.clang-tidy` rules:
 
 ```bash
-./tool/gn check out          # check header dependencies in an existing build
+./tool/gn check out           # check header dependencies in an existing build
 ./format.sh                  # format project C/C++ files in place
-./tidy.sh --staged            # analyze staged paths
+./tidy.sh --staged            # analyze sources selected from staged paths
 ./tidy.sh                     # analyze all project sources in the selected build
 JOBS=12 BUILD_DIR=out ./tidy.sh # override parallelism and build directory
 ```
 
-`gn gen --check` and Tidy also check header dependencies. Tidy analyzes only
-sources in the selected build; `JOBS` defaults to the logical CPU count and
-`BUILD_DIR` to `out/` relative to the repository root. `--staged` selects staged
-sources and same-basename source siblings of staged headers, but analyzes
-working-tree contents. It does not discover other direct or indirect includers
-of a header; if no matching paths are staged, it skips analysis.
+`JOBS` defaults to the logical CPU count and `BUILD_DIR` to `out/` relative to
+the repository root. Both Tidy modes analyze working-tree contents, using only
+`.c`, `.cc`, and `.cpp` entries under the project directories above in the
+selected build's `compile_commands.json`. A full run analyzes all such entries.
 
-Use `--staged` when its selection covers the affected sources. For header
-changes, also cover affected direct and indirect includers. A header being
-`public` does not by itself require a full run; use the full check when the
-affected set is broad or cannot be reliably identified or covered. New headers
-must be included by a source or test in the selected build to be analyzed,
-even during a full run.
+`--staged` selects existing `.c`, `.cc`, and `.cpp` paths from the staged diff.
+For staged `.h` and `.hpp` paths, it also selects existing source files with
+the same basename in the same directory. Deleted paths are excluded. It does
+not discover other direct or indirect includers of headers or source files.
+
+A full run, or a staged run with candidates, regenerates the compilation
+database with `gn gen --check`, which also checks header dependencies. With no
+candidates, `--staged` exits successfully before both GN and static analysis;
+this can happen with only configuration changes, deletions, or headers without
+same-basename sources. If candidates exist but none match the database, GN
+runs and the analyzer reports `0 files`, also successfully. Confirm that the
+reported file count and paths cover the intended sources.
+
+Choose the mode by the affected sources:
+
+| Situation | Action |
+| --------- | ------ |
+| Every affected source is selected by `--staged` and appears in the selected build's database. | Run `./tidy.sh --staged`. |
+| Affected includers or test wrappers are outside that selection, or coverage cannot be reliably established. | Run `./tidy.sh`. |
+| Analysis rules, compiler macros/options, or shared build configuration change. | Run `./tidy.sh` in the affected build configurations. |
+| Affected sources or conditional branches are absent from the selected build. | Add the relevant GN targets/sources or configure an appropriate `BUILD_DIR`, then choose the mode using the rules above. |
+
+A header being `public` does not by itself require a full run; cover its
+affected direct and indirect includers. Source-file changes can also affect
+other compilation units: `odin/testing/event_loop_testing.c`, for example,
+includes `odin/event_loop.c` and is not automatically selected when only the
+latter is staged. New headers must be included by an analyzed source or test
+in the selected build, even during a full run.
+
+A full run covers only the selected build configuration. For platform-specific
+changes, use the corresponding configured build directories, for example
+`BUILD_DIR=out/linux ./tidy.sh`; the default build does not cover every platform
+or conditional compilation branch.
 
 ## Layout
 
