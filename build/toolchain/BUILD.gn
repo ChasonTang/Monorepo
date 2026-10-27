@@ -114,6 +114,7 @@ template("clang_toolchain") {
     asm = "$prefix/clang"
     ar = "$prefix/llvm-ar"
     ld = "$prefix/clang++"
+    toc_script = rebase_path("//build/toolchain/solink_toc.py", root_build_dir)
 
     tool("cc") {
       depfile = "{{output}}.d"
@@ -159,6 +160,45 @@ template("clang_toolchain") {
       command = "cp -af {{source}} {{output}}"
     }
 
+    tool("solink") {
+      sofile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
+      tocfile = "$sofile.TOC"
+      rspfile = "$sofile.rsp"
+      depfile = "$tocfile.d"
+      rspfile_content = "{{inputs}} {{solibs}} {{libs}}"
+
+      if (is_apple) {
+        # Consumers resolve the install name via rpath. @loader_path lets a
+        # dylib find sibling dylibs regardless of which executable loaded it.
+        shared_flags = "-Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path"
+        default_output_extension = ".dylib"
+        toc_format = "macho"
+        rspfile_content += " {{frameworks}}"
+      } else {
+        # DT_SONAME avoids embedding the build path in consumers. $ORIGIN
+        # locates sibling shared objects at runtime, like @loader_path above.
+        shared_flags = "-Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\\\$ORIGIN"
+        default_output_extension = ".so"
+        toc_format = "elf"
+      }
+
+      command = "$ld $link_flags -shared $shared_flags {{ldflags}} -o \"$sofile\" \"@$rspfile\" && python3 \"$toc_script\" --format=$toc_format --tool-dir=\"$prefix\" --library=\"$sofile\" --toc=\"$tocfile\" --depfile=\"$depfile\""
+      description = "SOLINK $sofile"
+      output_prefix = "lib"
+      outputs = [
+        sofile,
+        tocfile,
+      ]
+
+      # Chromium's solink pattern: link against the library, but use its TOC
+      # for dependency tracking. The script only writes changed interfaces;
+      # restat lets Ninja cancel downstream links when that mtime is unchanged.
+      link_output = sofile
+      depend_output = tocfile
+      runtime_outputs = [ sofile ]
+      restat = true
+    }
+
     if (is_apple) {
       # ObjC is a superset of C and ObjC++ a superset of C++, so the C / C++
       # flag streams are inherited too — a config that sets cflags_cc (e.g.
@@ -186,26 +226,6 @@ template("clang_toolchain") {
         ]
       }
 
-      tool("solink") {
-        rspfile = "{{output}}.rsp"
-
-        # -install_name @rpath/<leaf> makes dependents resolve via the
-        # consumer's rpath instead of dyld's system search path. Without
-        # this, bare-name install names collide with
-        # /usr/lib/libcrypto.*.dylib and dyld aborts with "loading libcrypto
-        # in an unsafe way".
-        #
-        # -rpath @loader_path lets a dylib find its sibling dylibs in its
-        # own directory regardless of which binary loaded it, instead of
-        # relying on the consumer's rpath being set up correctly.
-        command = "$ld $link_flags -shared -Wl,-install_name,@rpath/{{target_output_name}}{{output_extension}} -Wl,-rpath,@loader_path {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}} {{frameworks}}"
-        rspfile_content = "{{inputs}}"
-        default_output_extension = ".dylib"
-        output_prefix = "lib"
-        outputs =
-            [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
-      }
-
       tool("link") {
         # Output executables to the root output directory, not obj
         # directory.
@@ -219,23 +239,6 @@ template("clang_toolchain") {
         outputs = [ outfile ]
       }
     } else {
-      tool("solink") {
-        rspfile = "{{output}}.rsp"
-
-        # ELF analogues of the Apple solink flags:
-        #   -Wl,-soname,<leaf>     ↔ -install_name @rpath/<leaf>
-        #     records DT_SONAME so consumers reference the leaf, not the
-        #     build path.
-        #   -Wl,-rpath,$ORIGIN     ↔ -Wl,-rpath,@loader_path
-        #     lets a .so locate sibling .so files in its own directory.
-        command = "$ld $link_flags -shared -Wl,-soname,{{target_output_name}}{{output_extension}} -Wl,-rpath,\\\$ORIGIN {{ldflags}} -o {{output}} @$rspfile {{solibs}} {{libs}}"
-        rspfile_content = "{{inputs}}"
-        default_output_extension = ".so"
-        output_prefix = "lib"
-        outputs =
-            [ "{{root_out_dir}}/{{target_output_name}}{{output_extension}}" ]
-      }
-
       tool("link") {
         outfile = "{{root_out_dir}}/{{target_output_name}}{{output_extension}}"
         rspfile = "$outfile.rsp"
