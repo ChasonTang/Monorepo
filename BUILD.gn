@@ -5,6 +5,7 @@ group("default") {
     "//argcv",
     "//boringssl:ssl",
     "//c-ares:cares",
+    "//ngtcp2",
     "//odin:odin_cli_artifacts",
     "//xquic",
   ]

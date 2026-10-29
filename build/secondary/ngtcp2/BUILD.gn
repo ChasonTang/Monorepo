@@ -1,0 +1,51 @@
+# ngtcp2 with the BoringSSL backend used by the monorepo.
+
+import("//build/component.gni")
+import("//build/secondary/ngtcp2/sources.gni")
+
+_ngtcp2_config_dir = "//build/secondary/ngtcp2/config"
+if (current_os == "linux") {
+  _ngtcp2_config_dir += "/linux"
+} else {
+  # macOS, iOS devices and iOS simulators have identical configure output.
+  _ngtcp2_config_dir += "/apple"
+}
+
+config("ngtcp2_public_config") {
+  include_dirs = [
+    "lib/includes",
+    "crypto/includes",
+  ]
+
+  # Match component() and upstream's static-library export annotations.
+  if (!is_debug) {
+    defines = [ "NGTCP2_STATICLIB" ]
+  }
+}
+
+config("ngtcp2_internal_config") {
+  defines = [
+    "HAVE_CONFIG_H=1",
+    "BUILDING_NGTCP2",
+  ]
+  include_dirs = [
+    _ngtcp2_config_dir,
+    "lib",
+    "crypto",
+  ]
+}
+
+component("ngtcp2") {
+  public_configs = [ ":ngtcp2_public_config" ]
+  configs += [
+    ":ngtcp2_internal_config",
+    "//build:no_unused_parameter",
+  ]
+
+  public = ngtcp2_public_headers
+  sources = ngtcp2_sources + [ "$_ngtcp2_config_dir/config.h" ]
+
+  # The public BoringSSL adapter header includes <openssl/ssl.h>.
+  public_deps = [ "//boringssl:ssl" ]
+  deps = [ "//boringssl:crypto" ]
+}
