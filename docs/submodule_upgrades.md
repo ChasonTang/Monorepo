@@ -3,7 +3,7 @@
 Run the following commands from the repository root.
 
 1. Set the dependency to upgrade. Use `xquic`, `boringssl`, `c-ares`,
-   `googletest`, or `ngtcp2`:
+   or `googletest`:
 
    ```bash
    dependency=googletest
