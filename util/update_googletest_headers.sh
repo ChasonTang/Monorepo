@@ -27,18 +27,12 @@ for header_dir in "$GTEST_INCLUDE" "$GTEST_INCLUDE/internal" \
 done
 
 write_header_list() {
-    local list_name="$1" header
-    local headers=()
+    local list_name="$1"
     shift
-    for header in "$@"; do
-        if [ -f "$header" ]; then
-            headers+=("$header")
-        fi
-    done
-    [ "${#headers[@]}" -gt 0 ] || fail "no headers found for $list_name; check the upstream layout"
+    [ "$#" -gt 0 ] || fail "no headers found for $list_name; check the upstream layout"
 
     printf '%s = [\n' "$list_name"
-    printf '  "//%s",\n' "${headers[@]}" | sort
+    printf '  "//%s",\n' "$@"
     printf ']\n'
 }
 
