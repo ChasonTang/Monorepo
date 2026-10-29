@@ -1,3 +1,5 @@
+import("//build/secondary/googletest/headers.gni")
+
 # Use upstream's aggregate sources so upgrades do not require maintaining an
 # individual implementation file list.
 config("gtest_public_config") {
@@ -10,7 +12,8 @@ config("gmock_public_config") {
 
 source_set("gtest") {
   testonly = true
-  sources = [ "googletest/src/gtest-all.cc" ]
+  public = gtest_public_headers
+  sources = [ "googletest/src/gtest-all.cc" ] + gtest_internal_headers
 
   # gtest-all.cc includes implementation files relative to this directory.
   include_dirs = [ "googletest" ]
@@ -23,7 +26,8 @@ source_set("gtest") {
 
 source_set("gmock") {
   testonly = true
-  sources = [ "googlemock/src/gmock-all.cc" ]
+  public = gmock_public_headers
+  sources = [ "googlemock/src/gmock-all.cc" ] + gmock_internal_headers
 
   # gmock-all.cc includes implementation files relative to this directory.
   include_dirs = [ "googlemock" ]
