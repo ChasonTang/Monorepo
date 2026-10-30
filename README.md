@@ -10,13 +10,13 @@ Requires macOS, `python3`, and the full
 
 ```bash
 git submodule update --init --recursive
-./sync_tools.sh                  # gn, ninja, clang, cfssl → ./tool/
+./sync_tools.sh                  # gn, ninja, clang, jq, cfssl → ./tool/
 ./extract_sdk.sh                 # macOS + iOS SDKs → ./build/sdk/
 ./tool/gn gen out --check
 ./tool/ninja -C out
 ```
 
-Rerun `sync_tools.sh` to update GN, Clang, CFSSL, and CFSSLJSON when their reported
+Rerun `sync_tools.sh` to update GN, Clang, jq, CFSSL, and CFSSLJSON when their reported
 versions differ from the pins. Ninja is skipped whenever `tool/ninja` exists;
 remove it before rerunning to reinstall or upgrade it. Rerun `extract_sdk.sh` to
 refresh Apple SDKs.
@@ -101,54 +101,41 @@ under `out/gen/thor/odin_test_certs/`.
 ## Formatting and Static Analysis
 
 These checks cover `argcv/`, `odin/`, and `ipsw/`, using bundled tools and the
-root `.clang-format` / `.clang-tidy` rules:
+root `.clang-format` / `.clang-tidy` rules.
+
+For local source/header changes (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`), stage the
+intended files and prefer `./tidy.sh --staged`. Configuration, script, and
+documentation-only changes do not need Tidy.
 
 ```bash
-./tool/gn check out           # check header dependencies in an existing build
-./format.sh                  # format project C/C++ files in place
-./tidy.sh --staged            # analyze sources selected from staged paths
-./tidy.sh                     # analyze all project sources in the selected build
-JOBS=12 BUILD_DIR=out ./tidy.sh # override parallelism and build directory
+./tidy.sh --staged
+JOBS=12 BUILD_DIR=out ./tidy.sh --staged # optional overrides
 ```
 
 `JOBS` defaults to the logical CPU count and `BUILD_DIR` to `out/` relative to
-the repository root. Both Tidy modes analyze working-tree contents, using only
-`.c`, `.cc`, and `.cpp` entries under the project directories above in the
-selected build's `compile_commands.json`. A full run analyzes all such entries.
+the repository root. Use an existing build directory appropriate for the change.
+Analysis uses working-tree contents. The command may first compile missing or
+outdated objects; it does not run unit tests. GN configuration edits are allowed;
+other sources rebuilt by accompanying GN edits may also be checked.
 
-`--staged` selects existing `.c`, `.cc`, and `.cpp` paths from the staged diff.
-For staged `.h` and `.hpp` paths, it also selects existing source files with
-the same basename in the same directory. Deleted paths are excluded. It does
-not discover other direct or indirect includers of headers or source files.
+Full analysis with `./tidy.sh` is normally reserved for the CI gate and can take
+over 10 minutes. If a local Tidy run reports an error, note the reason and skip
+Tidy for that change; do not automatically switch to a full run. Report the
+check as skipped or failed, not passed.
 
-A full run, or a staged run with candidates, regenerates the compilation
-database with `gn gen --check`, which also checks header dependencies. With no
-candidates, `--staged` exits successfully before both GN and static analysis;
-this can happen with only configuration changes, deletions, or headers without
-same-basename sources. If candidates exist but none match the database, GN
-runs and the analyzer reports `0 files`, also successfully. Confirm that the
-reported file count and paths cover the intended sources.
+| Error | Reason |
+| ----- | ------ |
+| `not executable` | A required local tool is missing or cannot be executed. |
+| GN or Ninja exits with an error | The selected build cannot be generated or compiled; see the preceding diagnostics. |
+| `no compilation unit covers staged path(s)` | A staged source is outside the selected build, or a header has no compiled consumer there. |
+| clang-tidy reports warnings or errors | The analyzer found issues in the selected code; retain the diagnostics when reporting the failed check. |
 
-Choose the mode by the affected sources:
+Other checks are available when relevant:
 
-| Situation | Action |
-| --------- | ------ |
-| Every affected source is selected by `--staged` and appears in the selected build's database. | Run `./tidy.sh --staged`. |
-| Affected includers or test wrappers are outside that selection, or coverage cannot be reliably established. | Run `./tidy.sh`. |
-| Analysis rules, compiler macros/options, or shared build configuration change. | Run `./tidy.sh` in the affected build configurations. |
-| Affected sources or conditional branches are absent from the selected build. | Add the relevant GN targets/sources or configure an appropriate `BUILD_DIR`, then choose the mode using the rules above. |
-
-A header being `public` does not by itself require a full run; cover its
-affected direct and indirect includers. Source-file changes can also affect
-other compilation units: `odin/testing/event_loop_testing.c`, for example,
-includes `odin/event_loop.c` and is not automatically selected when only the
-latter is staged. New headers must be included by an analyzed source or test
-in the selected build, even during a full run.
-
-A full run covers only the selected build configuration. For platform-specific
-changes, use the corresponding configured build directories, for example
-`BUILD_DIR=out/linux ./tidy.sh`; the default build does not cover every platform
-or conditional compilation branch.
+```bash
+./format.sh        # format project C/C++ files in place
+./tool/gn check out # check header dependencies in an existing build
+```
 
 ## Layout
 

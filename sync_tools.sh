@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Download pinned build tools. Skip an existing Ninja binary; compare reported
-# versions for GN, Clang, CFSSL, and CFSSLJSON.
+# versions for GN, Clang, jq, CFSSL, and CFSSLJSON.
 
 set -euo pipefail
 
@@ -9,6 +9,7 @@ set -euo pipefail
 GN_GIT_REVISION="81b24e01531ecf0eff12ec9359a555ec3944ec4e"  # Fixed gn git revision
 NINJA_VERSION="version:2@1.11.1.chromium.4"  # Ninja CIPD tag
 CLANG_GIT_REVISION="80743bd43fd5b38fedc503308e7a652e23d3ec93"  # Clang git revision
+JQ_VERSION="1.8.2"  # https://github.com/jqlang/jq/releases/tag/jq-1.8.2
 CFSSL_VERSION="1.7.1"  # Cloudflare CFSSL release version
 
 # Detect current machine architecture to download corresponding tool versions
@@ -17,6 +18,8 @@ if [ "$ARCH" = "arm64" ]; then
     GN_PLATFORM="mac-arm64"
     NINJA_PLATFORM="mac-arm64"
     CLANG_PLATFORM="mac-arm64"
+    JQ_PLATFORM="macos-arm64"
+    JQ_SHA256="2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e"
     CFSSL_PLATFORM="darwin_arm64"
     CFSSLJSON_PLATFORM=""
     echo "Detected Apple Silicon (ARM64) architecture"
@@ -24,6 +27,8 @@ elif [ "$ARCH" = "x86_64" ]; then
     GN_PLATFORM="mac-amd64"
     NINJA_PLATFORM="mac-amd64"
     CLANG_PLATFORM="mac-amd64"
+    JQ_PLATFORM="macos-amd64"
+    JQ_SHA256="e94b266e3c26690550006abe63152b782280f4e14374accdf04cbde844f00bc0"
     CFSSL_PLATFORM="darwin_amd64"
     CFSSLJSON_PLATFORM="darwin_amd64"
     echo "Detected Intel (x86_64) architecture"
@@ -67,6 +72,9 @@ tool_is_current() {
             ;;
         clang)
             [[ "$version_output" == *" $CLANG_GIT_REVISION)"* ]]
+            ;;
+        jq)
+            [ "$version_output" = "jq-$JQ_VERSION" ]
             ;;
         cfssl|cfssljson)
             printf '%s\n' "$version_output" | grep -Fx "Version: $CFSSL_VERSION" >/dev/null
@@ -120,6 +128,32 @@ sync_cipd_tool() {
     echo "$tool_name $version installed successfully"
 }
 
+download_jq() {
+    local output_path="$TOOL_DIR/jq"
+    local temp_path="$WORK/jq"
+    local url="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-${JQ_PLATFORM}"
+
+    if tool_is_current jq "$output_path"; then
+        echo "jq $JQ_VERSION already installed, skipping"
+        return
+    fi
+
+    echo "==> Downloading jq $JQ_VERSION..."
+    curl -fL --retry 3 -o "$temp_path" "$url"
+    printf '%s  %s\n' "$JQ_SHA256" "$temp_path" | shasum -a 256 -c -
+    if ! file "$temp_path" | grep 'Mach-O' >/dev/null; then
+        echo "Error: jq download is not a valid macOS binary" >&2
+        exit 1
+    fi
+    chmod +x "$temp_path"
+    if [ "$("$temp_path" --version)" != "jq-$JQ_VERSION" ]; then
+        echo "Error: jq download does not report version $JQ_VERSION" >&2
+        exit 1
+    fi
+    mv -f "$temp_path" "$output_path"
+    echo "jq $JQ_VERSION installed successfully"
+}
+
 download_cfssl_tool() {
     local tool_name="$1"
     local download_url="$2"
@@ -156,6 +190,7 @@ download_cfssl_tool() {
 sync_cipd_tool gn "gn/gn/$GN_PLATFORM" "git_revision:$GN_GIT_REVISION" gn
 sync_cipd_tool ninja "infra/3pp/tools/ninja/$NINJA_PLATFORM" "$NINJA_VERSION" ninja
 sync_cipd_tool clang "fuchsia/third_party/clang/$CLANG_PLATFORM" "git_revision:$CLANG_GIT_REVISION" bin/clang
+download_jq
 
 CFSSL_BASE_URL="https://github.com/cloudflare/cfssl/releases/download/v${CFSSL_VERSION}"
 download_cfssl_tool cfssl "${CFSSL_BASE_URL}/cfssl_${CFSSL_VERSION}_${CFSSL_PLATFORM}"
@@ -170,6 +205,7 @@ echo "Verifying tools..."
 "$TOOL_DIR/gn" --version
 "$TOOL_DIR/ninja" --version
 "$TOOL_DIR/clang/bin/clang" --version
+"$TOOL_DIR/jq" --version
 "$TOOL_DIR/cfssl" version
 if [ -n "$CFSSLJSON_PLATFORM" ]; then
     "$TOOL_DIR/cfssljson" -version
