@@ -1,184 +1,78 @@
-# GN build for c-ares (1.34.6).
-#
-# Source list mirrors c-ares/src/lib/Makefile.inc. The two shared configuration
-# headers preserve CMake's output for the repository SDKs with CARES_THREADS
-# and CARES_SYMBOL_HIDING enabled. Only ares_config.h needs platform selection;
-# its private CARES_OS_* defines come from this target's current_os.
-# Recheck the CMake output when updating c-ares or the SDKs.
+# c-ares 1.34.6, using the upstream Autotools file lists and configuration.
 
 import("//build/component.gni")
+import("//build/secondary/c-ares/config/targets.gni")
+import("//build/secondary/c-ares/sources.gni")
 
-_cares_config_dir = "//build/secondary/c-ares/config"
-
-# Public-facing config: anything that depends on //c-ares gets these include
-# dirs so it can resolve <ares.h> and the shared <ares_build.h>. The public
-# header is identical on every supported target and needs no platform defines.
-config("cares_public_config") {
-  include_dirs = [
-    _cares_config_dir,
-    "//c-ares/include",
-  ]
+if (current_os == "mac") {
+  if (current_cpu == "arm64") {
+    _cares_config_dir = cares_config_dirs.mac_arm64
+    _cares_build_dir = cares_build_dirs.mac_arm64
+  } else {
+    _cares_config_dir = cares_config_dirs.mac_x64
+    _cares_build_dir = cares_build_dirs.mac_x64
+  }
+} else if (current_os == "linux") {
+  _cares_config_dir = cares_config_dirs.linux_x64
+  _cares_build_dir = cares_build_dirs.linux_x64
+} else if (current_toolchain == "//build/toolchain:clang_ios_device") {
+  _cares_config_dir = cares_config_dirs.ios_arm64
+  _cares_build_dir = cares_build_dirs.ios_arm64
+} else if (current_cpu == "arm64") {
+  _cares_config_dir = cares_config_dirs.ios_sim_arm64
+  _cares_build_dir = cares_build_dirs.ios_sim_arm64
+} else {
+  _cares_config_dir = cares_config_dirs.ios_sim_x64
+  _cares_build_dir = cares_build_dirs.ios_sim_x64
 }
 
-# Private build settings used while compiling c-ares itself.
+_cares_include_dir = "$target_gen_dir/include"
+
+# ares.h includes "ares_build.h", so both must live in the generated directory.
+copy("public_headers") {
+  visibility = [ ":cares" ]
+  sources = cares_public_headers - [ "//c-ares/include/ares_build.h" ] +
+            [ "$_cares_build_dir/ares_build.h" ]
+  outputs = [ "$_cares_include_dir/{{source_file_part}}" ]
+}
+
+config("cares_public_config") {
+  include_dirs = [ _cares_include_dir ]
+}
+
 config("cares_internal_config") {
   defines = [
     "HAVE_CONFIG_H=1",
     "CARES_BUILDING_LIBRARY",
   ]
-
-  # Select the private configuration and match CMake's libc feature macros.
-  # current_os follows this toolchain, including during cross-compilation.
-  if (current_os == "mac") {
-    defines += [
-      "CARES_OS_MAC=1",
-      "_DARWIN_C_SOURCE",
-    ]
-  } else if (current_os == "ios") {
-    defines += [ "CARES_OS_IOS=1" ]
-  } else if (current_os == "linux") {
-    defines += [
-      "CARES_OS_LINUX=1",
-      "_GNU_SOURCE",
-      "_POSIX_C_SOURCE=200809L",
-      "_XOPEN_SOURCE=700",
-    ]
-  }
-
   include_dirs = [
-    # Prefer the configuration supplied by the GN adapter.
     _cares_config_dir,
-    "//c-ares/include",
-    "//c-ares/src/lib",
-    "//c-ares/src/lib/include",
+    "src/lib",
+    "src/lib/include",
   ]
 
-  cflags_c = [
-    "-Wno-unused-parameter",
-    "-Wno-sign-compare",
-    "-Wno-missing-field-initializers",
-    "-Wno-unused-but-set-variable",
-    "-Wno-unused-function",
-    "-Wno-unused-variable",
-  ]
+  # Match configure's pthread compile flag; feature macros come from ares_config.h.
+  cflags = [ "-pthread" ]
 }
 
 component("cares") {
   public_configs = [ ":cares_public_config" ]
-  configs += [ ":cares_internal_config" ]
-
-  sources = [
-    "$_cares_config_dir/ares_config.h",
-    "//c-ares/src/lib/ares_addrinfo2hostent.c",
-    "//c-ares/src/lib/ares_addrinfo_localhost.c",
-    "//c-ares/src/lib/ares_android.c",
-    "//c-ares/src/lib/ares_cancel.c",
-    "//c-ares/src/lib/ares_close_sockets.c",
-    "//c-ares/src/lib/ares_conn.c",
-    "//c-ares/src/lib/ares_cookie.c",
-    "//c-ares/src/lib/ares_data.c",
-    "//c-ares/src/lib/ares_destroy.c",
-    "//c-ares/src/lib/ares_free_hostent.c",
-    "//c-ares/src/lib/ares_free_string.c",
-    "//c-ares/src/lib/ares_freeaddrinfo.c",
-    "//c-ares/src/lib/ares_getaddrinfo.c",
-    "//c-ares/src/lib/ares_getenv.c",
-    "//c-ares/src/lib/ares_gethostbyaddr.c",
-    "//c-ares/src/lib/ares_gethostbyname.c",
-    "//c-ares/src/lib/ares_getnameinfo.c",
-    "//c-ares/src/lib/ares_hosts_file.c",
-    "//c-ares/src/lib/ares_init.c",
-    "//c-ares/src/lib/ares_library_init.c",
-    "//c-ares/src/lib/ares_metrics.c",
-    "//c-ares/src/lib/ares_options.c",
-    "//c-ares/src/lib/ares_parse_into_addrinfo.c",
-    "//c-ares/src/lib/ares_process.c",
-    "//c-ares/src/lib/ares_qcache.c",
-    "//c-ares/src/lib/ares_query.c",
-    "//c-ares/src/lib/ares_search.c",
-    "//c-ares/src/lib/ares_send.c",
-    "//c-ares/src/lib/ares_set_socket_functions.c",
-    "//c-ares/src/lib/ares_socket.c",
-    "//c-ares/src/lib/ares_sortaddrinfo.c",
-    "//c-ares/src/lib/ares_strerror.c",
-    "//c-ares/src/lib/ares_sysconfig.c",
-    "//c-ares/src/lib/ares_sysconfig_files.c",
-    "//c-ares/src/lib/ares_sysconfig_mac.c",
-    "//c-ares/src/lib/ares_sysconfig_win.c",
-    "//c-ares/src/lib/ares_timeout.c",
-    "//c-ares/src/lib/ares_update_servers.c",
-    "//c-ares/src/lib/ares_version.c",
-    "//c-ares/src/lib/dsa/ares_array.c",
-    "//c-ares/src/lib/dsa/ares_htable.c",
-    "//c-ares/src/lib/dsa/ares_htable_asvp.c",
-    "//c-ares/src/lib/dsa/ares_htable_dict.c",
-    "//c-ares/src/lib/dsa/ares_htable_strvp.c",
-    "//c-ares/src/lib/dsa/ares_htable_szvp.c",
-    "//c-ares/src/lib/dsa/ares_htable_vpstr.c",
-    "//c-ares/src/lib/dsa/ares_htable_vpvp.c",
-    "//c-ares/src/lib/dsa/ares_llist.c",
-    "//c-ares/src/lib/dsa/ares_slist.c",
-    "//c-ares/src/lib/event/ares_event_configchg.c",
-    "//c-ares/src/lib/event/ares_event_epoll.c",
-    "//c-ares/src/lib/event/ares_event_kqueue.c",
-    "//c-ares/src/lib/event/ares_event_poll.c",
-    "//c-ares/src/lib/event/ares_event_select.c",
-    "//c-ares/src/lib/event/ares_event_thread.c",
-    "//c-ares/src/lib/event/ares_event_wake_pipe.c",
-    "//c-ares/src/lib/event/ares_event_win32.c",
-    "//c-ares/src/lib/inet_net_pton.c",
-    "//c-ares/src/lib/inet_ntop.c",
-    "//c-ares/src/lib/legacy/ares_create_query.c",
-    "//c-ares/src/lib/legacy/ares_expand_name.c",
-    "//c-ares/src/lib/legacy/ares_expand_string.c",
-    "//c-ares/src/lib/legacy/ares_fds.c",
-    "//c-ares/src/lib/legacy/ares_getsock.c",
-    "//c-ares/src/lib/legacy/ares_parse_a_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_aaaa_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_caa_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_mx_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_naptr_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_ns_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_ptr_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_soa_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_srv_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_txt_reply.c",
-    "//c-ares/src/lib/legacy/ares_parse_uri_reply.c",
-    "//c-ares/src/lib/record/ares_dns_mapping.c",
-    "//c-ares/src/lib/record/ares_dns_multistring.c",
-    "//c-ares/src/lib/record/ares_dns_name.c",
-    "//c-ares/src/lib/record/ares_dns_parse.c",
-    "//c-ares/src/lib/record/ares_dns_record.c",
-    "//c-ares/src/lib/record/ares_dns_write.c",
-    "//c-ares/src/lib/str/ares_buf.c",
-    "//c-ares/src/lib/str/ares_str.c",
-    "//c-ares/src/lib/str/ares_strsplit.c",
-    "//c-ares/src/lib/util/ares_iface_ips.c",
-    "//c-ares/src/lib/util/ares_math.c",
-    "//c-ares/src/lib/util/ares_rand.c",
-    "//c-ares/src/lib/util/ares_threads.c",
-    "//c-ares/src/lib/util/ares_timeval.c",
-    "//c-ares/src/lib/util/ares_uri.c",
-    "//c-ares/src/lib/windows_port.c",
+  configs += [
+    ":cares_internal_config",
+    "//build:no_unused_parameter",
   ]
 
-  public = [
-    "$_cares_config_dir/ares_build.h",
-    "//c-ares/include/ares.h",
-    "//c-ares/include/ares_dns.h",
-    "//c-ares/include/ares_dns_record.h",
-    "//c-ares/include/ares_nameser.h",
-    "//c-ares/include/ares_version.h",
-  ]
+  public = get_target_outputs(":public_headers")
+  sources = cares_sources + [
+              "$_cares_config_dir/ares_config.h",
 
-  # Resolver routines (res_*, inet_net_pton) live in libresolv on both
-  # macOS (/usr/lib/libresolv.dylib) and glibc Linux (libresolv.so.2).
-  libs = [ "resolv" ]
+              # Let gn check reject consumers that bypass the generated header.
+              "//c-ares/include/ares_build.h",
+            ]
 
-  if (current_os == "linux") {
-    libs += [
-      "dl",
-      "pthread",
-    ]
-  }
+  # Keep the copy target private so consumers only see its generated outputs.
+  deps = [ ":public_headers" ]
+
+  # configure selects libpthread on all six targets.
+  libs = [ "pthread" ]
 }
