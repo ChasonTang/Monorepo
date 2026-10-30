@@ -198,6 +198,11 @@ source_set("odin_accept_loop") {
   sources = [ "accept_loop.c" ]
 
   public_deps = [ ":odin_event_loop" ]
+
+  if (current_os == "linux") {
+    # Expose glibc's accept4(2) declaration.
+    defines = [ "_GNU_SOURCE" ]
+  }
 }
 
 source_set("odin_transport") {

@@ -14,10 +14,6 @@
  * from inside on_accept or on_error via a deferred-destroy flag.
  */
 
-#if defined(__linux__) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE /* accept4(2) */
-#endif
-
 #include "odin/accept_loop.h"
 
 #include <errno.h>
