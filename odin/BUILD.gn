@@ -7,12 +7,12 @@
 #                          "odin" so the produced binary is out/odin. (Named
 #                          :odin_main because :odin already labels the
 #                          source_set.)
-#   :odin_symlinks       — GN action that creates relative symlinks
+#   :odin_symlinks       — group of ln actions that creates relative symlinks
 #                          out/odin-client and out/odin-server pointing to
 #                          basename "odin". Intentionally has no deps on
-#                          :odin_main: link contents depend only on script
-#                          and link/target paths, so relinking out/odin
-#                          must not re-run the action.
+#                          :odin_main: link contents depend only on
+#                          link/target paths, so relinking out/odin must not
+#                          re-run the actions.
 #   :odin_cli_artifacts  — group bundling :odin_main + :odin_symlinks.
 #
 # Test targets live in //odin/testing:BUILD.gn (notably :odin_unittests
@@ -294,21 +294,28 @@ executable("odin_main") {
   }
 }
 
-action("odin_symlinks") {
-  script = "//build/symlink.py"
+foreach(mode,
+        [
+          "client",
+          "server",
+        ]) {
+  action("odin_${mode}_symlink") {
+    script = "/bin/ln"
 
-  outputs = [
-    "$root_out_dir/odin-client",
-    "$root_out_dir/odin-server",
-  ]
+    outputs = [ "$root_out_dir/odin-$mode" ]
 
-  args = [
-    "--target",
-    "odin",
-    "--link",
-    rebase_path("$root_out_dir/odin-client", root_build_dir),
-    "--link",
-    rebase_path("$root_out_dir/odin-server", root_build_dir),
+    args = [
+      "-sfn",
+      "odin",
+      rebase_path(outputs[0], root_build_dir),
+    ]
+  }
+}
+
+group("odin_symlinks") {
+  deps = [
+    ":odin_client_symlink",
+    ":odin_server_symlink",
   ]
 }
 

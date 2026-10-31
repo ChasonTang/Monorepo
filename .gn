@@ -17,6 +17,6 @@ check_targets = [
 # Also validate dependencies included with <angle brackets> (e.g. gtest).
 check_system_includes = true
 
-# Run all GN action() scripts through python3. Without this, GN would search
-# $PATH for "python", which is absent on systems that ship only python3.
-script_executable = "python3"
+# Execute actions directly so they can use host tools such as /bin/ln.
+# Python scripts select python3 through their shebangs and must be executable.
+script_executable = ""

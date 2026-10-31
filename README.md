@@ -4,7 +4,7 @@ A C/C++ monorepo built with GN + Ninja.
 
 ## Quick Start
 
-Requires macOS, `python3`, and the full
+Requires macOS and the full
 [Xcode app](https://developer.apple.com/download/all/) placed or symlinked at
 `./Xcode.app`. Run from the repository root:
 
@@ -86,7 +86,8 @@ GCC 10 libstdc++ lacks complete C++23 support.
 
 ## Tests
 
-For native tests, ensure `openssl` is on `PATH` for TLS fixture generation:
+For native tests, ensure `python3` and `openssl` are on `PATH` for test helpers
+and TLS fixture generation:
 
 ```bash
 ./tool/gn gen out --check
@@ -102,6 +103,9 @@ under `out/gen/thor/odin_test_certs/`.
 
 These checks cover `argcv/`, `odin/`, and `ipsw/`, using bundled tools and the
 root `.clang-format` / `.clang-tidy` rules.
+
+`tidy.sh` requires `python3` for its Clang-Tidy runner. The optional Odin scope
+checks and `docs/rfc_lint.py` also require `python3`; the default build does not.
 
 For local source/header changes (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`), stage the
 intended files and prefer `./tidy.sh --staged`. Configuration, script, and

@@ -114,7 +114,7 @@ template("clang_toolchain") {
     asm = "$prefix/clang"
     ar = "$prefix/llvm-ar"
     ld = "$prefix/clang++"
-    toc_script = rebase_path("//build/toolchain/solink_toc.py", root_build_dir)
+    toc_script = rebase_path("//build/toolchain/solink_toc.sh", root_build_dir)
 
     tool("cc") {
       depfile = "{{output}}.d"
@@ -182,7 +182,7 @@ template("clang_toolchain") {
         toc_format = "elf"
       }
 
-      command = "$ld $link_flags -shared $shared_flags {{ldflags}} -o \"$sofile\" \"@$rspfile\" && python3 \"$toc_script\" --format=$toc_format --tool-dir=\"$prefix\" --library=\"$sofile\" --toc=\"$tocfile\" --depfile=\"$depfile\""
+      command = "$ld $link_flags -shared $shared_flags {{ldflags}} -o \"$sofile\" \"@$rspfile\" && \"$toc_script\" --format=$toc_format --tool-dir=\"$prefix\" --library=\"$sofile\" --toc=\"$tocfile\" --depfile=\"$depfile\""
       description = "SOLINK $sofile"
       output_prefix = "lib"
       outputs = [
