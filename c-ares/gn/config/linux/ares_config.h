@@ -428,7 +428,7 @@
 #define PACKAGE_NAME "c-ares"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "c-ares 1.34.6"
+#define PACKAGE_STRING "c-ares 1.34.9"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "c-ares"
@@ -437,7 +437,7 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "1.34.6"
+#define PACKAGE_VERSION "1.34.9"
 
 /* Define to necessary symbol if this constant uses a non-standard name on
    your system. */
@@ -588,7 +588,7 @@
 
 
 /* Version number of package */
-#define VERSION "1.34.6"
+#define VERSION "1.34.9"
 
 /* Number of bits in a file offset, on hosts where this is settable. */
 /* #undef _FILE_OFFSET_BITS */

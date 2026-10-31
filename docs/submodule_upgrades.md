@@ -52,9 +52,9 @@ Complete [Quick Start](../README.md#quick-start), then run from the repository r
 
 ## c-ares release archive
 
-Current release: [`c-ares-1.34.6.tar.gz`](https://github.com/c-ares/c-ares/releases/tag/v1.34.6).
+Current release: [`c-ares-1.34.9.tar.gz`](https://github.com/c-ares/c-ares/releases/tag/v1.34.9).
 SHA256:
-`912dd7cc3b3e8a79c52fd7fb9c0f4ecf0aaa73e45efda880266a2d6e26b84ef5`.
+`9364b70a12eb59a06830fb488d9357f90100dff0d98b23ea3593a183d43e6f2f`.
 
 1. Download the `c-ares-<version>.tar.gz`
    [release asset](https://github.com/c-ares/c-ares/releases):
