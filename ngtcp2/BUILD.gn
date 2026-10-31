@@ -1,9 +1,9 @@
 # ngtcp2 with the BoringSSL backend used by the monorepo.
 
 import("//build/component.gni")
-import("//build/secondary/ngtcp2/sources.gni")
+import("//ngtcp2/gn/sources.gni")
 
-_ngtcp2_config_dir = "//build/secondary/ngtcp2/config"
+_ngtcp2_config_dir = "//ngtcp2/gn/config"
 if (current_os == "linux") {
   _ngtcp2_config_dir += "/linux"
 } else {

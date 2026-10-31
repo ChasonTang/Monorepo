@@ -71,16 +71,19 @@ SHA256:
 
    Check the hash against the asset's SHA256 digest on GitHub before extracting.
 
-2. Extract and replace `c-ares/`:
+2. Extract and replace `c-ares/`, preserving the repository's GN adapter:
 
    ```bash
    tar -xzf "$cares_archive" -C "$cares_upgrade_dir"
    mv c-ares "$cares_upgrade_dir/previous"
    mv "$cares_upgrade_dir/c-ares-$cares_version" c-ares
+   cp "$cares_upgrade_dir/previous/BUILD.gn" c-ares/BUILD.gn
    ```
 
-   Keep the release tree unchanged, including its generic `include/ares_build.h`.
-   Generated target headers belong in `build/secondary/c-ares/config/`.
+   The generators below recreate `c-ares/gn/sources.gni` and platform headers
+   under `c-ares/gn/config/`. The archive's `c-ares/config/` contains only its
+   Autotools helper scripts. The config generator also overwrites the archive's
+   generic `include/ares_build.h` with configure output.
 
 3. Regenerate source lists and configuration headers:
 
@@ -91,28 +94,32 @@ SHA256:
    ./util/update_autotools_config.sh c-ares --check
    ```
 
-   Review the diff and remove header directories no longer referenced by
-   `build/secondary/c-ares/config/targets.gni`.
+   The config generator verifies that all six targets produce identical
+   `ares_build.h` contents before overwriting `c-ares/include/ares_build.h`.
+   If they differ, reconcile the differences before updating the shared header.
+   Private `ares_config.h` files are grouped by identical contents; review the
+   diff and remove generated header directories no longer referenced by
+   `c-ares/gn/config/targets.gni`.
 
    On failure, inspect the target's `configure.log` and `config.log` under
    the printed `out/c-ares-config/run.*/` path.
 
 4. Validate the upgrade:
 
-   - Run `gn gen --check`, build `cares`, then run `gn check --check-generated`
-     for each [supported target](../README.md#cross-compilation).
-   - Confirm compiler dependencies use the copied public headers and exclude
-     `c-ares/include/ares_build.h`.
+   - Run `gn gen --check` and build `cares` for each
+     [supported target](../README.md#cross-compilation).
+   - Confirm compiler dependencies use `c-ares/include/ares_build.h` and the
+     selected platform's `ares_config.h` under `c-ares/gn/config/`.
    - Run Odin's DNS resolver tests on the host and follow the
      [static-analysis requirements](../README.md#formatting-and-static-analysis).
 
 5. Update the release and SHA256 above and the version in
-   `build/secondary/c-ares/BUILD.gn`.
+   `c-ares/BUILD.gn`.
 
 6. Stage and commit:
 
    ```bash
-   git add -A -- c-ares build/secondary/c-ares README.md docs/submodule_upgrades.md \
+   git add -A -- c-ares README.md docs/submodule_upgrades.md \
        util/update_autotools_config.sh util/update_autotools_sources.sh
    git commit -m "chore(deps): upgrade c-ares to v$cares_version"
    ```
@@ -136,14 +143,16 @@ SHA256:
    tar -xf "$ngtcp2_archive" -C "$ngtcp2_upgrade_dir"
    ```
 
-   Replace `ngtcp2/`:
+   Replace `ngtcp2/`, preserving the repository's GN adapter:
 
    ```bash
    mv ngtcp2 "$ngtcp2_upgrade_dir/previous"
    mv "$ngtcp2_upgrade_dir/ngtcp2-$ngtcp2_version" ngtcp2
+   cp "$ngtcp2_upgrade_dir/previous/BUILD.gn" ngtcp2/BUILD.gn
    ```
 
    Keep the release's `configure` and `lib/includes/ngtcp2/version.h`.
+   The generators below recreate `ngtcp2/gn/sources.gni` and `ngtcp2/gn/config/`.
 
 3. Regenerate the source lists and configuration headers:
 
@@ -151,13 +160,13 @@ SHA256:
    ./util/update_autotools_sources.sh ngtcp2
    ./util/update_autotools_sources.sh ngtcp2 --check
    ./util/update_autotools_config.sh ngtcp2
+   ./util/update_autotools_config.sh ngtcp2 --check
    ```
 
    On failure, inspect the target's `configure.log` and `config.log` under
    the printed `out/ngtcp2-config/run.*/` path. If Apple configurations
-   differ, split `build/secondary/ngtcp2/config/` into platform groups,
-   update `build/secondary/ngtcp2/BUILD.gn` and
-   `util/update_autotools_config.sh`, then rerun generation.
+   differ, split `ngtcp2/gn/config/` into platform groups, update
+   `ngtcp2/BUILD.gn` and `util/update_autotools_config.sh`, then rerun generation.
 
    Keep the generator's triples and deployment versions synchronized with
    `build/toolchain/BUILD.gn`.
@@ -165,7 +174,7 @@ SHA256:
 4. Stage and commit:
 
    ```bash
-   git add -A -- ngtcp2 build/secondary/ngtcp2 \
+   git add -A -- ngtcp2 README.md docs/submodule_upgrades.md \
        util/update_autotools_sources.sh \
        util/update_autotools_config.sh
    git commit -m "chore(deps): upgrade ngtcp2 to v$ngtcp2_version"

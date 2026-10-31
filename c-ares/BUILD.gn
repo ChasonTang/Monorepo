@@ -1,43 +1,27 @@
 # c-ares 1.34.6, using the upstream Autotools file lists and configuration.
 
 import("//build/component.gni")
-import("//build/secondary/c-ares/config/targets.gni")
-import("//build/secondary/c-ares/sources.gni")
+import("//c-ares/gn/config/targets.gni")
+import("//c-ares/gn/sources.gni")
 
 if (current_os == "mac") {
   if (current_cpu == "arm64") {
     _cares_config_dir = cares_config_dirs.mac_arm64
-    _cares_build_dir = cares_build_dirs.mac_arm64
   } else {
     _cares_config_dir = cares_config_dirs.mac_x64
-    _cares_build_dir = cares_build_dirs.mac_x64
   }
 } else if (current_os == "linux") {
   _cares_config_dir = cares_config_dirs.linux_x64
-  _cares_build_dir = cares_build_dirs.linux_x64
 } else if (current_toolchain == "//build/toolchain:clang_ios_device") {
   _cares_config_dir = cares_config_dirs.ios_arm64
-  _cares_build_dir = cares_build_dirs.ios_arm64
 } else if (current_cpu == "arm64") {
   _cares_config_dir = cares_config_dirs.ios_sim_arm64
-  _cares_build_dir = cares_build_dirs.ios_sim_arm64
 } else {
   _cares_config_dir = cares_config_dirs.ios_sim_x64
-  _cares_build_dir = cares_build_dirs.ios_sim_x64
-}
-
-_cares_include_dir = "$target_gen_dir/include"
-
-# ares.h includes "ares_build.h", so both must live in the generated directory.
-copy("public_headers") {
-  visibility = [ ":cares" ]
-  sources = cares_public_headers - [ "//c-ares/include/ares_build.h" ] +
-            [ "$_cares_build_dir/ares_build.h" ]
-  outputs = [ "$_cares_include_dir/{{source_file_part}}" ]
 }
 
 config("cares_public_config") {
-  include_dirs = [ _cares_include_dir ]
+  include_dirs = [ "include" ]
 }
 
 config("cares_internal_config") {
@@ -62,16 +46,8 @@ component("cares") {
     "//build:no_unused_parameter",
   ]
 
-  public = get_target_outputs(":public_headers")
-  sources = cares_sources + [
-              "$_cares_config_dir/ares_config.h",
-
-              # Let gn check reject consumers that bypass the generated header.
-              "//c-ares/include/ares_build.h",
-            ]
-
-  # Keep the copy target private so consumers only see its generated outputs.
-  deps = [ ":public_headers" ]
+  public = cares_public_headers
+  sources = cares_sources + [ "$_cares_config_dir/ares_config.h" ]
 
   # configure selects libpthread on all six targets.
   libs = [ "pthread" ]
