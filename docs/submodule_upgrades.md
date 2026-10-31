@@ -1,26 +1,23 @@
 # Upgrade dependencies
 
-Start after completing Quick Start, with the submodules already initialized.
-Run the following commands from the repository root.
+Complete [Quick Start](../README.md#quick-start), then run from the repository root.
 
 ## Git submodules
 
-1. Set the dependency to upgrade. Use `xquic`, `boringssl`, `c-ares`,
-   or `googletest`:
+1. Set the dependency to upgrade. Use `xquic`, `boringssl`, or `googletest`:
 
    ```bash
    dependency=googletest
    ```
 
-2. Fetch upstream tags and list available tags:
+2. Fetch and list upstream tags:
 
    ```bash
    git -C "$dependency" fetch origin --tags
    git -C "$dependency" tag --list --sort=-version:refname
    ```
 
-3. Replace `<newer-release-tag>` with the newer release tag you want to use,
-   then check out that tag and update any nested submodules:
+3. Check out the target release and update nested submodules:
 
    ```bash
    target_tag='<newer-release-tag>'
@@ -28,7 +25,7 @@ Run the following commands from the repository root.
    git -C "$dependency" submodule update --init --recursive
    ```
 
-4. When upgrading `googletest`, regenerate
+4. For `googletest`, regenerate
    `build/secondary/googletest/headers.gni`:
 
    ```bash
@@ -41,24 +38,90 @@ Run the following commands from the repository root.
    git add -- "$dependency"
    ```
 
-   For `googletest`, also stage the regenerated header list:
+   For `googletest`, also stage the header list:
 
    ```bash
    git add -- build/secondary/googletest/headers.gni
    ```
 
-6. Commit the upgrade in the parent repository using a Conventional Commits
-   message with the `chore(deps)` prefix:
+6. Commit:
 
    ```bash
    git commit -m "chore(deps): upgrade $dependency to $target_tag"
    ```
 
+## c-ares release archive
+
+Current release: [`c-ares-1.34.6.tar.gz`](https://github.com/c-ares/c-ares/releases/tag/v1.34.6).
+SHA256:
+`912dd7cc3b3e8a79c52fd7fb9c0f4ecf0aaa73e45efda880266a2d6e26b84ef5`.
+
+1. Download the `c-ares-<version>.tar.gz`
+   [release asset](https://github.com/c-ares/c-ares/releases):
+
+   ```bash
+   cares_version='<newer-release-version>'
+   mkdir -p out/dependency-upgrades
+   cares_upgrade_dir="$(mktemp -d "$PWD/out/dependency-upgrades/c-ares.XXXXXX")"
+   cares_archive="$cares_upgrade_dir/c-ares-$cares_version.tar.gz"
+   curl -fL --retry 3 -o "$cares_archive" \
+       "https://github.com/c-ares/c-ares/releases/download/v$cares_version/c-ares-$cares_version.tar.gz"
+   shasum -a 256 "$cares_archive"
+   ```
+
+   Check the hash against the asset's SHA256 digest on GitHub before extracting.
+
+2. Extract and replace `c-ares/`:
+
+   ```bash
+   tar -xzf "$cares_archive" -C "$cares_upgrade_dir"
+   mv c-ares "$cares_upgrade_dir/previous"
+   mv "$cares_upgrade_dir/c-ares-$cares_version" c-ares
+   ```
+
+   Keep the release tree unchanged, including its generic `include/ares_build.h`.
+   Generated target headers belong in `build/secondary/c-ares/config/`.
+
+3. Regenerate source lists and configuration headers:
+
+   ```bash
+   ./util/update_autotools_sources.sh c-ares
+   ./util/update_autotools_sources.sh c-ares --check
+   ./util/update_autotools_config.sh c-ares
+   ./util/update_autotools_config.sh c-ares --check
+   ```
+
+   Review the diff and remove header directories no longer referenced by
+   `build/secondary/c-ares/config/targets.gni`.
+
+   On failure, inspect the target's `configure.log` and `config.log` under
+   the printed `out/c-ares-config/run.*/` path.
+
+4. Validate the upgrade:
+
+   - Run `gn gen --check`, build `cares`, then run `gn check --check-generated`
+     for each [supported target](../README.md#cross-compilation).
+   - Confirm compiler dependencies use the copied public headers and exclude
+     `c-ares/include/ares_build.h`.
+   - Run Odin's DNS resolver tests on the host and follow the
+     [static-analysis requirements](../README.md#formatting-and-static-analysis).
+
+5. Update the release and SHA256 above and the version in
+   `build/secondary/c-ares/BUILD.gn`.
+
+6. Stage and commit:
+
+   ```bash
+   git add -A -- c-ares build/secondary/c-ares README.md docs/submodule_upgrades.md \
+       util/update_autotools_config.sh util/update_autotools_sources.sh
+   git commit -m "chore(deps): upgrade c-ares to v$cares_version"
+   ```
+
 ## ngtcp2 release archive
 
 1. Download the `ngtcp2-<version>.tar.xz` asset from the target
-   [upstream release](https://github.com/ngtcp2/ngtcp2/releases). Set the
-   version without the `v` prefix and the downloaded archive's path:
+   [upstream release](https://github.com/ngtcp2/ngtcp2/releases).
+   Set the version without the `v` prefix and the archive path:
 
    ```bash
    ngtcp2_version='<newer-release-version>'
@@ -73,8 +136,7 @@ Run the following commands from the repository root.
    tar -xf "$ngtcp2_archive" -C "$ngtcp2_upgrade_dir"
    ```
 
-   After extraction succeeds, replace the entire `ngtcp2/` tree, retaining
-   the previous tree in the upgrade directory:
+   Replace `ngtcp2/`:
 
    ```bash
    mv ngtcp2 "$ngtcp2_upgrade_dir/previous"
@@ -86,21 +148,25 @@ Run the following commands from the repository root.
 3. Regenerate the source lists and configuration headers:
 
    ```bash
-   ./util/update_ngtcp2_sources.sh
-   ./util/update_ngtcp2_config.sh
+   ./util/update_autotools_sources.sh ngtcp2
+   ./util/update_autotools_sources.sh ngtcp2 --check
+   ./util/update_autotools_config.sh ngtcp2
    ```
 
-   If configuration fails, inspect `configure.log` and `config.log` in the
-   target directory under the printed `out/ngtcp2-config/run.*/` path. If
-   Apple configurations differ, split `build/secondary/ngtcp2/config/` into
-   the required platform groups, update `build/secondary/ngtcp2/BUILD.gn`
-   and `util/update_ngtcp2_config.sh`, then rerun generation.
+   On failure, inspect the target's `configure.log` and `config.log` under
+   the printed `out/ngtcp2-config/run.*/` path. If Apple configurations
+   differ, split `build/secondary/ngtcp2/config/` into platform groups,
+   update `build/secondary/ngtcp2/BUILD.gn` and
+   `util/update_autotools_config.sh`, then rerun generation.
 
-4. Stage and commit the source, generated files and any generator or GN
-   adjustments:
+   Keep the generator's triples and deployment versions synchronized with
+   `build/toolchain/BUILD.gn`.
+
+4. Stage and commit:
 
    ```bash
    git add -A -- ngtcp2 build/secondary/ngtcp2 \
-       util/update_ngtcp2_sources.sh util/update_ngtcp2_config.sh
+       util/update_autotools_sources.sh \
+       util/update_autotools_config.sh
    git commit -m "chore(deps): upgrade ngtcp2 to v$ngtcp2_version"
    ```
