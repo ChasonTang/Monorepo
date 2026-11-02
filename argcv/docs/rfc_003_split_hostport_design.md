@@ -1,5 +1,3 @@
-# RFC 003: Splitting Host and Port Byte Slices
-
 ## 1. Purpose and design rationale
 
 This RFC proposes `argcv_split_hostport`, a function that separates a byte slice
