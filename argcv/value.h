@@ -1,4 +1,4 @@
-/* Allocation-free parsing and splitting of byte slices. */
+/* Allocation-free parsing, splitting, and validation of byte slices. */
 
 #ifndef ARGCV_VALUE_H_
 #define ARGCV_VALUE_H_
@@ -62,6 +62,23 @@ typedef struct {
  * See docs/rfc_003_split_hostport_design.md for the full contract. */
 ARGCV_EXPORT bool argcv_split_hostport(const char *text, size_t len,
                                        argcv_hostport_parts_t *out);
+
+/* Return true exactly when all len bytes form an IPv6 address. Accept one to
+ * four ASCII hexadecimal digits per group, at most one '::' compressing at
+ * least one group, and an optional final IPv4 dotted-decimal tail occupying
+ * two groups. The expanded address must contain exactly eight groups.
+ * Decimal octets must be in 0..255 with no leading zeros except for '0'
+ * itself. No NUL terminator is required. Empty input, NULs within the
+ * slice, whitespace, brackets, zone identifiers, and network prefixes are
+ * invalid. This checks syntax only, without imposing a canonical spelling
+ * or interpreting a final group as a port.
+ *
+ * Preconditions: text is nonnull with at least len readable bytes (even for
+ * len == 0). Input remains valid and unchanged during the call. Only bytes
+ * within the slice are inspected; no input is modified and no storage is
+ * retained. No allocation, I/O, name resolution, or mutable global state.
+ * See docs/rfc_004_validate_ipv6_design.md for the full contract. */
+ARGCV_EXPORT bool argcv_validate_ipv6(const char *text, size_t len);
 
 #pragma clang assume_nonnull end
 

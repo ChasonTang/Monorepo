@@ -343,4 +343,321 @@ TEST(ArgcvSplitHostportTest, ReuseOutputAfterSuccessAndFailure) {
   ExpectSplitHostport(bracketed_host, 5, true, {1, 3, 0, 0, true}, out);
 }
 
+void ExpectValidateIpv6(const char *buffer, size_t buffer_len, size_t offset,
+                        size_t len, bool success) {
+  ASSERT_LT(offset, buffer_len);
+  ASSERT_LE(len, buffer_len - offset);
+  // Snapshot all storage, including any terminator and out-of-slice bytes.
+  const std::string before(buffer, buffer_len);
+  SCOPED_TRACE(before.substr(offset, len));
+  EXPECT_EQ(argcv_validate_ipv6(buffer + offset, len), success);
+  EXPECT_EQ(std::string(buffer, buffer_len), before);
+}
+
+template <size_t N>
+void ExpectValidateIpv6(char (&buffer)[N], size_t offset, size_t len,
+                        bool success) {
+  ExpectValidateIpv6(buffer, N, offset, len, success);
+}
+
+void ExpectValidateIpv6(std::string &text, bool success) {
+  // Include the string's terminator in the snapshot, but not in the slice.
+  ExpectValidateIpv6(text.data(), text.size() + 1, 0, text.size(), success);
+}
+
+struct ValidateIpv6Case {
+  const char *id;
+  char text[46];
+  size_t len;
+  bool success;
+};
+
+class ArgcvValidateIpv6RfcTest
+    : public testing::TestWithParam<ValidateIpv6Case> {};
+
+// TEST_P generates a public override of GoogleTest's private TestBody method.
+// NOLINTNEXTLINE(misc-override-with-different-visibility)
+TEST_P(ArgcvValidateIpv6RfcTest, RfcCase) {
+  auto test = GetParam();
+  ExpectValidateIpv6(test.text, 0, test.len, test.success);
+}
+
+// V01, M02, E02, and X22 use exact-size objects below for ASan. Compression
+// representatives V10-V12, M05-M07, E10-E12, and X15-X16 are covered by
+// G01/G02.
+INSTANTIATE_TEST_SUITE_P(
+    Rfc, ArgcvValidateIpv6RfcTest,
+    testing::ValuesIn<ValidateIpv6Case>({
+        {"V02", "::1", 3, true},
+        {"V03", "2001:db8::1", 11, true},
+        {"V04", "1:2:3:4:5:6:7:8", 15, true},
+        {"V05", "0:0:0:0:0:0:0:0", 15, true},
+        {"V06", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", 39, true},
+        {"V07", "2001:0DB8:0000:0000:0000:0000:0000:0001", 39, true},
+        {"V08", "a:B:c:D:e:F:0:1", 15, true},
+        {"V09", "0:00:000:0000:1:01:001:0001", 27, true},
+        {"V13", "fe80::1", 7, true},
+        {"V14", "ff02::1", 7, true},
+        {"V15", "::1:443", 7, true},
+        {"M01", "::192.0.2.1", 11, true},
+        {"M03", "0:0:0:0:0:ffff:192.0.2.1", 24, true},
+        {"M04", "1:2:3:4:5:6:192.0.2.1", 21, true},
+        {"M08", "::ffff:0.9.10.99", 16, true},
+        {"M09", "::ffff:100.199.249.255", 22, true},
+        {"M10", "::ffff:255.255.255.255", 22, true},
+        {"M11", "ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255", 45, true},
+        {"M12", "::0.0.0.0", 9, true},
+        {"M13", "2001:db8::192.0.2.1", 19, true},
+        {"E01", "", 0, false},
+        {"E03", ":1", 2, false},
+        {"E04", "1:", 2, false},
+        {"E05", ":::", 3, false},
+        {"E06", "1:::2", 5, false},
+        {"E07", "1::2::3", 7, false},
+        {"E08", "1:2:3:4:5:6:7", 13, false},
+        {"E09", "1:2:3:4:5:6:7:8:9", 17, false},
+        {"E13", "12345::", 7, false},
+        {"E14", "::00000", 7, false},
+        {"E15", "2001:db8::g", 11, false},
+        {"E16", "0x1::", 5, false},
+        {"E17", "+1::", 4, false},
+        {"E18", "-1::", 4, false},
+        {"E19", " ::1", 4, false},
+        {"E20", "::1 ", 4, false},
+        {"E21", ":: 1", 4, false},
+        {"E22", "\t::1", 4, false},
+        {"E23", "::1\r\n", 5, false},
+        {"E24", "::1junk", 7, false},
+        {"E25", "[::1]", 5, false},
+        {"E26", "[::1]:443", 9, false},
+        {"E27", "2001:db8::/64", 13, false},
+        {"E28", "fe80::1%eth0", 12, false},
+        {"E29", "fe80::1%3", 9, false},
+        {"E30", "fe80::1%25eth0", 14, false},
+        {"E31", "v1.fe80", 7, false},
+        {"E32", "192.0.2.1", 9, false},
+        {"E33", "example.com", 11, false},
+        {"E34", "1", 1, false},
+        {"E35", "::1:", 4, false},
+        {"E36", ":1::", 4, false},
+        {"X01", "::ffff:256.0.2.1", 16, false},
+        {"X02", "::ffff:192.0.2.256", 18, false},
+        {"X03", "::ffff:192.00.2.1", 17, false},
+        {"X04", "::ffff:192.0.2.01", 17, false},
+        {"X05", "::ffff:000.0.0.0", 16, false},
+        {"X06", "::ffff:192.0.2", 14, false},
+        {"X07", "::ffff:192.0.2.1.5", 18, false},
+        {"X08", "::ffff:192..2.1", 15, false},
+        {"X09", "::ffff:.192.0.2.1", 17, false},
+        {"X10", "::ffff:192.0.2.1.", 17, false},
+        {"X11", "::ffff:192.0.2.1:1", 18, false},
+        {"X12", "192.0.2.1::", 11, false},
+        {"X13", "1:2:3:4:5:192.0.2.1", 19, false},
+        {"X14", "1:2:3:4:5:6:7:192.0.2.1", 23, false},
+        {"X17", "::ffff:0xc0.0.2.1", 17, false},
+        {"X18", "::ffff:192.0.2.+1", 17, false},
+        {"X19", "::ffff:192.0.2.-1", 17, false},
+        {"X20", "::ffff:192.0.2.4294967296", 25, false},
+        {"X21", "::ffff:192.0.2.a", 16, false},
+    }),
+    [](const testing::TestParamInfo<ValidateIpv6Case> &info) {
+      return info.param.id;
+    });
+
+TEST(ArgcvValidateIpv6Test, E02SingleColonWithoutTerminator) {
+  char text[] = {':'};
+  ExpectValidateIpv6(text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv6Test, V01CompressionWithoutTerminator) {
+  char text[] = {':', ':'};
+  ExpectValidateIpv6(text, 0, sizeof(text), true);
+}
+
+TEST(ArgcvValidateIpv6Test, M02Ipv4TailWithoutTerminator) {
+  char text[] = {':', ':', 'f', 'f', 'f', 'f', ':', '1',
+                 '9', '2', '.', '0', '.', '2', '.', '1'};
+  ExpectValidateIpv6(text, 0, sizeof(text), true);
+}
+
+TEST(ArgcvValidateIpv6Test, X22EmptyFourthOctetWithoutTerminator) {
+  char text[] = {':', ':', 'f', 'f', 'f', 'f', ':', '1',
+                 '9', '2', '.', '0', '.', '2', '.'};
+  ExpectValidateIpv6(text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv6Test, S01NonTerminatedSlice) {
+  char text[] = {':', ':', '1'};
+  ExpectValidateIpv6(text, 0, sizeof(text), true);
+}
+
+TEST(ArgcvValidateIpv6Test, S02ToS04ExactSubslice) {
+  char text[] = {'x', ':', ':', '1', 'y'};
+  ExpectValidateIpv6(text, 1, 3, true);
+  ExpectValidateIpv6(text, 1, 4, false);
+  ExpectValidateIpv6(text, 0, 4, false);
+}
+
+TEST(ArgcvValidateIpv6Test, S05EmptySlice) {
+  char text[] = {'x'};
+  ExpectValidateIpv6(text, 0, 0, false);
+}
+
+TEST(ArgcvValidateIpv6Test, S06WhitespaceAndNulOutsideSlice) {
+  char text[] = {' ', ':', ':', '1', '\0'};
+  ExpectValidateIpv6(text, 1, 3, true);
+}
+
+TEST(ArgcvValidateIpv6Test, S07ToS09NulInsideSlice) {
+  char end[] = {':', ':', '1', '\0'};
+  char middle[] = {':', '\0', ':', '1'};
+  char start[] = {'\0', ':', ':', '1'};
+  ExpectValidateIpv6(end, 0, sizeof(end), false);
+  ExpectValidateIpv6(middle, 0, sizeof(middle), false);
+  ExpectValidateIpv6(start, 0, sizeof(start), false);
+}
+
+TEST(ArgcvValidateIpv6Test, S10S11NonHexByteAtBoundary) {
+  char text[] = {':', ':', '1', 'g'};
+  ExpectValidateIpv6(text, 0, 3, true);
+  ExpectValidateIpv6(text, 0, 4, false);
+}
+
+TEST(ArgcvValidateIpv6Test, S12S13ColonAtBoundary) {
+  char text[] = {':', ':', '1', ':'};
+  ExpectValidateIpv6(text, 0, 3, true);
+  ExpectValidateIpv6(text, 0, 4, false);
+}
+
+TEST(ArgcvValidateIpv6Test, S14S15FifthHexDigitAtBoundary) {
+  char text[] = {':', ':', '1', '2', '3', '4', '5'};
+  ExpectValidateIpv6(text, 0, 6, true);
+  ExpectValidateIpv6(text, 0, 7, false);
+}
+
+TEST(ArgcvValidateIpv6Test, S16FullwidthDigit) {
+  char text[] = {static_cast<char>(0xEF), static_cast<char>(0xBC),
+                 static_cast<char>(0x91), ':', ':'};
+  ExpectValidateIpv6(text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv6Test, S17HighBitByte) {
+  char text[] = {':', ':', static_cast<char>(0xFF)};
+  ExpectValidateIpv6(text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv6Test, S18HostInsideEndpoint) {
+  char text[] = {'x', '[', ':', ':', '1', ']', ':', '8', '0', 'y'};
+  ExpectValidateIpv6(text, 2, 3, true);
+}
+
+TEST(ArgcvValidateIpv6Test, S19NulAfterIpv4Tail) {
+  char text[] = {':', ':', 'f', 'f', 'f', 'f', ':', '1', '9',
+                 '2', '.', '0', '.', '2', '.', '1', '\0'};
+  ExpectValidateIpv6(text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv6Test, S20S21OctetDigitAtBoundary) {
+  char text[] = {':', ':', 'f', 'f', 'f', 'f', ':', '1',
+                 '.', '2', '.', '3', '.', '2', '5', '6'};
+  ExpectValidateIpv6(text, 0, 15, true);
+  ExpectValidateIpv6(text, 0, 16, false);
+}
+
+TEST(ArgcvValidateIpv6Test, S22S23FourthOctetAtBoundary) {
+  char text[] = {':', ':', 'f', 'f', 'f', 'f', ':',
+                 '1', '.', '2', '.', '3', '.', '4'};
+  ExpectValidateIpv6(text, 0, 12, false);
+  ExpectValidateIpv6(text, 0, 14, true);
+}
+
+std::string JoinIpv6Groups(size_t count, char digit) {
+  std::string text;
+  for (size_t i = 0; i < count; ++i) {
+    if (i != 0) {
+      text += ':';
+    }
+    text += digit;
+  }
+  return text;
+}
+
+TEST(ArgcvValidateIpv6Test, G01CompressedHexGroups) {
+  for (size_t i = 0; i <= 9; ++i) {
+    for (size_t j = 0; i + j <= 9; ++j) {
+      std::string text = JoinIpv6Groups(i, '1') + "::" + JoinIpv6Groups(j, '2');
+      ExpectValidateIpv6(text, i + j <= 7);
+    }
+  }
+}
+
+TEST(ArgcvValidateIpv6Test, G02CompressedGroupsWithIpv4Tail) {
+  for (size_t i = 0; i <= 7; ++i) {
+    for (size_t j = 0; i + j <= 7; ++j) {
+      std::string text = JoinIpv6Groups(i, '1') + "::";
+      if (j != 0) {
+        text += JoinIpv6Groups(j, '2') + ':';
+      }
+      text += "192.0.2.1";
+      ExpectValidateIpv6(text, i + j <= 5);
+    }
+  }
+}
+
+TEST(ArgcvValidateIpv6Test, G03EveryByteValue) {
+  const std::string hex_digits = "0123456789abcdefABCDEF";
+  for (unsigned int byte = 0; byte <= 0xFF; ++byte) {
+    SCOPED_TRACE(byte);
+    char text[] = {':', ':', static_cast<char>(byte)};
+    ExpectValidateIpv6(text, 0, sizeof(text),
+                       hex_digits.find(text[2]) != std::string::npos);
+  }
+}
+
+TEST(ArgcvValidateIpv6Test, G04EveryOctetPositionAndNumericBoundary) {
+  const struct {
+    const char *text;
+    bool success;
+  } spellings[] = {
+      {"0", true},   {"9", true},   {"10", true},   {"99", true},
+      {"100", true}, {"199", true}, {"200", true},  {"249", true},
+      {"250", true}, {"255", true}, {"256", false}, {"999", false},
+      {"00", false}, {"01", false}, {"001", false}, {"0000", false},
+      {"+1", false}, {"-1", false}, {"0x1", false}, {"4294967296", false},
+  };
+  for (size_t position = 0; position < 4; ++position) {
+    for (const auto &spelling : spellings) {
+      std::array<std::string, 4> octets = {"1", "2", "3", "4"};
+      octets[position] = spelling.text;
+      std::string text = "::ffff:" + octets[0] + '.' + octets[1] + '.' +
+                         octets[2] + '.' + octets[3];
+      ExpectValidateIpv6(text, spelling.success);
+    }
+  }
+}
+
+TEST(ArgcvValidateIpv6Test, G05OverlongInputs) {
+  for (auto text :
+       {std::string(1024, '0') + "::", "::ffff:1.2.3." + std::string(1024, '9'),
+        std::string("ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255x")}) {
+    ExpectValidateIpv6(text, false);
+  }
+}
+
+TEST(ArgcvValidateIpv6Test, R01IndependentCalls) {
+  char loopback[] = "::1";
+  char invalid_colons[] = ":::";
+  char unspecified[] = "::";
+  char invalid_tail[] = "::ffff:192.0.2.01";
+  char valid_tail[] = "::ffff:192.0.2.1";
+  for (int pass = 0; pass < 2; ++pass) {
+    SCOPED_TRACE(pass);
+    ExpectValidateIpv6(loopback, 0, sizeof(loopback) - 1, true);
+    ExpectValidateIpv6(invalid_colons, 0, sizeof(invalid_colons) - 1, false);
+    ExpectValidateIpv6(unspecified, 0, sizeof(unspecified) - 1, true);
+    ExpectValidateIpv6(invalid_tail, 0, sizeof(invalid_tail) - 1, false);
+    ExpectValidateIpv6(valid_tail, 0, sizeof(valid_tail) - 1, true);
+  }
+}
+
 } // namespace

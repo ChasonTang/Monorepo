@@ -78,3 +78,101 @@ bool argcv_split_hostport(const char *text, size_t len,
   *out = parts;
   return true;
 }
+
+static bool validate_ipv4_tail(const char *text, size_t len) {
+  size_t offset = 0;
+  for (unsigned int octet = 0; octet < 4; ++octet) {
+    const size_t start = offset;
+    unsigned int value = 0;
+    while (offset < len && text[offset] >= '0' && text[offset] <= '9') {
+      if (offset - start == 3 || (offset > start && text[start] == '0')) {
+        return false;
+      }
+      /* At most three digits are accumulated, so arithmetic cannot overflow. */
+      value = value * 10 + (unsigned int)(text[offset] - '0');
+      if (value > 255) {
+        return false;
+      }
+      ++offset;
+    }
+    if (offset == start) {
+      return false;
+    }
+    if (octet < 3) {
+      if (offset == len || text[offset] != '.') {
+        return false;
+      }
+      ++offset;
+    }
+  }
+  return offset == len;
+}
+
+bool argcv_validate_ipv6(const char *text, size_t len) {
+  /* The longest form has six four-digit groups and four three-digit octets. */
+  if (len < 2 || len > 45) {
+    return false;
+  }
+
+  size_t offset = 0;
+  unsigned int groups = 0;
+  bool compressed = false;
+  if (text[0] == ':') {
+    if (text[1] != ':') {
+      return false;
+    }
+    offset = 2;
+    compressed = true;
+  }
+
+  while (offset < len) {
+    if (groups == 8) {
+      return false;
+    }
+    const size_t start = offset;
+    while (offset < len) {
+      const unsigned char byte = (unsigned char)text[offset];
+      if (!((byte >= '0' && byte <= '9') || (byte >= 'a' && byte <= 'f') ||
+            (byte >= 'A' && byte <= 'F'))) {
+        break;
+      }
+      if (offset - start == 4) {
+        return false;
+      }
+      ++offset;
+    }
+
+    if (offset < len && text[offset] == '.') {
+      /* Recheck the entire component as decimal, including its first octet. */
+      if (!validate_ipv4_tail(text + start, len - start)) {
+        return false;
+      }
+      groups += 2;
+      return compressed ? groups < 8 : groups == 8;
+    }
+    if (offset == start) {
+      return false;
+    }
+    ++groups;
+    if (offset == len) {
+      break;
+    }
+    if (text[offset] != ':') {
+      return false;
+    }
+    ++offset;
+    if (offset == len) {
+      return false;
+    }
+    if (text[offset] == ':') {
+      if (compressed) {
+        return false;
+      }
+      compressed = true;
+      ++offset;
+    }
+  }
+
+  /* Compression must account for at least one of the eight groups. */
+  return compressed ? groups < 8 : groups == 8;
+}
