@@ -63,6 +63,21 @@ typedef struct {
 ARGCV_EXPORT bool argcv_split_hostport(const char *text, size_t len,
                                        argcv_hostport_parts_t *out);
 
+/* Return true exactly when all len bytes form a strict dotted-decimal IPv4
+ * address: four ASCII decimal octets in 0..255 separated by dots. Each octet
+ * has one to three digits with no leading zero unless it is exactly '0'.
+ * No NUL terminator is required. Empty input, NULs within the slice, signs,
+ * whitespace, non-ASCII bytes, and extra content are invalid. This checks
+ * syntax only; all address values are accepted without normalization.
+ *
+ * Preconditions: text is nonnull with at least len readable bytes (even for
+ * len == 0). Input remains valid and unchanged during the call. Only bytes
+ * within the slice are inspected; no input is modified and no storage is
+ * retained. No allocation, I/O, name resolution, or mutable global state;
+ * ASCII checks ignore locale.
+ * See docs/rfc_006_validate_ipv4_design.md for the full contract. */
+ARGCV_EXPORT bool argcv_validate_ipv4(const char *text, size_t len);
+
 /* Return true exactly when all len bytes form an IPv6 address. Accept one to
  * four ASCII hexadecimal digits per group, at most one '::' compressing at
  * least one group, and an optional final IPv4 dotted-decimal tail occupying

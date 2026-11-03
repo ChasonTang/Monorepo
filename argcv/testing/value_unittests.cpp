@@ -343,26 +343,264 @@ TEST(ArgcvSplitHostportTest, ReuseOutputAfterSuccessAndFailure) {
   ExpectSplitHostport(bracketed_host, 5, true, {1, 3, 0, 0, true}, out);
 }
 
-void ExpectValidateIpv6(const char *buffer, size_t buffer_len, size_t offset,
-                        size_t len, bool success) {
+using IpValidator = bool (*)(const char *, size_t);
+
+void ExpectValidateIp(IpValidator validate, const char *api, const char *buffer,
+                      size_t buffer_len, size_t offset, size_t len,
+                      bool success) {
+  SCOPED_TRACE(api);
   ASSERT_LT(offset, buffer_len);
   ASSERT_LE(len, buffer_len - offset);
   // Snapshot all storage, including any terminator and out-of-slice bytes.
   const std::string before(buffer, buffer_len);
-  SCOPED_TRACE(before.substr(offset, len));
-  EXPECT_EQ(argcv_validate_ipv6(buffer + offset, len), success);
+  SCOPED_TRACE(testing::PrintToString(before.substr(offset, len)));
+  EXPECT_EQ(validate(buffer + offset, len), success);
   EXPECT_EQ(std::string(buffer, buffer_len), before);
+}
+
+template <size_t N>
+void ExpectValidateIpv4(const char *id, char (&buffer)[N], size_t offset,
+                        size_t len, bool success) {
+  SCOPED_TRACE(id);
+  ExpectValidateIp(argcv_validate_ipv4, "argcv_validate_ipv4", buffer, N,
+                   offset, len, success);
+}
+
+void ExpectValidateIpv4(const char *id, std::string &text, bool success) {
+  SCOPED_TRACE(id);
+  // Include the string's terminator in the snapshot, but not in the slice.
+  ExpectValidateIp(argcv_validate_ipv4, "argcv_validate_ipv4", text.data(),
+                   text.size() + 1, 0, text.size(), success);
 }
 
 template <size_t N>
 void ExpectValidateIpv6(char (&buffer)[N], size_t offset, size_t len,
                         bool success) {
-  ExpectValidateIpv6(buffer, N, offset, len, success);
+  ExpectValidateIp(argcv_validate_ipv6, "argcv_validate_ipv6", buffer, N,
+                   offset, len, success);
 }
 
 void ExpectValidateIpv6(std::string &text, bool success) {
   // Include the string's terminator in the snapshot, but not in the slice.
-  ExpectValidateIpv6(text.data(), text.size() + 1, 0, text.size(), success);
+  ExpectValidateIp(argcv_validate_ipv6, "argcv_validate_ipv6", text.data(),
+                   text.size() + 1, 0, text.size(), success);
+}
+
+// RFC 006 G01 and RFC 004 G04 each check these 80 cases against the explicit
+// expectations. Only dotted-decimal candidates can be shared this way.
+void ExpectEveryOctetPositionAndNumericBoundary(IpValidator validate,
+                                                const char *api,
+                                                const char *prefix) {
+  const struct {
+    const char *text;
+    bool success;
+  } spellings[] = {
+      {"0", true},   {"9", true},   {"10", true},   {"99", true},
+      {"100", true}, {"199", true}, {"200", true},  {"249", true},
+      {"250", true}, {"255", true}, {"256", false}, {"999", false},
+      {"00", false}, {"01", false}, {"001", false}, {"0000", false},
+      {"+1", false}, {"-1", false}, {"0x1", false}, {"4294967296", false},
+  };
+  for (size_t position = 0; position < 4; ++position) {
+    SCOPED_TRACE(testing::Message() << "octet position " << position);
+    for (const auto &spelling : spellings) {
+      SCOPED_TRACE(spelling.text);
+      std::array<std::string, 4> octets = {"1", "2", "3", "4"};
+      octets[position] = spelling.text;
+      std::string text = std::string(prefix) + octets[0] + '.' + octets[1] +
+                         '.' + octets[2] + '.' + octets[3];
+      ExpectValidateIp(validate, api, text.data(), text.size() + 1, 0,
+                       text.size(), spelling.success);
+    }
+  }
+}
+
+struct ValidateIpv4Case {
+  const char *id;
+  std::string text;
+  bool success;
+};
+
+class ArgcvValidateIpv4RfcTest
+    : public testing::TestWithParam<ValidateIpv4Case> {};
+
+// TEST_P generates a public override of GoogleTest's private TestBody method.
+// NOLINTNEXTLINE(misc-override-with-different-visibility)
+TEST_P(ArgcvValidateIpv4RfcTest, RfcCase) {
+  auto test = GetParam();
+  ExpectValidateIpv4(test.id, test.text, test.success);
+}
+
+// V02, E02, E04, and E09 are covered by S02, S03, S14, and S16, respectively.
+// E23 is covered by G02's comma replacement at offset 1.
+INSTANTIATE_TEST_SUITE_P(
+    Rfc, ArgcvValidateIpv4RfcTest,
+    testing::ValuesIn<ValidateIpv4Case>({
+        {"V01", "0.0.0.0", true},
+        {"V03", "192.0.2.1", true},
+        {"V04", "127.0.0.1", true},
+        {"V05", "10.0.0.1", true},
+        {"V06", "169.254.1.1", true},
+        {"V07", "224.0.0.1", true},
+        {"V08", "0.9.10.99", true},
+        {"V09", "100.199.249.255", true},
+        {"E01", "", false},
+        {"E03", "127.1", false},
+        {"E05", "1.2.3.4.5", false},
+        {"E06", ".1.2.3.4", false},
+        {"E07", "1..2.3", false},
+        {"E08", "1.2.3.", false},
+        {"E10", "2130706433", false},
+        {"E11", "0x7f.0.0.1", false},
+        {"E12", "1.2.3.4x", false},
+        {"E13", "1.2.3.4:80", false},
+        {"E14", "1.2.3.4/24", false},
+        {"E15", "[1.2.3.4]", false},
+        {"E16", "::ffff:192.0.2.1", false},
+        {"E17", "example.com", false},
+        {"E18", " 1.2.3.4", false},
+        {"E19", "1.2.3.4 ", false},
+        {"E20", "1.2. 3.4", false},
+        {"E21", "\t1.2.3.4", false},
+        {"E22", "1.2.3.4\r\n", false},
+        {"E24", "1%2E2.3.4", false},
+    }),
+    [](const testing::TestParamInfo<ValidateIpv4Case> &info) {
+      return info.param.id;
+    });
+
+// S01-S04 each use a separate exact-size writable object so ASan can detect
+// reads beyond the slice, including on the failure paths.
+TEST(ArgcvValidateIpv4Test, S01NonTerminatedSlice) {
+  char text[] = {'1', '.', '2', '.', '3', '.', '4'};
+  ExpectValidateIpv4("S01", text, 0, sizeof(text), true);
+}
+
+TEST(ArgcvValidateIpv4Test, S02MaximumAddressWithoutTerminator) {
+  char text[] = {'2', '5', '5', '.', '2', '5', '5', '.',
+                 '2', '5', '5', '.', '2', '5', '5'};
+  ExpectValidateIpv4("S02/V02", text, 0, sizeof(text), true);
+}
+
+TEST(ArgcvValidateIpv4Test, S03SingleOctetWithoutTerminator) {
+  char text[] = {'1'};
+  ExpectValidateIpv4("S03/E02", text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv4Test, S04EmptyFourthOctetWithoutTerminator) {
+  char text[] = {'1', '9', '2', '.', '0', '.', '2', '.'};
+  ExpectValidateIpv4("S04", text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv4Test, S05ToS07ExactSubslice) {
+  char text[] = {'x', '1', '.', '2', '.', '3', '.', '4', 'y'};
+  ExpectValidateIpv4("S05", text, 1, 7, true);
+  ExpectValidateIpv4("S06", text, 1, 8, false);
+  ExpectValidateIpv4("S07", text, 0, 8, false);
+}
+
+TEST(ArgcvValidateIpv4Test, S08WhitespaceAndNulOutsideSlice) {
+  char text[] = {' ', '1', '.', '2', '.', '3', '.', '4', '\0'};
+  ExpectValidateIpv4("S08", text, 1, 7, true);
+}
+
+TEST(ArgcvValidateIpv4Test, S09ToS11NulInsideSlice) {
+  char end[] = {'1', '.', '2', '.', '3', '.', '4', '\0'};
+  char middle[] = {'1', '.', '2', '\0', '.', '3', '.', '4'};
+  char start[] = {'\0', '1', '.', '2', '.', '3', '.', '4'};
+  ExpectValidateIpv4("S09", end, 0, sizeof(end), false);
+  ExpectValidateIpv4("S10", middle, 0, sizeof(middle), false);
+  ExpectValidateIpv4("S11", start, 0, sizeof(start), false);
+}
+
+TEST(ArgcvValidateIpv4Test, S12S13OctetValueAtBoundary) {
+  char text[] = {'1', '.', '2', '.', '3', '.', '2', '5', '6'};
+  ExpectValidateIpv4("S12", text, 0, 8, true);
+  ExpectValidateIpv4("S13", text, 0, 9, false);
+}
+
+TEST(ArgcvValidateIpv4Test, S14FourthOctetOutsideSlice) {
+  char text[] = {'1', '.', '2', '.', '3', '.', '4'};
+  ExpectValidateIpv4("S14/E04", text, 0, 5, false);
+}
+
+TEST(ArgcvValidateIpv4Test, S15S16DotAtBoundary) {
+  char text[] = {'1', '.', '2', '.', '3', '.', '4', '.'};
+  ExpectValidateIpv4("S15", text, 0, 7, true);
+  ExpectValidateIpv4("S16/E09", text, 0, 8, false);
+}
+
+TEST(ArgcvValidateIpv4Test, S17S18FourthDigitAtBoundary) {
+  char text[] = {'1', '.', '2', '.', '3', '.', '1', '0', '0', '0'};
+  ExpectValidateIpv4("S17", text, 0, 9, true);
+  ExpectValidateIpv4("S18", text, 0, 10, false);
+}
+
+TEST(ArgcvValidateIpv4Test, S19FullwidthDigit) {
+  char text[] = {'1',
+                 '.',
+                 '2',
+                 '.',
+                 '3',
+                 '.',
+                 static_cast<char>(0xEF),
+                 static_cast<char>(0xBC),
+                 static_cast<char>(0x91)};
+  ExpectValidateIpv4("S19", text, 0, sizeof(text), false);
+}
+
+TEST(ArgcvValidateIpv4Test, S20EmptySliceAtObjectEnd) {
+  char buffer[] = {'x'};
+  const char before = buffer[0];
+  EXPECT_FALSE(argcv_validate_ipv4(buffer + sizeof(buffer), 0));
+  EXPECT_EQ(buffer[0], before);
+}
+
+TEST(ArgcvValidateIpv4Test, G01EveryOctetPositionAndNumericBoundary) {
+  ExpectEveryOctetPositionAndNumericBoundary(argcv_validate_ipv4,
+                                             "argcv_validate_ipv4", "");
+}
+
+TEST(ArgcvValidateIpv4Test, G02EveryByteValueAtEveryPosition) {
+  const std::string digits = "0123456789";
+  for (size_t position = 0; position < 7; ++position) {
+    SCOPED_TRACE(testing::Message() << "byte offset " << position);
+    for (unsigned int byte = 0; byte <= 0xFF; ++byte) {
+      SCOPED_TRACE(testing::Message() << "byte value " << byte);
+      char text[] = {'1', '.', '2', '.', '3', '.', '4'};
+      text[position] = static_cast<char>(byte);
+      // Independent ASCII allowlists; hexadecimal letters are not digits here.
+      const bool success =
+          position % 2 == 0 ? digits.find(text[position]) != std::string::npos
+                            : text[position] == '.';
+      ExpectValidateIpv4("G02", text, 0, sizeof(text), success);
+    }
+  }
+}
+
+TEST(ArgcvValidateIpv4Test, G03OverlongInputs) {
+  for (auto text :
+       {"1.2.3." + std::string(1024, '9'), "1.2.3." + std::string(1024, '0'),
+        std::string("255.255.255.255x")}) {
+    ExpectValidateIpv4("G03", text, false);
+  }
+}
+
+TEST(ArgcvValidateIpv4Test, R01IndependentCalls) {
+  char ordinary[] = "192.0.2.1";
+  char invalid_octet[] = "256.0.2.1";
+  char unspecified[] = "0.0.0.0";
+  char trailing_dot[] = "1.2.3.4.";
+  char maximum[] = "255.255.255.255";
+  for (int pass = 0; pass < 2; ++pass) {
+    SCOPED_TRACE(pass);
+    ExpectValidateIpv4("R01", ordinary, 0, sizeof(ordinary) - 1, true);
+    ExpectValidateIpv4("R01", invalid_octet, 0, sizeof(invalid_octet) - 1,
+                       false);
+    ExpectValidateIpv4("R01", unspecified, 0, sizeof(unspecified) - 1, true);
+    ExpectValidateIpv4("R01", trailing_dot, 0, sizeof(trailing_dot) - 1, false);
+    ExpectValidateIpv4("R01", maximum, 0, sizeof(maximum) - 1, true);
+  }
 }
 
 struct ValidateIpv6Case {
@@ -615,25 +853,8 @@ TEST(ArgcvValidateIpv6Test, G03EveryByteValue) {
 }
 
 TEST(ArgcvValidateIpv6Test, G04EveryOctetPositionAndNumericBoundary) {
-  const struct {
-    const char *text;
-    bool success;
-  } spellings[] = {
-      {"0", true},   {"9", true},   {"10", true},   {"99", true},
-      {"100", true}, {"199", true}, {"200", true},  {"249", true},
-      {"250", true}, {"255", true}, {"256", false}, {"999", false},
-      {"00", false}, {"01", false}, {"001", false}, {"0000", false},
-      {"+1", false}, {"-1", false}, {"0x1", false}, {"4294967296", false},
-  };
-  for (size_t position = 0; position < 4; ++position) {
-    for (const auto &spelling : spellings) {
-      std::array<std::string, 4> octets = {"1", "2", "3", "4"};
-      octets[position] = spelling.text;
-      std::string text = "::ffff:" + octets[0] + '.' + octets[1] + '.' +
-                         octets[2] + '.' + octets[3];
-      ExpectValidateIpv6(text, spelling.success);
-    }
-  }
+  ExpectEveryOctetPositionAndNumericBoundary(argcv_validate_ipv6,
+                                             "argcv_validate_ipv6", "::ffff:");
 }
 
 TEST(ArgcvValidateIpv6Test, G05OverlongInputs) {

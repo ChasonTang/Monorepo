@@ -79,7 +79,11 @@ bool argcv_split_hostport(const char *text, size_t len,
   return true;
 }
 
-static bool validate_ipv4_tail(const char *text, size_t len) {
+bool argcv_validate_ipv4(const char *text, size_t len) {
+  if (len < 7 || len > 15) {
+    return false;
+  }
+
   size_t offset = 0;
   for (unsigned int octet = 0; octet < 4; ++octet) {
     const size_t start = offset;
@@ -144,7 +148,7 @@ bool argcv_validate_ipv6(const char *text, size_t len) {
 
     if (offset < len && text[offset] == '.') {
       /* Recheck the entire component as decimal, including its first octet. */
-      if (!validate_ipv4_tail(text + start, len - start)) {
+      if (!argcv_validate_ipv4(text + start, len - start)) {
         return false;
       }
       groups += 2;
