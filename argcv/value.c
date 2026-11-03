@@ -176,3 +176,52 @@ bool argcv_validate_ipv6(const char *text, size_t len) {
   /* Compression must account for at least one of the eight groups. */
   return compressed ? groups < 8 : groups == 8;
 }
+
+bool argcv_validate_host_labels(const char *text, size_t len,
+                                bool *only_digits_and_dots) {
+  if (len == 0 || len > 254) {
+    return false;
+  }
+
+  const size_t core_len = text[len - 1] == '.' ? len - 1 : len;
+  if (core_len == 0 || core_len > 253) {
+    return false;
+  }
+
+  size_t label_len = 0;
+  bool last_is_alnum = false;
+  bool digits_and_dots = true;
+  for (size_t i = 0; i < core_len; ++i) {
+    const unsigned char byte = (unsigned char)text[i];
+    if (byte == '.') {
+      if (label_len == 0 || !last_is_alnum) {
+        return false;
+      }
+      label_len = 0;
+      last_is_alnum = false;
+      continue;
+    }
+
+    const bool is_digit = byte >= '0' && byte <= '9';
+    const bool is_alpha =
+        (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z');
+    const bool is_alnum = is_digit || is_alpha;
+    if ((!is_alnum && byte != '-') || (label_len == 0 && !is_alnum) ||
+        label_len == 63) {
+      return false;
+    }
+    ++label_len;
+    last_is_alnum = is_alnum;
+    if (!is_digit) {
+      digits_and_dots = false;
+    }
+  }
+
+  /* A trailing dot must not hide an empty label or a final hyphen. */
+  if (label_len == 0 || !last_is_alnum) {
+    return false;
+  }
+
+  *only_digits_and_dots = digits_and_dots;
+  return true;
+}

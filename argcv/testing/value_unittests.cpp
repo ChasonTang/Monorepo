@@ -660,4 +660,324 @@ TEST(ArgcvValidateIpv6Test, R01IndependentCalls) {
   }
 }
 
+void ExpectValidateHostLabels(const char *buffer, size_t buffer_len,
+                              size_t offset, size_t len, bool success,
+                              bool only_digits_and_dots, bool &out) {
+  ASSERT_LT(offset, buffer_len);
+  ASSERT_LE(len, buffer_len - offset);
+  // Include every byte of storage, including terminators and sentinels.
+  const std::string before(buffer, buffer_len);
+  const bool previous = out;
+  SCOPED_TRACE(before.substr(offset, len));
+  EXPECT_EQ(argcv_validate_host_labels(buffer + offset, len, &out), success);
+  EXPECT_EQ(out, success ? only_digits_and_dots : previous);
+  EXPECT_EQ(std::string(buffer, buffer_len), before);
+}
+
+void ExpectValidateHostLabels(const char *buffer, size_t buffer_len,
+                              size_t offset, size_t len, bool success,
+                              bool only_digits_and_dots) {
+  for (const bool initial : {false, true}) {
+    SCOPED_TRACE(initial);
+    bool out = initial;
+    ExpectValidateHostLabels(buffer, buffer_len, offset, len, success,
+                             only_digits_and_dots, out);
+  }
+}
+
+template <size_t N>
+void ExpectValidateHostLabels(char (&buffer)[N], size_t offset, size_t len,
+                              bool success, bool only_digits_and_dots = false) {
+  ExpectValidateHostLabels(buffer, N, offset, len, success,
+                           only_digits_and_dots);
+}
+
+void ExpectValidateHostLabels(std::string &text, bool success,
+                              bool only_digits_and_dots = false) {
+  // The string's terminator belongs to the snapshot, but not to the slice.
+  ExpectValidateHostLabels(text.data(), text.size() + 1, 0, text.size(),
+                           success, only_digits_and_dots);
+}
+
+TEST(ArgcvValidateHostLabelsTest, AcceptsHostnames) {
+  for (const char *input : {
+           "a",
+           "Z",
+           "nas",
+           "localhost",
+           "EXAMPLE.CoM",
+           "a.",
+           "example.com.",
+           "3com",
+           "123.example",
+           "999.example.com",
+           "node.123",
+           "a-b",
+           "a--b",
+           "ab--cd.example",
+           "1-2",
+           "1-2.",
+           "xn--bcher-kva.example",
+           "0x7f000001",
+           "nas.local",
+           "node.onion",
+       }) {
+    std::string text = input;
+    ExpectValidateHostLabels(text, true, false);
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, ClassifiesNumericNamesWithoutIpv4Validation) {
+  for (const char *input : {
+           "192.0.2.1",
+           "0.0.0.0",
+           "255.255.255.255",
+           "256.1.2.3",
+           "999.999.999.999",
+           "01.2.3.4",
+           "000.000.000.000",
+           "0",
+           "9",
+           "1234",
+           "00000",
+           "127.1",
+           "1.2.3",
+           "1.2.3.4.5",
+           "1.2.3.4.",
+           "1234.",
+       }) {
+    std::string text = input;
+    ExpectValidateHostLabels(text, true, true);
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, RejectsInvalidLabelsAndCharacters) {
+  const std::string cases[] = {
+      "",
+      ".",
+      "..",
+      ".a",
+      "a..b",
+      "a...b",
+      "1..2",
+      "a..",
+      "1.2.3.4..",
+      "-",
+      "-a",
+      "a.-b",
+      "a-",
+      "a-.b",
+      "a-.",
+      "_a",
+      "a_b",
+      "a_",
+      "*.example",
+      "a*b",
+      "a/b.example",
+      "a\\.b.example",
+      "a\\046b.example",
+      "a%2Eb.example",
+      "example.com:443",
+      "::1",
+      "2001:db8::1",
+      "[example.com]",
+      "[::1]",
+      "a]",
+      "192.0.2.1/24",
+      "a+b",
+      "a@b",
+      "a=b",
+      "a,b",
+      " a",
+      "a b",
+      "a ",
+      "\x09\x61",
+      "\x61\x0A",
+      "\x61\x0D\x0A",
+      std::string("\x61\x00\x62", 3),
+      std::string("\x61\x00", 2),
+      std::string("\x00\x61", 2),
+      "\x61\x7F\x62",
+      "\x61\xFF\x62",
+      "\xE4\xBE\x8B\xE5\xAD\x90.example",     // 例子.example
+      "\xEF\xBC\x91\xEF\xBC\x92\xEF\xBC\x93", // １２３
+      "a\xE2\x88\x92\x62",                    // a−b, U+2212
+      "a\xE3\x80\x82\x62",                    // a。b, U+3002
+  };
+  for (auto text : cases) {
+    ExpectValidateHostLabels(text, false);
+  }
+}
+
+struct ValidateHostLabelsCase {
+  std::string text;
+  bool success;
+  bool only_digits_and_dots;
+};
+
+TEST(ArgcvValidateHostLabelsTest, LabelLengthBoundaries) {
+  const ValidateHostLabelsCase cases[] = {
+      {std::string(63, 'a'), true, false},
+      {std::string(63, 'a') + ".a", true, false},
+      {"a" + std::string(61, '-') + "b", true, false},
+      {std::string(63, '1'), true, true},
+      {std::string(64, 'a'), false, false},
+      {std::string(64, '1'), false, false},
+      {std::string(64, 'a') + ".", false, false},
+      {"a" + std::string(62, '-') + "b", false, false},
+      {std::string(64, 'a') + ".a", false, false},
+      {"a." + std::string(64, 'a') + ".b", false, false},
+      {"a." + std::string(64, 'a'), false, false},
+  };
+  for (auto test : cases) {
+    ExpectValidateHostLabels(test.text, test.success,
+                             test.only_digits_and_dots);
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, TotalLengthBoundaries) {
+  // Three 63-byte labels and their following dots occupy 192 bytes.
+  const std::string letters = std::string(63, 'a') + '.' +
+                              std::string(63, 'a') + '.' +
+                              std::string(63, 'a') + '.';
+  const std::string digits = std::string(63, '1') + '.' + std::string(63, '1') +
+                             '.' + std::string(63, '1') + '.';
+  std::string short_labels = "a";
+  for (size_t i = 1; i < 127; ++i) {
+    short_labels += ".a";
+  }
+  const ValidateHostLabelsCase cases[] = {
+      {letters + std::string(60, 'a'), true, false},
+      {letters + std::string(61, 'a'), true, false},
+      {letters + std::string(61, 'a') + '.', true, false},
+      {letters + std::string(62, 'a'), false, false},
+      {letters + std::string(62, 'a') + '.', false, false},
+      {letters + std::string(63, 'a'), false, false},
+      {short_labels + ".a", false, false},
+      {std::string(1024, 'a'), false, false},
+      {digits + std::string(61, '1'), true, true},
+      {digits + std::string(61, '1') + '.', true, true},
+      {short_labels, true, false},
+      {short_labels + '.', true, false},
+      {letters + std::string(60, 'a') + "..", false, false},
+  };
+  for (auto test : cases) {
+    SCOPED_TRACE(test.text.size());
+    ExpectValidateHostLabels(test.text, test.success,
+                             test.only_digits_and_dots);
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, NonTerminatedObjects) {
+  // Separate exact-size arrays let ASan detect reads beyond each object.
+  char letters[] = {'a', 'b'};
+  char digits[] = {'1', '.', '2'};
+  char root_dot[] = {'a', '.'};
+  char double_dot[] = {'a', '.', '.'};
+  ExpectValidateHostLabels(letters, 0, sizeof(letters), true, false);
+  ExpectValidateHostLabels(digits, 0, sizeof(digits), true, true);
+  ExpectValidateHostLabels(root_dot, 0, sizeof(root_dot), true, false);
+  ExpectValidateHostLabels(double_dot, 0, 2, true, false);
+  ExpectValidateHostLabels(double_dot, 0, sizeof(double_dot), false);
+}
+
+TEST(ArgcvValidateHostLabelsTest, SliceBoundaries) {
+  char sentinels[] = {static_cast<char>(0xFF), 'a', 'b',
+                      static_cast<char>(0xFF)};
+  ExpectValidateHostLabels(sentinels, 1, 2, true, false);
+
+  char letter[] = {'1', '.', '2', 'X'};
+  ExpectValidateHostLabels(letter, 0, 3, true, true);
+  ExpectValidateHostLabels(letter, 0, 4, true, false);
+
+  char hyphen[] = {'a', '-', 'b'};
+  ExpectValidateHostLabels(hyphen, 0, 1, true, false);
+  ExpectValidateHostLabels(hyphen, 0, 2, false);
+  ExpectValidateHostLabels(hyphen, 0, 3, true, false);
+
+  char letter_nul[] = {'a', '\0'};
+  ExpectValidateHostLabels(letter_nul, 0, 1, true, false);
+  ExpectValidateHostLabels(letter_nul, 0, 2, false);
+
+  char digits_nul[] = {'1', '.', '2', '\0'};
+  ExpectValidateHostLabels(digits_nul, 0, 3, true, true);
+  ExpectValidateHostLabels(digits_nul, 0, 4, false);
+
+  char empty[] = {'_'};
+  ExpectValidateHostLabels(empty, 0, 0, false);
+}
+
+TEST(ArgcvValidateHostLabelsTest, OnlyWritesOutputObjectOnSuccess) {
+  for (const bool initial : {false, true}) {
+    SCOPED_TRACE(initial);
+    std::array<bool, 3> out = {!initial, initial, !initial};
+    const auto before = out;
+    char invalid[] = "a..b";
+    ExpectValidateHostLabels(invalid, sizeof(invalid), 0, sizeof(invalid) - 1,
+                             false, false, out[1]);
+    EXPECT_EQ(out, before);
+
+    std::string text = initial ? "a" : "1.2";
+    ExpectValidateHostLabels(text.data(), text.size() + 1, 0, text.size(), true,
+                             !initial, out[1]);
+    auto expected = before;
+    expected[1] = !initial;
+    EXPECT_EQ(out, expected);
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, ReusesOutputAfterSuccessAndFailure) {
+  for (const bool initial : {false, true}) {
+    SCOPED_TRACE(initial);
+    const ValidateHostLabelsCase steps[] = {
+        {initial ? "a" : "1.2", true, !initial},
+        {initial ? "1..2" : "a..b", false, !initial},
+        {initial ? "1234" : "a", true, initial},
+    };
+    bool out = initial;
+    for (auto step : steps) {
+      ExpectValidateHostLabels(step.text.data(), step.text.size() + 1, 0,
+                               step.text.size(), step.success,
+                               step.only_digits_and_dots, out);
+      EXPECT_EQ(out, step.only_digits_and_dots);
+    }
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, InitializesOutputOnSuccess) {
+  for (const bool only_digits_and_dots : {false, true}) {
+    std::string text = only_digits_and_dots ? "1.2" : "a";
+    const std::string before(text.data(), text.size() + 1);
+    // Deliberately uninitialized: the API writes it on success without reading.
+    bool out;
+    const bool success =
+        argcv_validate_host_labels(text.data(), text.size(), &out);
+    EXPECT_EQ(std::string(text.data(), text.size() + 1), before);
+    ASSERT_TRUE(success);
+    EXPECT_EQ(out, only_digits_and_dots);
+  }
+}
+
+TEST(ArgcvValidateHostLabelsTest, EveryByteInInteriorLeadingAndFinalPositions) {
+  // Independent explicit allowlists, including every accepted ASCII byte.
+  const std::string alnum =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const std::string digits = "0123456789";
+  for (unsigned int byte = 0; byte <= 0xFF; ++byte) {
+    SCOPED_TRACE(byte);
+    const char value = static_cast<char>(byte);
+    const bool is_alnum = alnum.find(value) != std::string::npos;
+    const bool is_digit = digits.find(value) != std::string::npos;
+    char interior[] = {'1', value, '2'};
+    char leading[] = {value, '1'};
+    char final[] = {'1', value};
+    ExpectValidateHostLabels(interior, 0, sizeof(interior),
+                             is_alnum || value == '-' || value == '.',
+                             is_digit || value == '.');
+    ExpectValidateHostLabels(leading, 0, sizeof(leading), is_alnum, is_digit);
+    ExpectValidateHostLabels(final, 0, sizeof(final), is_alnum || value == '.',
+                             is_digit || value == '.');
+  }
+}
+
 } // namespace

@@ -80,6 +80,30 @@ ARGCV_EXPORT bool argcv_split_hostport(const char *text, size_t len,
  * See docs/rfc_004_validate_ipv6_design.md for the full contract. */
 ARGCV_EXPORT bool argcv_validate_ipv6(const char *text, size_t len);
 
+/* Validate exactly len bytes as dot-separated ASCII host labels. Each label
+ * has 1..63 letters, digits, or hyphens, and starts and ends with a letter or
+ * digit. One trailing root dot is allowed; the length excluding that dot
+ * must be 1..253 bytes. No NUL terminator is required; NULs within the slice,
+ * empty labels, non-ASCII bytes, and other characters are invalid.
+ *
+ * On success, write whether every input byte is a digit or dot to
+ * *only_digits_and_dots and return true. Letters and hyphens make that flag
+ * false. On failure, return false and leave the output unchanged. Numeric
+ * labels are accepted without IPv4 range, leading-zero, or component-count
+ * checks. No normalization or name resolution is performed.
+ *
+ * Preconditions: text is nonnull with at least len readable bytes (even for
+ * len == 0). only_digits_and_dots is nonnull and points to a writable bool
+ * that does not overlap the input. Input remains valid and unchanged during
+ * the call; the caller prevents conflicting access to the output. Output needs
+ * no initialization, but may be read only after success if it was
+ * uninitialized. Only bytes within the slice are inspected; no input is
+ * modified or retained. No allocation, I/O, or mutable global state; ASCII
+ * checks ignore locale. See docs/rfc_005_validate_host_labels_design.md for the
+ * full contract. */
+ARGCV_EXPORT bool argcv_validate_host_labels(const char *text, size_t len,
+                                             bool *only_digits_and_dots);
+
 #pragma clang assume_nonnull end
 
 #ifdef __cplusplus
