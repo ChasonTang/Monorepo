@@ -6,7 +6,7 @@
 #                                Pulls in //odin:odin_cli_artifacts via
 #                                data_deps so `ninja -C out/ tests` produces
 #                                the runtime artifacts T9 spawns. _GNU_SOURCE
-#                                is set on Linux only — T8's fmemopen is
+#                                is set on Linux only — CLI tests' fmemopen is
 #                                hidden behind that feature macro by glibc.
 #   :odin_event_loop_testing   — source_set exposing event_loop internals
 #                                under ODIN_EVENT_LOOP_TESTING for tests that
@@ -16,15 +16,6 @@
 # Their .c includes use nogncheck because linking the production target would
 # compile the same implementation twice. Production sources are checked in
 # //odin; conditional test-only includes there are annotated separately.
-
-executable("odin_cli_v2_unittests") {
-  testonly = true
-  sources = [ "cli_v2_unittests.cpp" ]
-  deps = [
-    "//googletest:gtest_main",
-    "//odin:odin_core",
-  ]
-}
 
 config("odin_accept_loop_testing_config") {
   defines = [ "ODIN_ACCEPT_LOOP_TESTING" ]
@@ -126,7 +117,7 @@ executable("odin_unittests") {
   sources = [
     "../accept_loop.h",
 
-    # Compile the CLI dispatcher against the test runtimes in this target.
+    # Compile the CLI parser/dispatcher against this target's test runtimes.
     "../cli.c",
     "../cli_client.h",
     "../cli_server.h",
@@ -148,6 +139,7 @@ executable("odin_unittests") {
     "cli_client_internal_test.h",
     "cli_client_testing.c",
     "cli_client_unittests.cpp",
+    "cli_parse_unittests.cpp",
     "cli_server_internal_test.h",
     "cli_server_quic_unittests.cpp",
     "cli_server_testing.c",
@@ -165,9 +157,7 @@ executable("odin_unittests") {
     "dial_testing.c",
     "dial_unittests.cpp",
     "event_loop_unittests.cpp",
-    "host_addr_unittests.cpp",
     "http_connect_unittests.cpp",
-    "parse_util_unittests.cpp",
     "protocol_unittests.cpp",
     "relay_testing.c",
     "relay_unittests.cpp",
@@ -196,6 +186,7 @@ executable("odin_unittests") {
   deps = [
     ":odin_dns_resolver_testing",
     ":odin_event_loop_testing",
+    "//argcv",
     "//boringssl:crypto",
     "//boringssl:ssl",
     "//c-ares:cares",

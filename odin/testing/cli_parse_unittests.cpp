@@ -1,4 +1,4 @@
-// RFC-033 T01-T23. Exercise the public v2 API with the real argcv dependency.
+// RFC-033 T01-T23. Exercise the public CLI API with the real argcv dependency.
 #include "odin/cli.h"
 
 #include <filesystem>
@@ -40,8 +40,8 @@ private:
 };
 
 // Q01: every field, exact borrowed addresses, host length, and slice contents.
-void ExpectConfig(const odin_cli_args_v2_t &actual,
-                  const odin_cli_args_v2_t &expected, std::string_view host) {
+void ExpectConfig(const odin_cli_args_t &actual,
+                  const odin_cli_args_t &expected, std::string_view host) {
   EXPECT_EQ(actual.listen_port, expected.listen_port);
   EXPECT_EQ(actual.server_port, expected.server_port);
   EXPECT_EQ(actual.server_host_type, expected.server_host_type);
@@ -72,9 +72,9 @@ struct ServerConfig {
   size_t key_index = 4;
 };
 
-void ExpectClientConfig(const Arguments &args, const odin_cli_args_v2_t &out,
+void ExpectClientConfig(const Arguments &args, const odin_cli_args_t &out,
                         const ClientConfig &config = {}) {
-  const odin_cli_args_v2_t expected = {
+  const odin_cli_args_t expected = {
       args.at(config.server_index) + config.offset,
       config.host.size(),
       nullptr,
@@ -87,9 +87,9 @@ void ExpectClientConfig(const Arguments &args, const odin_cli_args_v2_t &out,
   ExpectConfig(out, expected, config.host);
 }
 
-void ExpectServerConfig(const Arguments &args, const odin_cli_args_v2_t &out,
+void ExpectServerConfig(const Arguments &args, const odin_cli_args_t &out,
                         const ServerConfig &config = {}) {
-  const odin_cli_args_v2_t expected = {
+  const odin_cli_args_t expected = {
       nullptr,
       0,
       args.at(config.cert_index),
@@ -105,9 +105,8 @@ void ExpectServerConfig(const Arguments &args, const odin_cli_args_v2_t &out,
 void ExpectClient(const Tokens &tokens, const ClientConfig &config = {}) {
   SCOPED_TRACE(testing::PrintToString(tokens));
   const Arguments args(tokens);
-  odin_cli_args_v2_t out;
-  ASSERT_EQ(odin_cli_parse_v2(args.argc(), args.argv(), &out),
-            ODIN_CLI_OK_CLIENT);
+  odin_cli_args_t out;
+  ASSERT_EQ(odin_cli_parse(args.argc(), args.argv(), &out), ODIN_CLI_OK_CLIENT);
   ExpectClientConfig(args, out, config);
   EXPECT_STREQ(out.quic_ca_file, tokens.at(config.ca_index).c_str());
 }
@@ -115,16 +114,15 @@ void ExpectClient(const Tokens &tokens, const ClientConfig &config = {}) {
 void ExpectServer(const Tokens &tokens, const ServerConfig &config = {}) {
   SCOPED_TRACE(testing::PrintToString(tokens));
   const Arguments args(tokens);
-  odin_cli_args_v2_t out;
-  ASSERT_EQ(odin_cli_parse_v2(args.argc(), args.argv(), &out),
-            ODIN_CLI_OK_SERVER);
+  odin_cli_args_t out;
+  ASSERT_EQ(odin_cli_parse(args.argc(), args.argv(), &out), ODIN_CLI_OK_SERVER);
   ExpectServerConfig(args, out, config);
   EXPECT_STREQ(out.quic_cert_file, tokens.at(config.cert_index).c_str());
   EXPECT_STREQ(out.quic_key_file, tokens.at(config.key_index).c_str());
 }
 
 // O02 is inexpensive to check alongside each expected help/error status.
-constexpr odin_cli_args_v2_t kUnchanged = {
+constexpr odin_cli_args_t kUnchanged = {
     "old-host", 8,    "old-cert", "old-key",
     "old-ca",   1234, 4321,       ODIN_CLI_HOST_IPV6,
 };
@@ -132,8 +130,8 @@ constexpr odin_cli_args_v2_t kUnchanged = {
 void ExpectStatus(const Tokens &tokens, odin_cli_status_t status) {
   SCOPED_TRACE(testing::PrintToString(tokens));
   const Arguments args(tokens);
-  odin_cli_args_v2_t out = kUnchanged;
-  EXPECT_EQ(odin_cli_parse_v2(args.argc(), args.argv(), &out), status);
+  odin_cli_args_t out = kUnchanged;
+  EXPECT_EQ(odin_cli_parse(args.argc(), args.argv(), &out), status);
   ExpectConfig(out, kUnchanged, "old-host");
 }
 
@@ -150,7 +148,7 @@ void ExpectHost(const std::string &server, const std::string &host,
   ExpectClient(tokens, config);
 }
 
-TEST(OdinCliV2Test, T01ModesBasenamesAndDefaults) {
+TEST(OdinCliParseTest, T01ModesBasenamesAndDefaults) {
   ExpectClient(kClient);
   ExpectServer(kServer);
   Tokens client = kClient;
@@ -161,7 +159,7 @@ TEST(OdinCliV2Test, T01ModesBasenamesAndDefaults) {
   ExpectServer(server);
 }
 
-TEST(OdinCliV2Test, T02UnknownModePrecedesHelpAndSyntax) {
+TEST(OdinCliParseTest, T02UnknownModePrecedesHelpAndSyntax) {
   for (const char *name :
        {"", "/bin/", "odin", "ODIN-CLIENT", "odin-client.exe"}) {
     Tokens tokens = kClient;
@@ -173,7 +171,7 @@ TEST(OdinCliV2Test, T02UnknownModePrecedesHelpAndSyntax) {
   ExpectStatus({}, ODIN_CLI_ERR_UNKNOWN_MODE);
 }
 
-TEST(OdinCliV2Test, T03MissingRequiredOptions) {
+TEST(OdinCliParseTest, T03MissingRequiredOptions) {
   for (const Tokens &base : {kClient, kServer}) {
     for (const int option_index : {1, 3}) {
       Tokens tokens = base;
@@ -185,7 +183,7 @@ TEST(OdinCliV2Test, T03MissingRequiredOptions) {
   }
 }
 
-TEST(OdinCliV2Test, T04RejectOtherModesOptions) {
+TEST(OdinCliParseTest, T04RejectOtherModesOptions) {
   for (const char *option : {"--quic-cert", "--quic-key"}) {
     Tokens tokens = kClient;
     tokens.insert(tokens.end(), {option, "x"});
@@ -198,13 +196,13 @@ TEST(OdinCliV2Test, T04RejectOtherModesOptions) {
   }
 }
 
-TEST(OdinCliV2Test, T05MissingValueMapping) {
+TEST(OdinCliParseTest, T05MissingValueMapping) {
   Tokens tokens = kClient;
   tokens.push_back("--listen");
   ExpectStatus(tokens, ODIN_CLI_ERR_MISSING_VALUE);
 }
 
-TEST(OdinCliV2Test, T06EmptyFinalValuesAreInvalid) {
+TEST(OdinCliParseTest, T06EmptyFinalValuesAreInvalid) {
   for (const Tokens &base : {kClient, kServer}) {
     for (const size_t value_index : {2u, 4u}) {
       Tokens tokens = base;
@@ -220,7 +218,7 @@ TEST(OdinCliV2Test, T06EmptyFinalValuesAreInvalid) {
   }
 }
 
-TEST(OdinCliV2Test, T07HelpForEachMode) {
+TEST(OdinCliParseTest, T07HelpForEachMode) {
   ExpectStatus({"odin-client", "--help"}, ODIN_CLI_HELP_CLIENT);
   ExpectStatus({"odin-server", "--help"}, ODIN_CLI_HELP_SERVER);
   Tokens client = kClient;
@@ -231,7 +229,7 @@ TEST(OdinCliV2Test, T07HelpForEachMode) {
   ExpectStatus(server, ODIN_CLI_HELP_SERVER);
 }
 
-TEST(OdinCliV2Test, T08HelpPrecedesBusinessErrors) {
+TEST(OdinCliParseTest, T08HelpPrecedesBusinessErrors) {
   ExpectStatus({"odin-client", "--help", "--listen", "abc"},
                ODIN_CLI_HELP_CLIENT);
   ExpectStatus({"odin-server", "--quic-cert", "", "--help"},
@@ -243,7 +241,7 @@ TEST(OdinCliV2Test, T08HelpPrecedesBusinessErrors) {
   }
 }
 
-TEST(OdinCliV2Test, T09SyntaxPrecedesHelpAndBusinessErrors) {
+TEST(OdinCliParseTest, T09SyntaxPrecedesHelpAndBusinessErrors) {
   ExpectStatus({"odin-client", "--help", "--listen"},
                ODIN_CLI_ERR_MISSING_VALUE);
   ExpectStatus({"odin-server", "--help", "--ca-file", "x"},
@@ -254,7 +252,7 @@ TEST(OdinCliV2Test, T09SyntaxPrecedesHelpAndBusinessErrors) {
                ODIN_CLI_ERR_UNKNOWN_FLAG);
 }
 
-TEST(OdinCliV2Test, T10BusinessErrorOrderIsUnspecified) {
+TEST(OdinCliParseTest, T10BusinessErrorOrderIsUnspecified) {
   const std::vector<Tokens> cases = {
       {"odin-client", "--listen", "abc"},
       {"odin-server", "--quic-cert", ""},
@@ -264,15 +262,15 @@ TEST(OdinCliV2Test, T10BusinessErrorOrderIsUnspecified) {
   for (const auto &tokens : cases) {
     SCOPED_TRACE(testing::PrintToString(tokens));
     const Arguments args(tokens);
-    odin_cli_args_v2_t out = kUnchanged;
-    const auto status = odin_cli_parse_v2(args.argc(), args.argv(), &out);
+    odin_cli_args_t out = kUnchanged;
+    const auto status = odin_cli_parse(args.argc(), args.argv(), &out);
     EXPECT_TRUE(status == ODIN_CLI_ERR_MISSING_REQUIRED ||
                 status == ODIN_CLI_ERR_INVALID_VALUE);
     ExpectConfig(out, kUnchanged, "old-host");
   }
 }
 
-TEST(OdinCliV2Test, T11OnlyFinalValuesAffectBusinessValidation) {
+TEST(OdinCliParseTest, T11OnlyFinalValuesAffectBusinessValidation) {
   for (const bool valid_last : {true, false}) {
     for (const Tokens &base : {kClient, kServer}) {
       Tokens tokens = base;
@@ -343,7 +341,7 @@ TEST(OdinCliV2Test, T11OnlyFinalValuesAffectBusinessValidation) {
   }
 }
 
-TEST(OdinCliV2Test, T12ListenAndServerPortsAreIndependent) {
+TEST(OdinCliParseTest, T12ListenAndServerPortsAreIndependent) {
   Tokens client = kClient;
   client[2] = "example.com:8443";
   client.insert(client.end(), {"--listen", "9000"});
@@ -358,7 +356,7 @@ TEST(OdinCliV2Test, T12ListenAndServerPortsAreIndependent) {
   ExpectServer(server, server_config);
 }
 
-TEST(OdinCliV2Test, T13ExplicitPortValues) {
+TEST(OdinCliParseTest, T13ExplicitPortValues) {
   struct PortCase {
     const char *text;
     uint16_t value;
@@ -382,7 +380,7 @@ TEST(OdinCliV2Test, T13ExplicitPortValues) {
   }
 }
 
-TEST(OdinCliV2Test, T14PortConversionFailures) {
+TEST(OdinCliParseTest, T14PortConversionFailures) {
   for (const char *port : {"65536", "abc"}) {
     for (const Tokens &base : {kClient, kServer}) {
       Tokens tokens = base;
@@ -397,7 +395,7 @@ TEST(OdinCliV2Test, T14PortConversionFailures) {
   }
 }
 
-TEST(OdinCliV2Test, T15MalformedServerAndEmptyPortSuffix) {
+TEST(OdinCliParseTest, T15MalformedServerAndEmptyPortSuffix) {
   for (const char *server : {"example.com:", "[::1]:", "[::1"}) {
     Tokens tokens = kClient;
     tokens[2] = server;
@@ -405,19 +403,19 @@ TEST(OdinCliV2Test, T15MalformedServerAndEmptyPortSuffix) {
   }
 }
 
-TEST(OdinCliV2Test, T16NamesPreserveOriginalText) {
+TEST(OdinCliParseTest, T16NamesPreserveOriginalText) {
   for (const char *host : {"localhost", "Example.COM.", "1-2", "123.example"}) {
     ExpectHost(host, host, ODIN_CLI_HOST_NAME);
   }
   ExpectHost("face:443", "face", ODIN_CLI_HOST_NAME, 443);
 }
 
-TEST(OdinCliV2Test, T17Ipv4Classification) {
+TEST(OdinCliParseTest, T17Ipv4Classification) {
   ExpectHost("127.0.0.1", "127.0.0.1", ODIN_CLI_HOST_IPV4);
   ExpectHost("127.0.0.1:80", "127.0.0.1", ODIN_CLI_HOST_IPV4, 80);
 }
 
-TEST(OdinCliV2Test, T18Ipv6ClassificationAndBorrowedSlices) {
+TEST(OdinCliParseTest, T18Ipv6ClassificationAndBorrowedSlices) {
   ExpectHost("::1", "::1", ODIN_CLI_HOST_IPV6);
   ExpectHost("[::1]", "::1", ODIN_CLI_HOST_IPV6, 4433, 1);
   ExpectHost("::1:443", "::1:443", ODIN_CLI_HOST_IPV6);
@@ -426,7 +424,7 @@ TEST(OdinCliV2Test, T18Ipv6ClassificationAndBorrowedSlices) {
              8443, 1);
 }
 
-TEST(OdinCliV2Test, T19NumericNamesFallBackWithoutNormalization) {
+TEST(OdinCliParseTest, T19NumericNamesFallBackWithoutNormalization) {
   ExpectHost("256.1.1.1", "256.1.1.1", ODIN_CLI_HOST_NAME);
   ExpectHost("01.2.3.4:80", "01.2.3.4", ODIN_CLI_HOST_NAME, 80);
   ExpectHost("1.2.3.4.", "1.2.3.4.", ODIN_CLI_HOST_NAME);
@@ -434,7 +432,7 @@ TEST(OdinCliV2Test, T19NumericNamesFallBackWithoutNormalization) {
                ODIN_CLI_ERR_MISSING_REQUIRED);
 }
 
-TEST(OdinCliV2Test, T20InvalidHostsCannotFallBack) {
+TEST(OdinCliParseTest, T20InvalidHostsCannotFallBack) {
   for (const char *server :
        {"[not-ip]", "[127.0.0.1]:80", "a:b:443", "bad_host"}) {
     Tokens tokens = kClient;
@@ -443,7 +441,7 @@ TEST(OdinCliV2Test, T20InvalidHostsCannotFallBack) {
   }
 }
 
-TEST(OdinCliV2Test, T21LongHostSliceExcludesPortAndPreservesRootDot) {
+TEST(OdinCliParseTest, T21LongHostSliceExcludesPortAndPreservesRootDot) {
   const std::string host = std::string(63, 'a') + "." + std::string(63, 'b') +
                            "." + std::string(63, 'c') + "." +
                            std::string(61, 'd') + ".";
@@ -451,7 +449,7 @@ TEST(OdinCliV2Test, T21LongHostSliceExcludesPortAndPreservesRootDot) {
   ExpectHost(host + ":80", host, ODIN_CLI_HOST_NAME, 80);
 }
 
-TEST(OdinCliV2Test,
+TEST(OdinCliParseTest,
      T22PathsAreBorrowedVerbatimWithoutAvailabilityOrLengthLimits) {
   Tokens client = kClient;
   client[4] = "~/$HOME/*.pem";
@@ -467,7 +465,7 @@ TEST(OdinCliV2Test,
   ExpectServer(key);
 }
 
-TEST(OdinCliV2Test, T23SuccessfulCallsReplaceEveryField) {
+TEST(OdinCliParseTest, T23SuccessfulCallsReplaceEveryField) {
   const Arguments name(kClient);
   Tokens ipv4_tokens = kClient;
   ipv4_tokens[2] = "127.0.0.1:80";
@@ -476,30 +474,26 @@ TEST(OdinCliV2Test, T23SuccessfulCallsReplaceEveryField) {
   ipv6_tokens[2] = "[::1]:8443";
   const Arguments ipv6(ipv6_tokens);
   const Arguments server(kServer);
-  odin_cli_args_v2_t out;
+  odin_cli_args_t out;
 
-  ASSERT_EQ(odin_cli_parse_v2(name.argc(), name.argv(), &out),
-            ODIN_CLI_OK_CLIENT);
+  ASSERT_EQ(odin_cli_parse(name.argc(), name.argv(), &out), ODIN_CLI_OK_CLIENT);
   ExpectClientConfig(name, out);
-  ASSERT_EQ(odin_cli_parse_v2(ipv4.argc(), ipv4.argv(), &out),
-            ODIN_CLI_OK_CLIENT);
+  ASSERT_EQ(odin_cli_parse(ipv4.argc(), ipv4.argv(), &out), ODIN_CLI_OK_CLIENT);
   ClientConfig config;
   config.host = "127.0.0.1";
   config.type = ODIN_CLI_HOST_IPV4;
   config.port = 80;
   ExpectClientConfig(ipv4, out, config);
-  ASSERT_EQ(odin_cli_parse_v2(ipv6.argc(), ipv6.argv(), &out),
-            ODIN_CLI_OK_CLIENT);
+  ASSERT_EQ(odin_cli_parse(ipv6.argc(), ipv6.argv(), &out), ODIN_CLI_OK_CLIENT);
   config.host = "::1";
   config.type = ODIN_CLI_HOST_IPV6;
   config.offset = 1;
   config.port = 8443;
   ExpectClientConfig(ipv6, out, config);
-  ASSERT_EQ(odin_cli_parse_v2(server.argc(), server.argv(), &out),
+  ASSERT_EQ(odin_cli_parse(server.argc(), server.argv(), &out),
             ODIN_CLI_OK_SERVER);
   ExpectServerConfig(server, out);
-  ASSERT_EQ(odin_cli_parse_v2(name.argc(), name.argv(), &out),
-            ODIN_CLI_OK_CLIENT);
+  ASSERT_EQ(odin_cli_parse(name.argc(), name.argv(), &out), ODIN_CLI_OK_CLIENT);
   ExpectClientConfig(name, out);
 }
 

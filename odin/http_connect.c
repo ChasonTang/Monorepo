@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "odin/parse_util.h"
+#include "argcv/value.h"
 
 static const char kRespOk[] = "HTTP/1.1 200 Connection Established\r\n\r\n";
 static const char kResp400[] = "HTTP/1.1 400 Bad Request\r\n\r\n";
@@ -114,28 +114,19 @@ odin_http_status_t odin_http_parse_connect(const uint8_t *buf, size_t n,
     return ODIN_HTTP_ERR_BAD_VERSION;
   }
 
-  /* Parse request-target = buf[8..sp). */
-  size_t target_start = 8;
-  size_t target_end = sp;
-
-  odin_parse_util_hostport_t hp;
-  const odin_parse_util_hostport_status_t hp_status =
-      odin_parse_util_split_hostport(buf + target_start,
-                                     target_end - target_start, &hp);
-  if (hp_status != ODIN_PARSE_UTIL_HOSTPORT_OK || hp.port_present == 0) {
+  /* CONNECT requires an explicit port; split only the request-target slice. */
+  const char *target = (const char *)buf + 8;
+  argcv_hostport_parts_t hp;
+  if (!argcv_split_hostport(target, sp - 8, &hp) || hp.port == NULL) {
     return ODIN_HTTP_ERR_BAD_REQUEST_TARGET;
   }
-  const size_t host_off = target_start + hp.host_off;
+  const size_t host_off = (size_t)(hp.host - (const char *)buf);
   const size_t host_len = hp.host_len;
-  const size_t port_start = target_start + hp.port_off;
 
-  /* Validate port: 1-to-5 digits, value <= 65535. */
-  const odin_parse_util_port_result_t pr =
-      odin_parse_util_port(buf + port_start, hp.port_len);
-  if (pr.status != ODIN_PARSE_UTIL_PORT_OK) {
+  uint16_t port_value;
+  if (!argcv_parse_u16(hp.port, hp.port_len, &port_value)) {
     return ODIN_HTTP_ERR_PORT_INVALID;
   }
-  const uint16_t port_value = pr.port;
 
   /* Validate host length. */
   if (host_len < 1 || host_len > ODIN_HTTP_HOST_MAX) {

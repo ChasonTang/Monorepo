@@ -22,20 +22,15 @@ source_set("odin_core") {
   public = [
     "cli.h",
     "client_listen.h",
-    "host_addr.h",
     "http_connect.h",
-    "parse_util.h",
     "protocol.h",
   ]
   sources = [
-    "cli_v2.c",
     "client_listen.c",
-    "host_addr.c",
     "http_connect.c",
-    "parse_util.c",
     "protocol.c",
   ]
-  deps = [ "//argcv" ]
+  deps = [ "//argcv:argcv_value" ]
 }
 
 source_set("odin") {
@@ -62,6 +57,7 @@ source_set("odin") {
     ":odin_transport_xqc",
     ":odin_udp",
     ":odin_xqc_udp",
+    "//argcv",
   ]
 }
 

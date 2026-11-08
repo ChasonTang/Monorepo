@@ -10,11 +10,15 @@
  *   host         = host-token / "[" v6-token "]"
  *   host-token   = 1*<any byte other than ':' / SP / CR / LF>
  *   v6-token     = 1*<any byte other than ']' / SP / CR / LF>
- *   port         = 1*5 DIGIT  ; value 0..65535
+ *   port         = 1*DIGIT    ; value 0..65535, leading zeros allowed
  *   HTTP-version = "HTTP/1.0" / "HTTP/1.1"
  *   headers-block = opaque bytes terminated by CRLF CRLF
  *   SP           = %x20       ; single space, no HTAB
  *   CRLF         = %x0D %x0A  ; no bare LF, no bare CR
+ *
+ * Target splitting and port conversion use argcv. An absent or empty port
+ * is BAD_REQUEST_TARGET; a nonempty invalid port is PORT_INVALID. IPv6
+ * authorities need brackets to separate an explicit port.
  *
  * Hard caps:
  *   ODIN_HTTP_REQUEST_MAX = 8192  — total bytes through final CRLFCRLF

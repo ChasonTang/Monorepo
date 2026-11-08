@@ -42,6 +42,7 @@ TEST(OdinHttpConnectTest, T1RoundTripSuccess) {
        "example.com", 11, 443},
       {"CONNECT 127.0.0.1:8443 HTTP/1.0\r\n\r\n", 35, "127.0.0.1", 9, 8443},
       {"CONNECT a:1 HTTP/1.1\r\n\r\n", 24, "a", 1, 1},
+      {"CONNECT a:000080 HTTP/1.1\r\n\r\n", 29, "a", 1, 80},
   };
 
   for (const auto &c : cases) {
@@ -51,6 +52,7 @@ TEST(OdinHttpConnectTest, T1RoundTripSuccess) {
     ASSERT_EQ(odin_http_parse_connect(buf, c.n, &consumed, &out), ODIN_HTTP_OK)
         << "req=" << c.req;
     EXPECT_EQ(consumed, c.n) << "req=" << c.req;
+    EXPECT_EQ(out.host_off, 8u) << "req=" << c.req;
     EXPECT_EQ(out.host_len, c.host_len) << "req=" << c.req;
     EXPECT_EQ(out.port, c.port) << "req=" << c.req;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(buf + out.host_off),
@@ -86,6 +88,7 @@ TEST(OdinHttpConnectTest, T2IPv6BracketStrip) {
     ASSERT_EQ(odin_http_parse_connect(buf, c.n, &consumed, &out), ODIN_HTTP_OK)
         << "req=" << c.req;
     EXPECT_EQ(consumed, c.n) << "req=" << c.req;
+    EXPECT_EQ(out.host_off, 9u) << "req=" << c.req;
     EXPECT_EQ(out.host_len, c.host_len) << "req=" << c.req;
     EXPECT_EQ(out.port, c.port) << "req=" << c.req;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(buf + out.host_off),
@@ -247,6 +250,11 @@ TEST(OdinHttpConnectTest, T6MalformedRequestTarget) {
       "CONNECT example.com HTTP/1.1\r\n\r\n", // no :port
       "CONNECT [::1:443 HTTP/1.1\r\n\r\n",    // unbalanced [
       "CONNECT [::1]443 HTTP/1.1\r\n\r\n",    // bracket without :
+      "CONNECT [::1] HTTP/1.1\r\n\r\n",       // IPv6 without port
+      "CONNECT ::1:443 HTTP/1.1\r\n\r\n",     // unbracketed IPv6 has no port
+      "CONNECT a: HTTP/1.1\r\n\r\n",          // empty port
+      "CONNECT [::1]: HTTP/1.1\r\n\r\n",      // empty IPv6 port
+      "CONNECT a:b:443 HTTP/1.1\r\n\r\n",     // multiple unbracketed colons
   };
 
   for (const char *req : cases) {
@@ -270,7 +278,6 @@ TEST(OdinHttpConnectTest, T7PortInvalid) {
   const char *const cases[] = {
       "CONNECT a:65536 HTTP/1.1\r\n\r\n",  "CONNECT a:99999 HTTP/1.1\r\n\r\n",
       "CONNECT a:123456 HTTP/1.1\r\n\r\n", "CONNECT a:abc HTTP/1.1\r\n\r\n",
-      "CONNECT a: HTTP/1.1\r\n\r\n",       "CONNECT a:b:443 HTTP/1.1\r\n\r\n",
   };
 
   for (const char *req : cases) {
