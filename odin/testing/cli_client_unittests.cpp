@@ -522,6 +522,7 @@ struct Rfc028QuicChildSnapshot {
 
 struct Rfc028QuicDirectRun {
   int rc;
+  std::string out;
   std::string err;
   Rfc028QuicChildSnapshot snapshot;
 };
@@ -728,14 +729,19 @@ Rfc028QuicDirectRun RunRfc028QuicDirect(
       EXPECT_EQ(odin_cli_client_test_fail_next(failpoint, fail_errno), 0);
     }
   }
+  char out_buf[512] = {0};
   char err_buf[512] = {0};
+  FILE *out_stream = fmemopen(out_buf, sizeof(out_buf), "w");
   FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+  EXPECT_NE(out_stream, nullptr);
   EXPECT_NE(err, nullptr);
   MutableArgv argv(tokens);
-  const int rc = odin_cli_main(argv.argc(), argv.argv(), stdout, err);
+  const int rc = odin_cli_main(argv.argc(), argv.argv(), out_stream, err);
+  (void)fclose(out_stream);
   (void)fclose(err);
   Rfc028QuicDirectRun out;
   out.rc = rc;
+  out.out = out_buf;
   out.err = err_buf;
   FillRfc028QuicSnapshot(rc, &out.snapshot);
   ClearRfc028QuicOps();
@@ -744,6 +750,7 @@ Rfc028QuicDirectRun RunRfc028QuicDirect(
 
 struct Rfc028QuicChild {
   pid_t pid;
+  int stdout_fd;
   int stderr_fd;
   int snapshot_fd;
   int progress_fd;
@@ -755,10 +762,12 @@ Rfc028QuicChild SpawnRfc028QuicChild(
     odin_cli_client_test_failpoint_t failpoint = ODIN_CLI_CLIENT_TEST_FAIL_NONE,
     int fail_errno = 0, size_t progress_min_quic_adds = 0,
     bool runtime_trigger = false) {
+  int out_pipe[2];
   int err_pipe[2];
   int snap_pipe[2];
   int progress_pipe[2] = {-1, -1};
   int trigger_pipe[2] = {-1, -1};
+  EXPECT_EQ(pipe(out_pipe), 0);
   EXPECT_EQ(pipe(err_pipe), 0);
   EXPECT_EQ(pipe(snap_pipe), 0);
   if (progress_min_quic_adds > 0) {
@@ -770,6 +779,7 @@ Rfc028QuicChild SpawnRfc028QuicChild(
   const pid_t pid = fork();
   EXPECT_NE(pid, -1);
   if (pid == 0) {
+    close(out_pipe[0]);
     close(err_pipe[0]);
     close(snap_pipe[0]);
     if (progress_min_quic_adds > 0) {
@@ -778,7 +788,9 @@ Rfc028QuicChild SpawnRfc028QuicChild(
     if (runtime_trigger) {
       close(trigger_pipe[1]);
     }
+    dup2(out_pipe[1], STDOUT_FILENO);
     dup2(err_pipe[1], STDERR_FILENO);
+    close(out_pipe[1]);
     close(err_pipe[1]);
     struct sigaction old_int;
     struct sigaction old_term;
@@ -829,6 +841,7 @@ Rfc028QuicChild SpawnRfc028QuicChild(
     (void)write(snap_pipe[1], &snap, sizeof(snap));
     _exit(rc);
   }
+  close(out_pipe[1]);
   close(err_pipe[1]);
   close(snap_pipe[1]);
   if (progress_min_quic_adds > 0) {
@@ -837,7 +850,8 @@ Rfc028QuicChild SpawnRfc028QuicChild(
   if (runtime_trigger) {
     close(trigger_pipe[0]);
   }
-  return {pid, err_pipe[0], snap_pipe[0], progress_pipe[0], trigger_pipe[1]};
+  return {pid,          out_pipe[0],      err_pipe[0],
+          snap_pipe[0], progress_pipe[0], trigger_pipe[1]};
 }
 
 Rfc028QuicChildSnapshot FinishRfc028QuicChild(Rfc028QuicChild *child,
@@ -854,6 +868,9 @@ Rfc028QuicChildSnapshot FinishRfc028QuicChild(Rfc028QuicChild *child,
   EXPECT_EQ(WaitChildBounded(child->pid, kLongDeadlineMs, &st), 0);
   EXPECT_TRUE(WIFEXITED(st));
   EXPECT_EQ(WEXITSTATUS(st), snap.rc);
+  EXPECT_EQ(ReadAllAvailable(child->stdout_fd, 100), "");
+  close(child->stdout_fd);
+  child->stdout_fd = -1;
   close(child->snapshot_fd);
   child->pid = -1;
   return snap;
@@ -875,7 +892,7 @@ TEST(OdinRFC028ClientTransportTest, T3QuicStartupCreatesRuntimeAfterListener) {
   const std::string ca = ClientCaFile();
   Rfc028QuicChild child = SpawnRfc028QuicChild(QuicClientArgs());
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -937,7 +954,7 @@ TEST(OdinCliClientCaFileTest, T3RunnerForwardsRequiredCaFileAndRejectsOmit) {
   const std::string ca = ClientCaFile();
   Rfc028QuicChild supplied = SpawnRfc028QuicChild(QuicClientArgs());
   ChildGuard supplied_guard(supplied.pid);
-  std::string line = ReadLineWithDeadline(supplied.stderr_fd, 2000);
+  std::string line = ReadLineWithDeadline(supplied.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -964,6 +981,7 @@ TEST(OdinCliClientCaFileTest, T3RunnerForwardsRequiredCaFileAndRejectsOmit) {
   Rfc028QuicDirectRun omitted = RunRfc028QuicDirect(
       {"odin-client", "--listen", "0", "--server", "127.0.0.1:4433"});
   EXPECT_EQ(omitted.rc, 2);
+  EXPECT_EQ(omitted.out, "");
   EXPECT_EQ(omitted.err,
             "usage: odin-client --listen ADDR --server ADDR --ca-file FILE\n");
   EXPECT_EQ(omitted.snapshot.runtime_record.default_create_calls, 0u);
@@ -990,6 +1008,7 @@ TEST(OdinRFC028ClientTransportTest, T5QuicListenerStartupFailureMatrix) {
     SCOPED_TRACE(c.step);
     Rfc028QuicDirectRun run = RunRfc028QuicDirect(QuicClientArgs(), c.fp, EIO);
     EXPECT_EQ(run.rc, 1);
+    EXPECT_EQ(run.out, "");
     EXPECT_EQ(run.err,
               std::string("odin: client startup failed at ") + c.step + "\n");
     EXPECT_EQ(run.err.find("mode=client"), std::string::npos);
@@ -1010,7 +1029,7 @@ TEST(OdinRFC028ClientTransportTest, T6QuicAcceptedFdTransfersToRuntime) {
   ASSERT_GE(sentry, 0) << std::strerror(errno);
   Rfc028QuicChild child = SpawnRfc028QuicChild(QuicClientArgs());
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -1038,7 +1057,7 @@ TEST(OdinRFC028ClientTransportTest, T7QuicAddFailureClosesOnlyThatFd) {
       QuicClientArgs(),
       ODIN_CLI_CLIENT_TEST_FAIL_XQC_CLIENT_RUNTIME_ADD_CONNECTION, EIO);
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -1095,14 +1114,11 @@ TEST(OdinRFC028ClientTransportTest, T8QuicFatalRuntimeFailuresCleanUp) {
     Rfc028QuicDirectRun run =
         RunRfc028QuicDirect(QuicClientArgs(), c.fp, c.errnum, c.trigger);
     EXPECT_EQ(run.rc, 1);
-    const size_t banner_end = run.err.find('\n');
-    ASSERT_NE(banner_end, std::string::npos) << run.err;
-    const std::string banner = run.err.substr(0, banner_end + 1);
     uint16_t proxy_port = 0;
     std::string server;
-    ASSERT_TRUE(ParseQuicStartupLine(banner, &proxy_port, &server)) << banner;
+    ASSERT_TRUE(ParseQuicStartupLine(run.out, &proxy_port, &server)) << run.out;
     EXPECT_EQ(server, "127.0.0.1:4433");
-    EXPECT_EQ(run.err, banner + c.line);
+    EXPECT_EQ(run.err, c.line);
     EXPECT_EQ(run.snapshot.cli.quic_runtime_force_destroy_calls, 1u);
     ExpectRfc028QuicClean(run.snapshot);
   }
@@ -1122,7 +1138,7 @@ TEST(OdinRFC028ClientTransportTest, T8QuicFatalRuntimeFailuresCleanUp) {
     Rfc028QuicChild child =
         SpawnRfc028QuicChild(QuicClientArgs(), c.fp, EIO, 0, true);
     ChildGuard guard(child.pid);
-    const std::string banner = ReadLineWithDeadline(child.stderr_fd, 2000);
+    const std::string banner = ReadLineWithDeadline(child.stdout_fd, 2000);
     uint16_t proxy_port = 0;
     std::string server;
     ASSERT_TRUE(ParseQuicStartupLine(banner, &proxy_port, &server)) << banner;
@@ -1155,7 +1171,7 @@ TEST(OdinRFC028ClientTransportTest, T9QuicSignalShutdownMirrorsTcpCleanup) {
     Rfc028QuicChild child = SpawnRfc028QuicChild(
         QuicClientArgs(), ODIN_CLI_CLIENT_TEST_FAIL_NONE, 0, 1);
     ChildGuard guard(child.pid);
-    const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+    const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
     uint16_t proxy_port = 0;
     std::string server;
     ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -1212,6 +1228,7 @@ TEST(OdinRFC028ClientTransportTest, T11QuicPostListenerStartupFailureMatrix) {
     SCOPED_TRACE(c.step);
     Rfc028QuicDirectRun run = RunRfc028QuicDirect(QuicClientArgs(), c.fp, EIO);
     EXPECT_EQ(run.rc, 1);
+    EXPECT_EQ(run.out, "");
     EXPECT_EQ(run.err,
               std::string("odin: client startup failed at ") + c.step + "\n");
     EXPECT_EQ(run.err.find("mode=client"), std::string::npos);
@@ -1226,10 +1243,13 @@ TEST(OdinRFC028ClientTransportTest, T12ClientRunnerConfigPreconditions) {
   odin_cli_client_test_reset_liveness();
   odin_event_loop_test_reset_liveness();
 
+  char out_buf[128] = {0};
+  FILE *out = fmemopen(out_buf, sizeof(out_buf), "w");
+  ASSERT_NE(out, nullptr);
   char null_buf[128] = {0};
   FILE *null_err = fmemopen(null_buf, sizeof(null_buf), "w");
   ASSERT_NE(null_err, nullptr);
-  EXPECT_EQ(odin_cli_run_client(nullptr, null_err), 1);
+  EXPECT_EQ(odin_cli_run_client(nullptr, out, null_err), 1);
   (void)fclose(null_err);
   EXPECT_STREQ(null_buf, "odin: client startup failed at config\n");
 
@@ -1241,7 +1261,7 @@ TEST(OdinRFC028ClientTransportTest, T12ClientRunnerConfigPreconditions) {
   char missing_ca_buf[128] = {0};
   FILE *missing_ca_err = fmemopen(missing_ca_buf, sizeof(missing_ca_buf), "w");
   ASSERT_NE(missing_ca_err, nullptr);
-  EXPECT_EQ(odin_cli_run_client(&quic, missing_ca_err), 1);
+  EXPECT_EQ(odin_cli_run_client(&quic, out, missing_ca_err), 1);
   (void)fclose(missing_ca_err);
   EXPECT_STREQ(missing_ca_buf, "odin: client startup failed at config\n");
 
@@ -1249,13 +1269,23 @@ TEST(OdinRFC028ClientTransportTest, T12ClientRunnerConfigPreconditions) {
   char empty_ca_buf[128] = {0};
   FILE *empty_ca_err = fmemopen(empty_ca_buf, sizeof(empty_ca_buf), "w");
   ASSERT_NE(empty_ca_err, nullptr);
-  EXPECT_EQ(odin_cli_run_client(&quic, empty_ca_err), 1);
+  EXPECT_EQ(odin_cli_run_client(&quic, out, empty_ca_err), 1);
   (void)fclose(empty_ca_err);
   EXPECT_STREQ(empty_ca_buf, "odin: client startup failed at config\n");
 
   const std::string ca = ClientCaFile();
   quic.quic_ca_file = ca.c_str();
-  EXPECT_EQ(odin_cli_run_client(&quic, nullptr), 1);
+  EXPECT_EQ(odin_cli_run_client(&quic, out, nullptr), 1);
+
+  char missing_out_buf[128] = {0};
+  FILE *missing_out_err =
+      fmemopen(missing_out_buf, sizeof(missing_out_buf), "w");
+  ASSERT_NE(missing_out_err, nullptr);
+  EXPECT_EQ(odin_cli_run_client(&quic, nullptr, missing_out_err), 1);
+  (void)fclose(missing_out_err);
+  EXPECT_STREQ(missing_out_buf, "odin: client startup failed at config\n");
+  (void)fclose(out);
+  EXPECT_STREQ(out_buf, "");
 
   odin_cli_client_test_liveness_t live{};
   odin_event_loop_test_liveness_t elive{};
@@ -1298,6 +1328,7 @@ TEST(OdinRFC028ClientTransportTest, T15FailpointGapsAndPendingNullRejected) {
   Rfc028QuicDirectRun run = RunRfc028QuicDirect(
       QuicClientArgs(), ODIN_CLI_CLIENT_TEST_FAIL_NONE, 0, false, false);
   EXPECT_EQ(run.rc, 1);
+  EXPECT_EQ(run.out, "");
   EXPECT_EQ(run.err,
             "odin: client startup failed at xqc_client_runtime_create\n");
   ExpectRfc028QuicClean(run.snapshot);
@@ -1638,14 +1669,19 @@ Rfc028QuicDirectRun
 RunRfc032DirectConfig(const odin_cli_client_config_t &config,
                       const Rfc032Setup &setup) {
   EXPECT_EQ(Rfc032ConfigureRun(setup), 0);
+  char out_buf[512] = {0};
   char err_buf[512] = {0};
+  FILE *out_stream = fmemopen(out_buf, sizeof(out_buf), "w");
   FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
+  EXPECT_NE(out_stream, nullptr);
   EXPECT_NE(err, nullptr);
-  const int rc = odin_cli_run_client(&config, err);
+  const int rc = odin_cli_run_client(&config, out_stream, err);
+  (void)fclose(out_stream);
   (void)fclose(err);
   FinishRfc032FakeExpectations();
   Rfc028QuicDirectRun out;
   out.rc = rc;
+  out.out = out_buf;
   out.err = err_buf;
   FillRfc028QuicSnapshot(rc, &out.snapshot);
   ClearRfc028QuicOps();
@@ -1656,9 +1692,11 @@ Rfc028QuicChild
 SpawnRfc032ChildImpl(const std::vector<std::string> *tokens,
                      const odin_cli_client_config_t *direct_config,
                      const Rfc032Setup &setup) {
+  int out_pipe[2];
   int err_pipe[2];
   int snap_pipe[2];
   int progress_pipe[2] = {-1, -1};
+  EXPECT_EQ(pipe(out_pipe), 0);
   EXPECT_EQ(pipe(err_pipe), 0);
   EXPECT_EQ(pipe(snap_pipe), 0);
   if (setup.progress_min_quic_adds > 0) {
@@ -1667,12 +1705,15 @@ SpawnRfc032ChildImpl(const std::vector<std::string> *tokens,
   const pid_t pid = fork();
   EXPECT_NE(pid, -1);
   if (pid == 0) {
+    close(out_pipe[0]);
     close(err_pipe[0]);
     close(snap_pipe[0]);
     if (setup.progress_min_quic_adds > 0) {
       close(progress_pipe[0]);
     }
+    dup2(out_pipe[1], STDOUT_FILENO);
     dup2(err_pipe[1], STDERR_FILENO);
+    close(out_pipe[1]);
     close(err_pipe[1]);
     g_child_sigint_count = 0;
     g_child_sigterm_count = 0;
@@ -1700,7 +1741,7 @@ SpawnRfc032ChildImpl(const std::vector<std::string> *tokens,
       MutableArgv argv(*tokens);
       rc = odin_cli_main(argv.argc(), argv.argv(), stdout, stderr);
     } else {
-      rc = odin_cli_run_client(direct_config, stderr);
+      rc = odin_cli_run_client(direct_config, stdout, stderr);
     }
     FinishRfc032FakeExpectations();
     Rfc028QuicChildSnapshot snap;
@@ -1712,12 +1753,13 @@ SpawnRfc032ChildImpl(const std::vector<std::string> *tokens,
     (void)write(snap_pipe[1], &snap, sizeof(snap));
     _exit(snap.fake_failures == 0 ? rc : kRfc032FakeFailureExit);
   }
+  close(out_pipe[1]);
   close(err_pipe[1]);
   close(snap_pipe[1]);
   if (setup.progress_min_quic_adds > 0) {
     close(progress_pipe[1]);
   }
-  return {pid, err_pipe[0], snap_pipe[0], progress_pipe[0], -1};
+  return {pid, out_pipe[0], err_pipe[0], snap_pipe[0], progress_pipe[0], -1};
 }
 
 Rfc028QuicChild SpawnRfc032Child(const std::vector<std::string> &tokens,
@@ -1744,6 +1786,9 @@ bool TryFinishRfc032Child(Rfc028QuicChild *child, int signal_to_send,
   snap->process_exited = WIFEXITED(st) ? 1 : 0;
   snap->process_status =
       WIFEXITED(st) ? WEXITSTATUS(st) : (WIFSIGNALED(st) ? -WTERMSIG(st) : -1);
+  EXPECT_EQ(ReadAllAvailable(child->stdout_fd, 100), "");
+  close(child->stdout_fd);
+  child->stdout_fd = -1;
   close(child->snapshot_fd);
   child->pid = -1;
   return n == static_cast<ssize_t>(sizeof(*snap));
@@ -1853,7 +1898,7 @@ TEST_F(OdinRFC032ClientDnsTest, T1HostnameResolvesToIpv4BeforeQuicStartup) {
   Rfc028QuicChild child =
       SpawnRfc032Child(QuicClientArgs("odin.test:8443"), setup);
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -1880,7 +1925,7 @@ TEST_F(OdinRFC032ClientDnsTest, T2Ipv4LiteralStillUsesAsyncResolverPath) {
   Rfc028QuicChild child =
       SpawnRfc032Child(QuicClientArgs("127.0.0.1:4433"), setup);
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -1902,7 +1947,7 @@ TEST_F(OdinRFC032ClientDnsTest, T3Ipv6LiteralResolvesAndUsesIpv6UdpBind) {
       Rfc032Expect("::1", AF_INET6, "::1", 9443, AF_INET6, "::", 0, 1));
   Rfc028QuicChild child = SpawnRfc032Child(QuicClientArgs("[::1]:9443"), setup);
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -1997,6 +2042,7 @@ TEST_F(OdinRFC032ClientDnsTest, T6InvalidHostSliceRejectedBeforeResources) {
   config.quic_ca_file = ca.c_str();
   Rfc028QuicDirectRun zero = RunRfc032DirectConfig(config, setup);
   EXPECT_EQ(zero.rc, 1);
+  EXPECT_EQ(zero.out, "");
   EXPECT_EQ(zero.err, "odin: client startup failed at server_endpoint\n");
   ExpectRfc032PreDnsRejected(zero.snapshot);
 
@@ -2005,6 +2051,7 @@ TEST_F(OdinRFC032ClientDnsTest, T6InvalidHostSliceRejectedBeforeResources) {
   config.server_host_len = too_long.size();
   Rfc028QuicDirectRun long_run = RunRfc032DirectConfig(config, setup);
   EXPECT_EQ(long_run.rc, 1);
+  EXPECT_EQ(long_run.out, "");
   EXPECT_EQ(long_run.err, "odin: client startup failed at server_endpoint\n");
   ExpectRfc032PreDnsRejected(long_run.snapshot);
 
@@ -2026,6 +2073,7 @@ TEST_F(OdinRFC032ClientDnsTest, T6InvalidHostSliceRejectedBeforeResources) {
   config.server_host_len = sizeof(embedded);
   Rfc028QuicDirectRun embedded_run = RunRfc032DirectConfig(config, setup);
   EXPECT_EQ(embedded_run.rc, 1);
+  EXPECT_EQ(embedded_run.out, "");
   EXPECT_EQ(embedded_run.err,
             "odin: client startup failed at server_endpoint\n");
   ExpectRfc032PreDnsRejected(embedded_run.snapshot);
@@ -2039,6 +2087,7 @@ TEST_F(OdinRFC032ClientDnsTest, T6InvalidHostSliceRejectedBeforeResources) {
   fail_setup.fail_errno = EIO;
   Rfc028QuicDirectRun prefix_run = RunRfc032DirectConfig(config, fail_setup);
   EXPECT_EQ(prefix_run.rc, 1);
+  EXPECT_EQ(prefix_run.out, "");
   EXPECT_EQ(prefix_run.err, "odin: client startup failed at server_endpoint\n");
   odin_cli_client_test_failpoint_t pending = ODIN_CLI_CLIENT_TEST_FAIL_NONE;
   ASSERT_EQ(odin_cli_client_test_pending_failpoint(&pending), 0);
@@ -2157,7 +2206,7 @@ TEST_F(OdinRFC032ClientDnsTest,
   Rfc028QuicChild child =
       SpawnRfc032Child(QuicClientArgs("odin.test:4433"), setup);
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;
@@ -2199,7 +2248,7 @@ TEST_F(OdinRFC032ClientDnsTest, T11MultipleDnsResultsSelectFirstUsableAddress) {
   Rfc028QuicChild child =
       SpawnRfc032Child(QuicClientArgs("ordered.test:9443"), setup);
   ChildGuard guard(child.pid);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 2000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 2000);
   uint16_t proxy_port = 0;
   std::string server;
   ASSERT_TRUE(ParseQuicStartupLine(line, &proxy_port, &server)) << line;

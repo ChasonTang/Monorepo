@@ -4,13 +4,13 @@
  *
  * odin_cli_run_server is an owner-thread, blocking call that binds an
  * IPv4 QUIC listener on 0.0.0.0:<listen_port>, prints the actual bound
- * UDP port on err once the listener, event loop, server runtime, default
+ * UDP port on out once the listener, event loop, server runtime, default
  * SSRF dial filter, signal handlers, and signal-stop polling timer are
  * live, then runs the QUIC server stack until
  * SIGINT/SIGTERM is delivered. Returns 0 only after a graceful
  * signal-driven stop; returns 1 for any setup, runtime callback, or
  * event-loop run failure, after writing one deterministic failure line
- * to err. Writes nothing to stdout. listen_port == 0 means
+ * to err. listen_port == 0 means
  * kernel-selected ephemeral port; the success banner reports the
  * actual port discovered via getsockname.
  */
@@ -31,7 +31,8 @@ typedef struct odin_cli_server_config_t {
   uint16_t listen_port;
 } odin_cli_server_config_t;
 
-int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *err);
+int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *out,
+                        FILE *err);
 
 #ifdef __cplusplus
 }

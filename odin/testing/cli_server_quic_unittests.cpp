@@ -1284,7 +1284,7 @@ void RunT7ChildCase(int delivered_sig, T7Variant variant) {
   close(report_pipe[1]);
   close(release_pipe[0]);
 
-  const std::string line = ReadLineWithDeadline(err_pipe[0], 5000);
+  const std::string line = ReadLineWithDeadline(out_pipe[0], 5000);
   uint16_t port = 0;
   ASSERT_TRUE(ParseQuicStartupLine(line, &port))
       << T7VariantName(variant) << " signal=" << delivered_sig
@@ -1327,9 +1327,7 @@ void RunT7ChildCase(int delivered_sig, T7Variant variant) {
   EXPECT_TRUE(WIFEXITED(wstatus)) << T7VariantName(variant);
   EXPECT_EQ(WEXITSTATUS(wstatus), 0) << T7VariantName(variant);
   EXPECT_EQ(DrainFd(out_pipe[0]), "") << T7VariantName(variant);
-  const std::string rest = DrainFd(err_pipe[0]);
-  EXPECT_EQ(rest.find("failed"), std::string::npos)
-      << T7VariantName(variant) << " stderr_rest=" << rest;
+  EXPECT_EQ(DrainFd(err_pipe[0]), "") << T7VariantName(variant);
 
   if (T7VariantUsesProbe(variant)) {
     EXPECT_EQ(report.probe_ran, 1) << T7VariantName(variant);
@@ -1462,7 +1460,7 @@ TEST(OdinCliServerQuicRuntimeTest, T3QuicStartupBindsUdpAndReportsPort) {
   ChildHandle child = SpawnOdinServer(
       {"--listen", "0", "--quic-cert", CertPath(), "--quic-key", KeyPath()});
   ASSERT_NE(child.pid, -1);
-  const std::string line = ReadLineWithDeadline(child.stderr_fd, 4000);
+  const std::string line = ReadLineWithDeadline(child.stdout_fd, 4000);
   uint16_t port = 0;
   ASSERT_TRUE(ParseQuicStartupLine(line, &port)) << line;
   EXPECT_GT(port, 0);
@@ -1475,8 +1473,7 @@ TEST(OdinCliServerQuicRuntimeTest, T3QuicStartupBindsUdpAndReportsPort) {
   EXPECT_TRUE(WIFEXITED(wstatus));
   EXPECT_EQ(WEXITSTATUS(wstatus), 0);
   EXPECT_EQ(DrainFd(child.stdout_fd), "");
-  const std::string rest = DrainFd(child.stderr_fd);
-  EXPECT_EQ(rest.find("odin: quic server startup failed"), std::string::npos);
+  EXPECT_EQ(DrainFd(child.stderr_fd), "");
   close(child.stdout_fd);
   close(child.stderr_fd);
 }
@@ -1637,10 +1634,13 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
   ASSERT_GE(dup_sentinel, 0);
   close(dup_sentinel);
 
+  char out_buf[512] = {0};
+  FILE *out = fmemopen(out_buf, sizeof(out_buf), "w");
+  ASSERT_NE(out, nullptr);
   char err_buf[512] = {0};
   FILE *err = fmemopen(err_buf, sizeof(err_buf), "w");
   ASSERT_NE(err, nullptr);
-  EXPECT_EQ(odin_cli_run_server(nullptr, err), 1);
+  EXPECT_EQ(odin_cli_run_server(nullptr, out, err), 1);
   (void)fclose(err);
   EXPECT_STREQ(err_buf, "odin: server startup failed at config\n");
   ExpectZeroLiveness(SnapshotLiveness());
@@ -1656,12 +1656,24 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
     std::memset(err_buf, 0, sizeof(err_buf));
     err = fmemopen(err_buf, sizeof(err_buf), "w");
     ASSERT_NE(err, nullptr);
-    EXPECT_EQ(odin_cli_run_server(&cfg, err), 1);
+    EXPECT_EQ(odin_cli_run_server(&cfg, out, err), 1);
     (void)fclose(err);
     EXPECT_STREQ(err_buf, "odin: quic server startup failed at tls_config\n");
     ExpectZeroLiveness(SnapshotLiveness());
     EXPECT_EQ(odin_xqc_server_runtime_test_record()->udp_create_calls, 0u);
   }
+
+  const odin_cli_server_config_t cfg = {CertPath(), KeyPath(), 0};
+  std::memset(err_buf, 0, sizeof(err_buf));
+  err = fmemopen(err_buf, sizeof(err_buf), "w");
+  ASSERT_NE(err, nullptr);
+  EXPECT_EQ(odin_cli_run_server(&cfg, nullptr, err), 1);
+  (void)fclose(err);
+  EXPECT_STREQ(err_buf, "odin: server startup failed at config\n");
+  ExpectZeroLiveness(SnapshotLiveness());
+  EXPECT_EQ(odin_xqc_server_runtime_test_record()->udp_create_calls, 0u);
+  (void)fclose(out);
+  EXPECT_STREQ(out_buf, "");
 
   errno = 0;
   EXPECT_EQ(odin_cli_server_test_fail_next(
@@ -1716,15 +1728,14 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
       EXPECT_EQ(g_counted_sigterm, 1);
     }
     EXPECT_EQ(r.rc, 1) << static_cast<int>(fc.fp);
-    EXPECT_EQ(r.out, "");
-    std::string expected_err = fc.line;
+    std::string expected_out;
     if (fc.fp == ODIN_CLI_SERVER_TEST_FAIL_QUIC_EVENT_LOOP_RUN) {
-      expected_err =
+      expected_out =
           "odin: mode=server transport=quic listen=" + std::to_string(port) +
-          "\n" + fc.line;
+          "\n";
     }
-    EXPECT_EQ(r.err, expected_err)
-        << static_cast<int>(fc.fp) << " stderr=" << r.err;
+    EXPECT_EQ(r.out, expected_out) << static_cast<int>(fc.fp);
+    EXPECT_EQ(r.err, fc.line) << static_cast<int>(fc.fp) << " stderr=" << r.err;
     ExpectZeroLiveness(SnapshotLiveness());
     const int probe = TryBindUdpAny(port);
     ASSERT_GE(probe, 0) << static_cast<int>(fc.fp) << " "

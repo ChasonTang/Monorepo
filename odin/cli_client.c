@@ -694,7 +694,8 @@ static void cli_client_signal_poll_timer(odin_event_loop_t *loop,
   odin_event_loop_stop(loop);
 }
 
-static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
+static int run_quic_client(const odin_cli_client_config_t *config, FILE *out,
+                           FILE *err) {
   cli_client_state_t state;
   memset(&state, 0, sizeof(state));
   state.listen_fd = -1;
@@ -877,17 +878,17 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
   }
 
   if (state.server_display_needs_brackets) {
-    (void)fprintf(err,
+    (void)fprintf(out,
                   "odin: mode=client transport=quic listen=%u server=[%s]:%u\n",
                   (unsigned)state.actual_port, state.server_host_cstr,
                   (unsigned)state.server_port);
   } else {
-    (void)fprintf(err,
+    (void)fprintf(out,
                   "odin: mode=client transport=quic listen=%u server=%s:%u\n",
                   (unsigned)state.actual_port, state.server_host_cstr,
                   (unsigned)state.server_port);
   }
-  (void)fflush(err);
+  (void)fflush(out);
 
   const int run_rc = odin_event_loop_run(state.loop);
   if (state.accept_loop_error_seen) {
@@ -906,15 +907,16 @@ static int run_quic_client(const odin_cli_client_config_t *config, FILE *err) {
   return 0;
 }
 
-int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *err) {
+int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *out,
+                        FILE *err) {
   cli_client_state_t state;
   memset(&state, 0, sizeof(state));
   state.listen_fd = -1;
   state.test_wakeup_fd = -1;
 
-  if (config == NULL || err == NULL || config->quic_ca_file == NULL ||
-      config->quic_ca_file[0] == '\0') {
+  if (config == NULL || out == NULL || err == NULL ||
+      config->quic_ca_file == NULL || config->quic_ca_file[0] == '\0') {
     return startup_fail(&state, err, "config");
   }
-  return run_quic_client(config, err);
+  return run_quic_client(config, out, err);
 }

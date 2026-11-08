@@ -155,7 +155,7 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
         .server_port = args.server_port,
     };
     (void)fflush(out);
-    return odin_cli_run_client(&config, err);
+    return odin_cli_run_client(&config, out, err);
   }
   case ODIN_CLI_OK_SERVER: {
     const odin_cli_server_config_t config = {
@@ -164,7 +164,7 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
         .listen_port = args.listen_port,
     };
     (void)fflush(out);
-    rc = odin_cli_run_server(&config, err);
+    rc = odin_cli_run_server(&config, out, err);
     break;
   }
   case ODIN_CLI_HELP_CLIENT:

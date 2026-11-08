@@ -216,7 +216,8 @@ static int startup_fail_config(FILE *err) {
   return 1;
 }
 
-static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
+static int run_quic_server(const odin_cli_server_config_t *config, FILE *out,
+                           FILE *err) {
   cli_server_state_t state;
   memset(&state, 0, sizeof(state));
 
@@ -334,9 +335,9 @@ static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
     return startup_fail_quic(&state, err, "signal_timer_start");
   }
 
-  (void)fprintf(err, "odin: mode=server transport=quic listen=%u\n",
+  (void)fprintf(out, "odin: mode=server transport=quic listen=%u\n",
                 (unsigned)actual_port);
-  (void)fflush(err);
+  (void)fflush(out);
 
   int run_rc = 0;
 #if defined(ODIN_CLI_SERVER_TESTING)
@@ -360,9 +361,10 @@ static int run_quic_server(const odin_cli_server_config_t *config, FILE *err) {
   return state.shutdown_requested ? 0 : 1;
 }
 
-int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *err) {
-  if (config == NULL) {
+int odin_cli_run_server(const odin_cli_server_config_t *config, FILE *out,
+                        FILE *err) {
+  if (config == NULL || out == NULL) {
     return startup_fail_config(err);
   }
-  return run_quic_server(config, err);
+  return run_quic_server(config, out, err);
 }

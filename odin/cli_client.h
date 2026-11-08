@@ -1,7 +1,7 @@
 /* odin/cli_client.h
  *
- * Internal CLI client runner. Startup status and diagnostics are written to
- * err; nothing is written to stdout.
+ * Internal CLI client runner. The startup success banner is written to out;
+ * diagnostics are written to err.
  */
 
 #ifndef ODIN_CLI_CLIENT_H_
@@ -23,7 +23,8 @@ typedef struct odin_cli_client_config_t {
   uint16_t server_port;
 } odin_cli_client_config_t;
 
-int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *err);
+int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *out,
+                        FILE *err);
 
 #ifdef __cplusplus
 }
