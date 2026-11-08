@@ -29,8 +29,9 @@ typedef enum odin_cli_status_t {
 } odin_cli_status_t;
 
 /* Successful parses start the selected runtime. Help writes the mode's usage
- * to out and returns 0; every parse error writes the combined usage to err and
- * returns 2 without starting a runtime. Both streams must be writable. */
+ * to out and returns 0; parse errors write the mode's usage to err (combined
+ * usage for unknown mode) and return 2 without starting a runtime. Both
+ * streams must be writable. */
 int odin_cli_main(int argc, char *_Nullable const *_Nonnull argv, FILE *out,
                   FILE *err);
 

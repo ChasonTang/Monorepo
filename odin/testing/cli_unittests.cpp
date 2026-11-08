@@ -85,8 +85,8 @@ constexpr const char kUBoth[] =
 
 } // namespace
 
-// Help succeeds on stdout; every parse error prints the combined usage to
-// stderr and returns 2 before any runtime starts.
+// Help succeeds on stdout; parse errors print the recognized mode's usage
+// (combined usage for unknown mode) to stderr and return 2 before runtime.
 TEST(OdinCliTest, MainHelpAndParseErrors) {
   struct Row {
     std::vector<std::string> tokens;
@@ -94,7 +94,9 @@ TEST(OdinCliTest, MainHelpAndParseErrors) {
     std::string expected_err;
     int expected_return;
   };
-  const std::string error_usage = std::string(kUBoth) + "\n";
+  const std::string client_usage = std::string(kUC) + "\n";
+  const std::string server_usage = std::string(kUS) + "\n";
+  const std::string unknown_usage = std::string(kUBoth) + "\n";
   const std::vector<Row> rows = {
       {{"odin-client", "--help"}, std::string(kUC) + "\n", "", 0},
       {{"odin-server", "--help"}, std::string(kUS) + "\n", "", 0},
@@ -102,33 +104,39 @@ TEST(OdinCliTest, MainHelpAndParseErrors) {
        std::string(kUC) + "\n",
        "",
        0},
-      {{"odin"}, "", error_usage, 2},
-      {{"odin-client"}, "", error_usage, 2},
-      {{"odin-server", "--quic-cert", "C"}, "", error_usage, 2},
-      {{"odin-client", "--bogus"}, "", error_usage, 2},
-      {{"odin-server", "--bogus"}, "", error_usage, 2},
-      {{"odin-client", "--listen"}, "", error_usage, 2},
-      {{"odin-server", "--listen", "--help"}, "", error_usage, 2},
+      {{}, "", unknown_usage, 2},
+      {{""}, "", unknown_usage, 2},
+      {{"odin"}, "", unknown_usage, 2},
+      {{"odin", "--help", "--bogus"}, "", unknown_usage, 2},
+      {{"/bin/odin-client/", "--help"}, "", unknown_usage, 2},
+      {{"odin-client"}, "", client_usage, 2},
+      {{"odin-server", "--quic-cert", "C"}, "", server_usage, 2},
+      {{"/usr/local/bin/odin-client"}, "", client_usage, 2},
+      {{"./bin/odin-server", "--bogus"}, "", server_usage, 2},
+      {{"odin-client", "--bogus"}, "", client_usage, 2},
+      {{"odin-server", "--bogus"}, "", server_usage, 2},
+      {{"odin-client", "--listen"}, "", client_usage, 2},
+      {{"odin-server", "--listen", "--help"}, "", server_usage, 2},
       {{"odin-client", "--server", "bad_host", "--ca-file", "CA"},
        "",
-       error_usage,
+       client_usage,
        2},
       {{"odin-client", "--server", "127.0.0.1:4433", "--ca-file", ""},
        "",
-       error_usage,
+       client_usage,
        2},
       {{"odin-server", "--quic-cert", "C", "--quic-key", "K", "--listen", ""},
        "",
-       error_usage,
+       server_usage,
        2},
       {{"odin-server", "--quic-cert", "C", "--quic-key", "K", "--listen",
         "abc"},
        "",
-       error_usage,
+       server_usage,
        2},
-      {{"odin-client", "--help", "--bogus"}, "", error_usage, 2},
-      {{"odin-server", "-h"}, "", error_usage, 2},
-      {{"odin-server", "--listen=4433"}, "", error_usage, 2},
+      {{"odin-client", "--help", "--bogus"}, "", client_usage, 2},
+      {{"odin-server", "-h"}, "", server_usage, 2},
+      {{"odin-server", "--listen=4433"}, "", server_usage, 2},
   };
 
   char out_buf[512];

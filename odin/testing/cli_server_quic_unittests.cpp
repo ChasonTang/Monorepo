@@ -55,9 +55,6 @@ int g_t5_engine_create_port_fd = -1;
 
 constexpr const char kServerUsage[] =
     "usage: odin-server --listen ADDR --quic-cert FILE --quic-key FILE";
-constexpr const char kBothUsage[] =
-    "usage: 'odin-client --listen ADDR --server ADDR --ca-file FILE' or "
-    "'odin-server --listen ADDR --quic-cert FILE --quic-key FILE'";
 
 class MutableArgv {
 public:
@@ -1456,7 +1453,7 @@ TEST(OdinCliServerQuicRuntimeTest, T2MainUsageContract) {
     const MainResult result = RunMain(tokens);
     EXPECT_EQ(result.rc, 2);
     EXPECT_EQ(result.out, "");
-    EXPECT_EQ(result.err, std::string(kBothUsage) + "\n");
+    EXPECT_EQ(result.err, std::string(kServerUsage) + "\n");
   }
 }
 

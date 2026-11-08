@@ -33,17 +33,34 @@ static const argcv_option_t kServerOptions[OPTION_COUNT] = {
     [REQUIRED_SECOND] = {"quic-key", true},
 };
 
-odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
-                                 odin_cli_args_t *out) {
+typedef enum {
+  CLI_MODE_UNKNOWN,
+  CLI_MODE_CLIENT,
+  CLI_MODE_SERVER,
+} cli_mode_t;
+
+static cli_mode_t cli_mode(int argc, char *const *argv) {
   if (argc == 0) {
-    return ODIN_CLI_ERR_UNKNOWN_MODE;
+    return CLI_MODE_UNKNOWN;
   }
   const char *slash = strrchr(argv[0], '/');
   const char *basename = slash == NULL ? argv[0] : slash + 1;
-  const bool is_client = strcmp(basename, "odin-client") == 0;
-  if (!is_client && strcmp(basename, "odin-server") != 0) {
+  if (strcmp(basename, "odin-client") == 0) {
+    return CLI_MODE_CLIENT;
+  }
+  if (strcmp(basename, "odin-server") == 0) {
+    return CLI_MODE_SERVER;
+  }
+  return CLI_MODE_UNKNOWN;
+}
+
+odin_cli_status_t odin_cli_parse(int argc, char *const *argv,
+                                 odin_cli_args_t *out) {
+  const cli_mode_t mode = cli_mode(argc, argv);
+  if (mode == CLI_MODE_UNKNOWN) {
     return ODIN_CLI_ERR_UNKNOWN_MODE;
   }
+  const bool is_client = mode == CLI_MODE_CLIENT;
 
   argcv_result_t values[OPTION_COUNT];
   const argcv_status_t syntax =
@@ -158,11 +175,14 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
     rc = 0;
     break;
   case ODIN_CLI_ERR_UNKNOWN_MODE:
+    (void)fputs(kUBoth, err);
+    (void)fputc('\n', err);
+    break;
   case ODIN_CLI_ERR_MISSING_REQUIRED:
   case ODIN_CLI_ERR_UNKNOWN_FLAG:
   case ODIN_CLI_ERR_MISSING_VALUE:
   case ODIN_CLI_ERR_INVALID_VALUE:
-    (void)fputs(kUBoth, err);
+    (void)fputs(cli_mode(argc, argv) == CLI_MODE_CLIENT ? kUC : kUS, err);
     (void)fputc('\n', err);
     break;
   }
