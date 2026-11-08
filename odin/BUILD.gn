@@ -28,12 +28,14 @@ source_set("odin_core") {
     "protocol.h",
   ]
   sources = [
+    "cli_v2.c",
     "client_listen.c",
     "host_addr.c",
     "http_connect.c",
     "parse_util.c",
     "protocol.c",
   ]
+  deps = [ "//argcv" ]
 }
 
 source_set("odin") {

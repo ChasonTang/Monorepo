@@ -17,6 +17,15 @@
 # compile the same implementation twice. Production sources are checked in
 # //odin; conditional test-only includes there are annotated separately.
 
+executable("odin_cli_v2_unittests") {
+  testonly = true
+  sources = [ "cli_v2_unittests.cpp" ]
+  deps = [
+    "//googletest:gtest_main",
+    "//odin:odin_core",
+  ]
+}
+
 config("odin_accept_loop_testing_config") {
   defines = [ "ODIN_ACCEPT_LOOP_TESTING" ]
 }

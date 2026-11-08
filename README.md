@@ -93,11 +93,15 @@ and TLS fixture generation:
 ./tool/gn gen out --check
 ./tool/ninja -C out tests
 ./out/odin_unittests
+./out/odin_cli_v2_unittests
 ./out/argcv_unittests
 ```
 
 The `tests` target also builds Odin's CLI artifacts and generates TLS fixtures
 under `out/gen/thor/odin_test_certs/`.
+
+RFC-033's CLI v2 parser tests can also run independently of the v1 runtime:
+build `odin_cli_v2_unittests` and run the resulting binary.
 
 ## Formatting and Static Analysis
 

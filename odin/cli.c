@@ -366,6 +366,10 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
     (void)fputc('\n', err);
     rc = 2;
     break;
+  case ODIN_CLI_ERR_MISSING_VALUE:
+  case ODIN_CLI_ERR_INVALID_VALUE:
+    /* These v2-only statuses cannot be returned by odin_cli_parse. */
+    break;
   }
 
   (void)fflush(out);
