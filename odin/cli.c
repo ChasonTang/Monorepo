@@ -148,17 +148,20 @@ int odin_cli_main(int argc, char *const *argv, FILE *out, FILE *err) {
   switch (status) {
   case ODIN_CLI_OK_CLIENT: {
     const odin_cli_client_config_t config = {
-        args.listen_port, args.server_host,  args.server_host_len,
-        args.server_port, args.quic_ca_file,
+        .server_host = args.server_host,
+        .server_host_len = args.server_host_len,
+        .quic_ca_file = args.quic_ca_file,
+        .listen_port = args.listen_port,
+        .server_port = args.server_port,
     };
     (void)fflush(out);
     return odin_cli_run_client(&config, err);
   }
   case ODIN_CLI_OK_SERVER: {
     const odin_cli_server_config_t config = {
-        args.listen_port,
-        args.quic_cert_file,
-        args.quic_key_file,
+        .quic_cert_file = args.quic_cert_file,
+        .quic_key_file = args.quic_key_file,
+        .listen_port = args.listen_port,
     };
     (void)fflush(out);
     rc = odin_cli_run_server(&config, err);

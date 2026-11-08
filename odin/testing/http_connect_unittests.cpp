@@ -276,8 +276,10 @@ TEST(OdinHttpConnectTest, T6MalformedRequestTarget) {
 TEST(OdinHttpConnectTest, T7PortInvalid) {
 
   const char *const cases[] = {
-      "CONNECT a:65536 HTTP/1.1\r\n\r\n",  "CONNECT a:99999 HTTP/1.1\r\n\r\n",
-      "CONNECT a:123456 HTTP/1.1\r\n\r\n", "CONNECT a:abc HTTP/1.1\r\n\r\n",
+      "CONNECT a:65536 HTTP/1.1\r\n\r\n",
+      "CONNECT a:99999 HTTP/1.1\r\n\r\n",
+      "CONNECT a:123456 HTTP/1.1\r\n\r\n",
+      "CONNECT a:abc HTTP/1.1\r\n\r\n",
   };
 
   for (const char *req : cases) {

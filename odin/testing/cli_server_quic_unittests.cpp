@@ -1648,10 +1648,10 @@ TEST(OdinCliServerQuicRuntimeTest, T6QuicSetupRuntimeFailureCleanupMatrix) {
 
   for (const odin_cli_server_config_t &cfg :
        std::vector<odin_cli_server_config_t>{
-           {0, nullptr, KeyPath()},
-           {0, CertPath(), nullptr},
-           {0, "", KeyPath()},
-           {0, CertPath(), ""},
+           {nullptr, KeyPath(), 0},
+           {CertPath(), nullptr, 0},
+           {"", KeyPath(), 0},
+           {CertPath(), "", 0},
        }) {
     std::memset(err_buf, 0, sizeof(err_buf));
     err = fmemopen(err_buf, sizeof(err_buf), "w");
