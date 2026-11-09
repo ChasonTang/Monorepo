@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Generate ngtcp2/c-ares headers for six targets with the bundled Clang and SDKs.
-# Usage: ./util/update_autotools_config.sh {c-ares|ngtcp2|all} [--check]
+# Generate dependency configuration for six targets with bundled Clang and SDKs.
+# Usage: ./util/update_autotools_config.sh {c-ares|ngtcp2|icu|all} [--check]
 set -euo pipefail
 
 usage() {
-    printf 'Usage: ./util/update_autotools_config.sh {c-ares|ngtcp2|all} [--check]\n'
+    printf 'Usage: ./util/update_autotools_config.sh {c-ares|ngtcp2|icu|all} [--check]\n'
 }
 
 fail() {
@@ -19,8 +19,8 @@ fi
 [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail "expected a project and optional --check; see --help"
 REQUESTED_PROJECT="$1"
 case "$REQUESTED_PROJECT" in
-    c-ares|ngtcp2) PROJECTS=("$REQUESTED_PROJECT") ;;
-    all) PROJECTS=(ngtcp2 c-ares) ;;
+    c-ares|ngtcp2|icu) PROJECTS=("$REQUESTED_PROJECT") ;;
+    all) PROJECTS=(ngtcp2 c-ares icu) ;;
     *) fail "unknown project: $REQUESTED_PROJECT" ;;
 esac
 CHECK=0
@@ -69,6 +69,7 @@ configure_target() {
     local name="$1" triple="$2" sdk="$3"
     local work="$RUN_DIR/$name" sysroot="$REPO_ROOT/build/sdk/$sdk"
     local host platform_flags cxx_flags link_flags linker header macro
+    local -a creation_options=(--cache-file=/dev/null --no-create) cross_options=("--build=$BUILD_TRIPLE")
     case "$sdk" in
         *.sdk)
             host="${triple%%-*}-apple-darwin"
@@ -85,6 +86,16 @@ configure_target() {
             linker="$CLANG_BIN/ld.lld"
             ;;
     esac
+    if [ "$PROJECT" = icu ]; then
+        # ICU probes populate make variables rather than config.h. Its configure
+        # also generates data make rules, so let it create its complete outputs.
+        creation_options=(--cache-file=/dev/null)
+        if [ "$name" = native ]; then
+            host="$BUILD_TRIPLE"
+        else
+            cross_options+=("--with-cross-build=$ICU_CROSS_ROOT")
+        fi
+    fi
     mkdir -p "$work"
     printf 'Configuring %s / %s...\n' "$PROJECT" "$name"
     (
@@ -101,9 +112,9 @@ configure_target() {
             LDFLAGS="$link_flags" LD="$linker" \
             AR="$CLANG_BIN/llvm-ar" RANLIB="$CLANG_BIN/llvm-ranlib" \
             NM="$CLANG_BIN/llvm-nm" STRIP="$CLANG_BIN/llvm-strip" \
-            "$@" /bin/sh "$REPO_ROOT/$PROJECT/configure" \
-                --no-create --cache-file=/dev/null --build="$BUILD_TRIPLE" --host="$host" \
-                "${CONFIGURE_OPTIONS[@]}" >configure.log 2>&1 &&
+            "$@" /bin/sh "$REPO_ROOT/$CONFIGURE_SCRIPT" \
+                "${creation_options[@]}" --host="$host" \
+                "${cross_options[@]}" "${CONFIGURE_OPTIONS[@]}" >configure.log 2>&1 &&
         "${CLEAN_ENV[@]}" /bin/sh ./config.status "${CONFIG_HEADERS[@]}" >>configure.log 2>&1
     ) || fail "$PROJECT/$name failed; see $work/configure.log and config.log"
     for header in "${CONFIG_HEADERS[@]}"; do
@@ -116,6 +127,10 @@ configure_target() {
                 END { exit !found }
             ' "$work/src/lib/ares_config.h" || fail "$name: requested feature missing: $macro"
         done
+    fi
+    if [ "$PROJECT" = icu ]; then
+        "${CLEAN_ENV[@]}" "$REPO_ROOT/util/icu_gn.sh" config --build-dir "$work" \
+            --output "$work/config.gni" --data-output "$work/icudata.S"
     fi
 }
 
@@ -172,7 +187,15 @@ group_cares_config() {
 
 for PROJECT in "${PROJECTS[@]}"; do
     CONFIG_DIR="$PROJECT/gn/config"
+    CONFIGURE_SCRIPT="$PROJECT/configure"
     case "$PROJECT" in
+        icu)
+            CONFIGURE_SCRIPT=icu/source/configure
+            CONFIG_GUESS=icu/source/config.guess
+            CONFIG_HEADERS=(icudefs.mk)
+            CONFIGURE_OPTIONS=(--enable-shared --enable-static --disable-tests --disable-samples
+                --disable-extras --with-data-packaging=library)
+            ;;
         ngtcp2)
             CONFIG_GUESS=ngtcp2/config.guess
             CONFIG_HEADERS=(config.h)
@@ -189,16 +212,34 @@ for PROJECT in "${PROJECTS[@]}"; do
                 --enable-cares-threads)
             ;;
     esac
-    [ -f "$PROJECT/configure" ] && [ -f "$CONFIG_GUESS" ] || fail "missing $PROJECT configure inputs"
+    [ -f "$CONFIGURE_SCRIPT" ] && [ -f "$CONFIG_GUESS" ] || fail "missing $PROJECT configure inputs"
     BUILD_TRIPLE="$("${CLEAN_ENV[@]}" /bin/sh "$CONFIG_GUESS")"
     mkdir -p "out/$PROJECT-config"
     RUN_DIR="$(mktemp -d "$REPO_ROOT/out/$PROJECT-config/run.XXXXXX")"
     printf 'Configure outputs and logs: %s\n' "${RUN_DIR#"$REPO_ROOT/"}"
+    if [ "$PROJECT" = icu ]; then
+        # Generate genuine native cross-build metadata using upstream make rules.
+        # No host data tools are needed: the generated assembly embeds the
+        # release archive directly.
+        case "$(uname -m)" in
+            arm64) native_triple=arm64-apple-macos11.0 ;;
+            x86_64) native_triple=x86_64-apple-macos10.15 ;;
+            *) fail "unsupported ICU configure host" ;;
+        esac
+        configure_target native "$native_triple" MacOSX.sdk
+        "${CLEAN_ENV[@]}" /usr/bin/make -s -C "$RUN_DIR/native" config/icucross.mk config/icucross.inc
+        ICU_CROSS_ROOT="$RUN_DIR/native"
+    fi
     for target in "${TARGETS[@]}"; do
         IFS='|' read -r name triple sdk <<< "$target"
         configure_target "$name" "$triple" "$sdk"
     done
-    if [ "$PROJECT" = c-ares ]; then
+    if [ "$PROJECT" = icu ]; then
+        for name in "${TARGET_NAMES[@]}"; do
+            queue_output "$RUN_DIR/$name/config.gni" "$CONFIG_DIR/$name.gni"
+            queue_output "$RUN_DIR/$name/icudata.S" "$PROJECT/gn/data/$name.S"
+        done
+    elif [ "$PROJECT" = c-ares ]; then
         # ares.h includes this header from its own directory. Overwrite the
         # release archive's generic copy only when all supported targets agree.
         for name in "${TARGET_NAMES[@]}"; do
@@ -249,4 +290,4 @@ for index in "${!OUTPUTS[@]}"; do
         printf 'Updated %s.\n' "$output"
     fi
 done
-[ "$STALE" -eq 0 ] || fail "Run ./util/update_autotools_config.sh $REQUESTED_PROJECT to update the headers."
+[ "$STALE" -eq 0 ] || fail "Run ./util/update_autotools_config.sh $REQUESTED_PROJECT to update the configuration."

@@ -1,0 +1,123 @@
+# ICU4C release sources; manifests and platform settings come from upstream.
+import("//build/component.gni")
+import("//icu/gn/sources.gni")
+
+declare_args() {
+  # Set false for consumers that require unversioned ICU entry points.
+  # The public config keeps the library and its consumers in the same mode.
+  icu_enable_renaming = true
+}
+
+if (current_os == "mac") {
+  _icu_platform = "mac_$current_cpu"
+} else if (current_os == "linux") {
+  _icu_platform = "linux_$current_cpu"
+} else if (current_toolchain == "//build/toolchain:clang_ios_device") {
+  _icu_platform = "ios_$current_cpu"
+} else {
+  _icu_platform = "ios_sim_$current_cpu"
+}
+import("//icu/gn/config/$_icu_platform.gni")
+
+config("icu_public_config") {
+  include_dirs = [ "source/common" ]
+  defines = []
+  if (!icu_enable_renaming) {
+    defines += [ "U_DISABLE_RENAMING=1" ]
+  }
+  if (!is_debug) {
+    defines += [ "U_STATIC_IMPLEMENTATION" ]
+  }
+}
+
+config("icu_private_config") {
+  defines = icu_private_defines
+  if (is_debug) {
+    defines += [ "U_DEBUG=1" ]
+  }
+  cflags_c = icu_thread_cflags
+  cflags_cc = icu_thread_cflags_cc
+  libs = icu_system_libs
+}
+
+component("icudata") {
+  # Regenerated with platform configuration when upgrading the release archive.
+  sources = [ "gn/data/$_icu_platform.S" ]
+
+  # Resolve .incbin independently of the checkout and build directory locations.
+  include_dirs = [ get_path_info(icu_data_archive, "dir") ]
+
+  # .incbin is not reported in Clang's preprocessor depfile.
+  inputs = [ icu_data_archive ]
+  if (!is_debug) {
+    # Assembly requires its own visibility control, in addition to C++'s
+    # U_STATIC_IMPLEMENTATION and the repository's -fvisibility=hidden.
+    defines = [ "U_HIDE_DATA_SYMBOL" ]
+  }
+}
+
+config("icu_common_config") {
+  defines = icu_common_defines
+}
+
+component("icuuc") {
+  # ICU uses dynamic_cast in implementations and public inline C++ methods.
+  public_configs = [
+    ":icu_public_config",
+    "//build:rtti",
+  ]
+  configs += [
+    ":icu_private_config",
+    ":icu_common_config",
+    "//build:no_unused_parameter",
+  ]
+  public = icu_common_public_headers
+  sources = icu_common_sources
+
+  # Upstream i18n and io share common's internal headers.
+  friend = [
+    ":icui18n",
+    ":icuio",
+  ]
+  deps = [ ":icudata" ]
+}
+
+config("icu_i18n_public_config") {
+  include_dirs = [ "source/i18n" ]
+}
+
+config("icu_i18n_config") {
+  defines = icu_i18n_defines
+}
+
+component("icui18n") {
+  public_configs = [ ":icu_i18n_public_config" ]
+  configs += [
+    ":icu_private_config",
+    ":icu_i18n_config",
+    "//build:no_unused_parameter",
+  ]
+  public = icu_i18n_public_headers
+  sources = icu_i18n_sources
+  public_deps = [ ":icuuc" ]
+}
+
+config("icu_io_public_config") {
+  include_dirs = [ "source/io" ]
+}
+
+config("icu_io_config") {
+  defines = icu_io_defines
+}
+
+component("icuio") {
+  public_configs = [ ":icu_io_public_config" ]
+  configs += [
+    ":icu_private_config",
+    ":icu_io_config",
+    "//build:no_unused_parameter",
+  ]
+  public = icu_io_public_headers
+  sources = icu_io_sources
+  public_deps = [ ":icui18n" ]
+}

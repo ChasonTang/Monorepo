@@ -124,3 +124,39 @@ SHA256:
 
    Keep the generator's triples and deployment versions synchronized with
    `build/toolchain/BUILD.gn`.
+
+## ICU release archive
+
+Current release: [ICU4C 79.1](https://github.com/unicode-org/icu/releases/tag/release-79.1).
+Use the `icu4c-79.1-sources.tgz` release asset.
+SHA256: `06fa63ecb521048f8082f12ad988f6b678d90cbd88aafce24cbc94902b191d99`.
+
+1. Download the `icu4c-<version>-sources.tgz`
+   [release asset](https://github.com/unicode-org/icu/releases):
+
+   ```bash
+   icu_version='<newer-release-version>'
+   mkdir -p out/dependency-upgrades
+   icu_upgrade_dir="$(mktemp -d "$PWD/out/dependency-upgrades/icu.XXXXXX")"
+   icu_archive="$icu_upgrade_dir/icu4c-$icu_version-sources.tgz"
+   curl -fL --retry 3 -o "$icu_archive" \
+       "https://github.com/unicode-org/icu/releases/download/release-${icu_version//./-}/icu4c-$icu_version-sources.tgz"
+   ```
+
+2. Extract and replace `icu/`, retaining its GN adapter:
+
+   ```bash
+   tar -xzf "$icu_archive" -C "$icu_upgrade_dir"
+   mv icu "$icu_upgrade_dir/previous"
+   mv "$icu_upgrade_dir/icu" icu
+   cp "$icu_upgrade_dir/previous/BUILD.gn" icu/BUILD.gn
+   ```
+
+3. Regenerate source lists, platform configuration and data assembly:
+
+   ```bash
+   ./util/update_autotools_sources.sh icu
+   ./util/update_autotools_config.sh icu
+   ```
+
+4. Update the release version, asset URL and SHA256 above.
