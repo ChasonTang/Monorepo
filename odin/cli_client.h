@@ -15,16 +15,20 @@
 extern "C" {
 #endif
 
+#pragma clang assume_nonnull begin
+
 typedef struct odin_cli_client_config_t {
-  const char *server_host;
+  const char *_Nullable server_host;
   size_t server_host_len;
-  const char *quic_ca_file;
+  const char *_Nullable quic_ca_file;
   uint16_t listen_port;
   uint16_t server_port;
 } odin_cli_client_config_t;
 
 int odin_cli_run_client(const odin_cli_client_config_t *config, FILE *out,
                         FILE *err);
+
+#pragma clang assume_nonnull end
 
 #ifdef __cplusplus
 }
