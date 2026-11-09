@@ -1,6 +1,5 @@
 # c-ares 1.34.9, using the upstream Autotools file lists and configuration.
 
-import("//build/component.gni")
 import("//c-ares/gn/config/targets.gni")
 import("//c-ares/gn/sources.gni")
 
@@ -39,7 +38,9 @@ config("cares_internal_config") {
   cflags = [ "-pthread" ]
 }
 
-component("cares") {
+# Keep c-ares in its own shared library so its API symbols are not exported
+# by libraries that depend on it.
+shared_library("cares") {
   public_configs = [ ":cares_public_config" ]
   configs += [
     ":cares_internal_config",

@@ -59,6 +59,9 @@ Pass `--args=` to `./tool/gn gen`; see [build/BUILDCONFIG.gn](build/BUILDCONFIG.
 | `target_cpu`         | host       | `x64` or `arm64`; iOS devices are arm64 only.                  |
 | `target_environment` | `""`       | Required for iOS: `device` or `simulator`.                    |
 
+c-ares is always built as a shared library, independently of `is_component_build`.
+Include the c-ares shared library in deployments that use it.
+
 The bundled macOS ASan runtime requires macOS 11.0+, so x64 ASan builds may
 warn about the 10.15 deployment target.
 
