@@ -4,6 +4,10 @@ declare_args() {
   # Debug build (built-in argument, setting default value)
   is_debug = true
 
+  # Build components as shared libraries; false selects static libraries.
+  # This defaults to false independently of is_debug.
+  is_component_build = false
+
   # Enable AddressSanitizer (macOS and Linux only).
   is_asan = false
 

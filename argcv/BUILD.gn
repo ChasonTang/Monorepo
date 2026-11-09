@@ -2,7 +2,7 @@ import("//build/component.gni")
 
 config("argcv_public_config") {
   # Match the shared-library branch of //build/component.gni.
-  if (is_debug) {
+  if (is_component_build) {
     defines = [ "ARGCV_SHARED_LIBRARY" ]
   }
 }

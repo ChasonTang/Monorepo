@@ -18,7 +18,7 @@ config("ngtcp2_public_config") {
   ]
 
   # Match component() and upstream's static-library export annotations.
-  if (!is_debug) {
+  if (!is_component_build) {
     defines = [ "NGTCP2_STATICLIB" ]
   }
 }

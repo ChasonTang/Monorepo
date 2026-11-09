@@ -25,7 +25,7 @@ config("icu_public_config") {
   if (!icu_enable_renaming) {
     defines += [ "U_DISABLE_RENAMING=1" ]
   }
-  if (!is_debug) {
+  if (!is_component_build) {
     defines += [ "U_STATIC_IMPLEMENTATION" ]
   }
 }
@@ -49,7 +49,7 @@ component("icudata") {
 
   # .incbin is not reported in Clang's preprocessor depfile.
   inputs = [ icu_data_archive ]
-  if (!is_debug) {
+  if (!is_component_build) {
     # Assembly requires its own visibility control, in addition to C++'s
     # U_STATIC_IMPLEMENTATION and the repository's -fvisibility=hidden.
     defines = [ "U_HIDE_DATA_SYMBOL" ]

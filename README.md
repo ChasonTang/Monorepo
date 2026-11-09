@@ -50,13 +50,14 @@ Minimum deployment versions: macOS 10.15 (x64), macOS 11.0 (arm64), iOS 15.0.
 
 Pass `--args=` to `./tool/gn gen`; see [build/BUILDCONFIG.gn](build/BUILDCONFIG.gn).
 
-| Argument             | Default | Effect                                            |
-| -------------------- | ------- | ------------------------------------------------- |
-| `is_debug`           | `true`  | `false`: ThinLTO and link-time size optimization. |
-| `is_asan`            | `false` | Enable AddressSanitizer (macOS/Linux only).         |
-| `target_os`          | host    | `mac`, `linux`, or `ios`; Linux is x64 only.       |
-| `target_cpu`         | host    | `x64` or `arm64`; iOS devices are arm64 only.      |
-| `target_environment` | `""`    | Required for iOS: `device` or `simulator`.         |
+| Argument             | Default    | Effect                                                      |
+| -------------------- | ---------- | ----------------------------------------------------------- |
+| `is_debug`           | `true`     | `false`: ThinLTO and link-time size optimization.             |
+| `is_component_build` | `false`    | `true`: shared component libraries; `false`: static ones.     |
+| `is_asan`            | `false`    | Enable AddressSanitizer (macOS/Linux only).                   |
+| `target_os`          | host       | `mac`, `linux`, or `ios`; Linux is x64 only.                   |
+| `target_cpu`         | host       | `x64` or `arm64`; iOS devices are arm64 only.                  |
+| `target_environment` | `""`       | Required for iOS: `device` or `simulator`.                    |
 
 The bundled macOS ASan runtime requires macOS 11.0+, so x64 ASan builds may
 warn about the 10.15 deployment target.
@@ -156,8 +157,8 @@ Other checks are available when relevant:
 
 1. Create `your_component/BUILD.gn` and add its target to the root `BUILD.gn`'s
    `default` group. Import `//build/component.gni` and use `component()` for
-   libraries that should be `shared_library` in debug and `static_library` in
-   release.
+   libraries that should be `shared_library` when `is_component_build=true`
+   and `static_library` when `is_component_build=false`.
 2. Declare `deps`; use `public_deps` when consumers need dependency headers.
    List exported headers in `public` and private headers in `sources`.
 3. Add an export macro in a public `export.h` and configure it through
@@ -176,7 +177,7 @@ and config name, following [argcv/BUILD.gn](argcv/BUILD.gn):
 ```gn
 config("your_component_public_config") {
   # Match the shared-library branch of //build/component.gni.
-  if (is_debug) {
+  if (is_component_build) {
     defines = [ "YOUR_COMPONENT_SHARED_LIBRARY" ]
   }
 }

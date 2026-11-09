@@ -7,7 +7,7 @@ config("boringssl_public_config") {
   include_dirs = [ "include" ]
 
   # Match component() and propagate the shared-library mode to consumers.
-  if (is_debug) {
+  if (is_component_build) {
     defines = [ "BORINGSSL_SHARED_LIBRARY" ]
   }
 }

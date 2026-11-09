@@ -1,13 +1,15 @@
-# component() — build mode switch keyed off is_debug.
+# component() — library type switch keyed off is_component_build.
 #
-#   is_debug = true  -> shared_library (fast relink in dev)
-#   is_debug = false -> static_library (ThinLTO in release)
+#   is_component_build = true  -> shared_library (fast incremental relinks)
+#   is_component_build = false -> static_library
+#
+# is_debug independently controls debug/release compiler settings.
 #
 # Use exactly like shared_library / static_library; all invoker variables are
 # forwarded. Default configs come from set_defaults("component") in
 # //build/BUILDCONFIG.gn.
 
-if (is_debug) {
+if (is_component_build) {
   _component_mode = "shared_library"
 } else {
   _component_mode = "static_library"
