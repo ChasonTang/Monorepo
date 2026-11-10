@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Format odin, argcv, and ipsw C/C++ sources in place using
+# Format odin, argcv, ipsw, and catalina C/C++ sources in place using
 # ./tool/clang/bin/clang-format and the repository-root .clang-format.
 #
 # Usage: ./format.sh
@@ -13,7 +13,7 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 CLANG_FORMAT="$REPO_ROOT/tool/clang/bin/clang-format"
-SOURCE_DIRS=("$REPO_ROOT/odin" "$REPO_ROOT/argcv" "$REPO_ROOT/ipsw")
+SOURCE_DIRS=("$REPO_ROOT/odin" "$REPO_ROOT/argcv" "$REPO_ROOT/ipsw" "$REPO_ROOT/catalina")
 
 if [ ! -x "$CLANG_FORMAT" ]; then
     echo "error: $CLANG_FORMAT not found or not executable" >&2
@@ -39,7 +39,7 @@ done < <(find "${SOURCE_DIRS[@]}" \
 COUNT="${#FILES[@]}"
 
 if [ "$COUNT" -eq 0 ]; then
-    echo "no C/C++ sources found under odin/, argcv/, or ipsw/"
+    echo "no C/C++ sources found under odin/, argcv/, ipsw/, or catalina/"
     exit 0
 fi
 

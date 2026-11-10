@@ -105,8 +105,8 @@ under `out/gen/thor/odin_test_certs/`.
 
 ## Formatting and Static Analysis
 
-These checks cover `argcv/`, `odin/`, and `ipsw/`, using bundled tools and the
-root `.clang-format` / `.clang-tidy` rules.
+These checks cover `argcv/`, `odin/`, `ipsw/`, and `catalina/`, using bundled
+tools and the root `.clang-format` / `.clang-tidy` rules.
 
 `tidy.sh` requires `python3` for its Clang-Tidy runner. The optional Odin scope
 checks and `docs/rfc_lint.py` also require `python3`; the default build does not.

@@ -1,0 +1,37 @@
+# Binary compatibility shims for macOS Catalina. These must remain dylibs even
+# when ordinary Monorepo components are static: consumers redirect load commands
+# to these libraries and rely on their whole-library re-exports.
+assert(current_os == "mac" && current_cpu == "x64",
+       "Catalina compatibility shims require macOS x64.")
+
+shared_library("catalina_cxx") {
+  output_name = "cxx"
+  output_prefix_override = true
+  sources = [ "iostream_compat.cpp" ]
+
+  # C++20 changes the str() overload set; retain the ABI used by the binary.
+  cflags_cc = [ "-std=c++17" ]
+  configs += [
+    "//build:rtti",
+    "//build:exceptions",
+    "//build:visibility_default",
+  ]
+
+  # Resolve via the target SDK instead of a host library path.
+  ldflags = [ "-Wl,-reexport-lc++" ]
+}
+
+shared_library("catalina_system") {
+  output_name = "sys"
+  output_prefix_override = true
+  sources = [ "system_compat.c" ]
+  configs += [ "//build:visibility_default" ]
+  ldflags = [ "-Wl,-reexport-lSystem" ]
+}
+
+group("catalina") {
+  deps = [
+    ":catalina_cxx",
+    ":catalina_system",
+  ]
+}

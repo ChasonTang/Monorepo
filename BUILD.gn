@@ -15,6 +15,9 @@ group("default") {
   # construction.
   if (target_os == "mac") {
     deps += [ "//ipsw" ]
+    if (target_cpu == "x64") {
+      deps += [ "//catalina" ]
+    }
   }
 }
 

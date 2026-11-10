@@ -24,7 +24,7 @@ STAGED=false
 CONFIG_CHANGED=false
 if [ "${1:-}" = --staged ]; then
     STAGED=true
-    git diff --cached --name-only --no-renames -z -- argcv odin ipsw > "$TIDY_WORK/paths"
+    git diff --cached --name-only --no-renames -z -- argcv odin ipsw catalina > "$TIDY_WORK/paths"
     : > "$TIDY_WORK/changed"
     : > "$TIDY_WORK/existing"
     while IFS= read -r -d '' path; do
@@ -64,7 +64,8 @@ echo "tidy: regenerating $BUILD_DIR/compile_commands.json"
 "$GN" gen "$BUILD_DIR" --check \
     --add-export-compile-commands='//argcv/*' \
     --add-export-compile-commands='//odin/*' \
-    --add-export-compile-commands='//ipsw/*'
+    --add-export-compile-commands='//ipsw/*' \
+    --add-export-compile-commands='//catalina/*'
 BUILD_DIR="$(cd "$BUILD_DIR" && pwd -P)"
 
 escape_regex() {
@@ -89,7 +90,7 @@ def tidy_units($root; $build):
   map(.directory as $directory
       | .file |= tidy_path($directory)
       | select(.file | startswith($root + "/"))
-      | select(.file | ltrimstr($root + "/") | test("^(argcv|odin|ipsw)/.*\\.(c|cc|cpp)$"))
+      | select(.file | ltrimstr($root + "/") | test("^(argcv|odin|ipsw|catalina)/.*\\.(c|cc|cpp)$"))
       | .output |= tidy_path($directory)
       | if (.output | startswith($build + "/")) then .
         else error("object output is outside BUILD_DIR: " + .output) end
@@ -188,7 +189,7 @@ JQ
     FILE_FILTER="${FILE_FILTER#|}"
 fi
 
-SOURCE_FILTER="(?s)\A$(escape_regex "$REPO_ROOT")/(argcv|odin|ipsw)/.*\.(c|cc|cpp)\Z"
+SOURCE_FILTER="(?s)\A$(escape_regex "$REPO_ROOT")/(argcv|odin|ipsw|catalina)/.*\.(c|cc|cpp)\Z"
 python3 -u "$RUNNER" -p "$BUILD_DIR" \
     -clang-tidy-binary "$CLANG_TIDY" -source-filter "$SOURCE_FILTER" \
     -j "${JOBS:-0}" -quiet "$FILE_FILTER"

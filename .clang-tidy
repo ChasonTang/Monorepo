@@ -13,7 +13,7 @@ Checks: >
 WarningsAsErrors: '*'
 # Share header diagnostics with direct clang-tidy invocations.
 # Source-file selection is handled by the project entry point.
-HeaderFilterRegex: '(^|/)(argcv|odin|ipsw)/.*'
+HeaderFilterRegex: '(^|/)(argcv|odin|ipsw|catalina)/.*'
 
 CheckOptions:
   # Recommend Annex K alternatives only when the target provides them.

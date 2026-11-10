@@ -10,6 +10,7 @@ secondary_source = "//build/secondary/"
 # Third-party sources keep their upstream layout and are not checked themselves.
 check_targets = [
   "//argcv/*",
+  "//catalina/*",
   "//odin/*",
   "//ipsw/*",
 ]
