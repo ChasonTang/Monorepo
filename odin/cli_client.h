@@ -25,8 +25,8 @@ typedef struct odin_cli_client_config_t {
   uint16_t server_port;
 } odin_cli_client_config_t;
 
-int odin_cli_run_client(const odin_cli_client_config_t *_Nullable config, FILE *_Nullable out,
-                        FILE *_Nullable err);
+int odin_cli_run_client(const odin_cli_client_config_t *_Nullable config,
+                        FILE *_Nullable out, FILE *_Nullable err);
 
 #pragma clang assume_nonnull end
 
