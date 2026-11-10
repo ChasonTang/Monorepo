@@ -1,6 +1,6 @@
-# Binary compatibility shims for macOS Catalina. These must remain dylibs even
-# when ordinary Monorepo components are static: consumers redirect load commands
-# to these libraries and rely on their whole-library re-exports.
+# Binary compatibility shims for macOS Catalina. Consumers redirect load commands
+# to these dylibs and rely on their whole-library re-exports. The system shims
+# remain dylibs even when ordinary Monorepo components are static.
 assert(current_os == "mac" && current_cpu == "x64",
        "Catalina compatibility shims require macOS x64.")
 
@@ -25,9 +25,34 @@ shared_library("catalina_system") {
   ldflags = [ "-Wl,-reexport-lSystem" ]
 }
 
+# Whole-library ICU re-exports require the component dylibs, not static archives.
+if (is_component_build) {
+  shared_library("catalina_icu") {
+    sources = [ "icu_reexport.c" ]
+    configs += [ "//build:visibility_default" ]
+
+    deps = [
+      "//icu:icui18n",
+      "//icu:icuuc",
+    ]
+    lib_dirs = [ root_out_dir ]
+    ldflags = [
+      "-Wl,-reexport-licui18n",
+      "-Wl,-reexport-licuuc",
+
+      # The anchor makes no ICU calls; retain both under -dead_strip_dylibs.
+      "-Wl,-needed-licui18n",
+      "-Wl,-needed-licuuc",
+    ]
+  }
+}
+
 group("catalina") {
   deps = [
     ":catalina_cxx",
     ":catalina_system",
   ]
+  if (is_component_build) {
+    deps += [ ":catalina_icu" ]
+  }
 }
